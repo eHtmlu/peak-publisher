@@ -1,0 +1,66 @@
+<?php
+
+// The code below is just the bootstrap code intended to be inserted into the hosted plugins.
+// Do not remove this exit statement because this file is NOT intended to be executed in this context.
+exit;
+
+
+/*********************** BOOTSTRAP CODE START ***********************/
+/**
+ * Publisher Bootstrap Code basicV1
+ * Keep the code as it is, as it is optimized for several requirements.
+ * 
+ * Compatible with:
+ * - PHP ≥ 5.3
+ * - Wordpress ≥ 5.8
+ */
+add_action('plugin_loaded', function($plugin_full_path) {
+    global $wp_version;
+    static $done = false;
+    if ($done) return;
+    $done = true;
+
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    $real_wp_version = function_exists('wp_get_wp_version') ? wp_get_wp_version() : $wp_version;
+    $user_agent = 'PublisherBootstrapCode/basicV1; WordPress/' . $real_wp_version . '; ' . home_url( '/' );
+    $plugin_basename = plugin_basename($plugin_full_path);
+    $update_url = trailingslashit(sanitize_url( get_plugin_data( $plugin_full_path, false, false )['UpdateURI'] ));
+    $host = wp_parse_url($update_url, PHP_URL_HOST);
+
+    add_filter('update_plugins_' . $host, function($false, $plugin_data, $plugin_file, $locales) use($user_agent, $plugin_full_path, $plugin_basename, $update_url) {
+        if ($plugin_file !== $plugin_basename) return $false;
+        $options = array(
+            'timeout'    => wp_doing_cron() ? 30 : 3,
+            'body'       => array(
+                'plugins'      => wp_json_encode( array('plugins' => array($plugin_file => $plugin_data)) ),
+                'locale'       => wp_json_encode( $locales )
+            ),
+            'user-agent' => $user_agent
+        );
+        $raw_response = wp_remote_post($update_url . 'plugins/update-check/', $options);
+        $response = json_decode( wp_remote_retrieve_body( $raw_response ) ?: 'false', true );
+        return empty($response['plugins'][$plugin_file]) ? $false : $response['plugins'][$plugin_file];
+    }, 10, 4);
+
+    add_filter('plugins_api', function($false, $action, $args) use($user_agent, $plugin_full_path, $plugin_basename, $update_url) {
+        if ($action !== 'plugin_information' || empty($args->slug)) return $false;
+        $transient = get_site_transient( 'update_plugins' );
+        $plugins = array_merge($transient->response, $transient->no_update);
+        if (empty($plugins[$plugin_basename]->slug) || $plugins[$plugin_basename]->slug !== $args->slug) return $false;
+        $url = add_query_arg(
+            array(
+                'action'  => $action,
+                'request' => $args,
+            ),
+            $update_url . 'plugins/info/'
+        );
+        $raw_response = wp_remote_get( $url, array(
+            'timeout'    => 15,
+            'user-agent' => $user_agent
+        ));
+        $response = json_decode( wp_remote_retrieve_body( $raw_response ) ?: 'false', true );
+        return empty($response) ? $false : (object) $response;
+    }, 9, 3);
+}, 10, 1);
+/*********************** BOOTSTRAP CODE END ***********************/
+

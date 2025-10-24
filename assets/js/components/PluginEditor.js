@@ -1,0 +1,172 @@
+// PluginEditor Component (simplified overview + releases list)
+lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onToggleReleaseStatus, pendingReleaseIds, onTogglePluginStatus, pendingPluginStatus, isLoadingReleases, onBack }) => {
+    const { __ } = wp.i18n;
+    const { createElement } = wp.element;
+    const { Tooltip, Button } = wp.components;
+    const { getSvgIcon } = Pblsh.Utils;
+
+    const safe = (val) => (val === undefined || val === null) ? '' : val;
+
+    const renderInfoBox = () => {
+        return [
+                createElement('div', { className: 'pblsh--card pblsh--card--plugin-info' },
+                createElement('div', { className: 'pblsh--plugin-info__row' },
+                    createElement('div', { className: 'pblsh--plugin-info__left' },
+                        createElement(Button, {
+                            isTertiary: true,
+                            className: 'has-icon',
+                            label: __('Back to list', 'publisher'),
+                            icon: getSvgIcon('arrow_back', { size: 24 }),
+                            onClick: () => { if (typeof onBack === 'function') onBack(); },
+                        })
+                    ),
+                    createElement('div', { className: 'pblsh--plugin-info__right' },
+                        createElement('div', { className: 'pblsh--plugin-header' },
+                            createElement('div', { className: 'pblsh--plugin-header__main' },
+                                createElement('h3', { className: 'pblsh--plugin-title' }, pluginData?.name),
+                                createElement('div', { className: 'pblsh--plugin-meta' },
+                                    createElement('strong', null, __('Slug', 'publisher')),
+                                    createElement('code', null, safe(pluginData?.slug) || '—'),
+                                ),
+                            ),
+                            createElement('div', { className: 'pblsh--plugin-header__actions' },
+                                createElement(Button, {
+                                    isTertiary: true,
+                                    className: 'pblsh--status-btn ' + (pluginData?.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
+                                    label: pluginData?.status === 'publish' ? __('Public', 'publisher') : __('Draft', 'publisher'),
+                                    icon: getSvgIcon('circle'),
+                                    isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
+                                    disabled: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
+                                    onClick: () => {
+                                        if (typeof onTogglePluginStatus === 'function' && pluginData?.id) {
+                                            const next = pluginData.status === 'publish' ? 'draft' : 'publish';
+                                            onTogglePluginStatus(pluginData.id, next);
+                                        }
+                                    },
+                                }, (pluginData?.status === 'publish' ? __('Public', 'publisher') : __('Draft', 'publisher')))
+                            ),
+                        ),
+                        createElement('div', { className: 'pblsh--plugin-grid' },
+                            createElement('div', { className: 'pblsh--plugin-grid__item' },
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String((pluginData?.releases || []).length))
+                            ),
+                            createElement('div', { className: 'pblsh--plugin-grid__item' },
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Latest Release', 'publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, safe(pluginData?.version) || '—')
+                            ),
+                        )
+                    )
+                )
+            ),
+        ];
+    };
+
+    const renderReleasesTable = () => {
+        const releases = Array.isArray(pluginData?.releases) ? pluginData.releases : [];
+        return [
+            createElement('div', { className: 'pblsh--table-container' },
+                isLoadingReleases ?
+                    createElement('div', { className: 'pblsh--loading pblsh--loading--table' },
+                        createElement('div', { className: 'pblsh--loading__spinner' })
+                    )
+                : createElement('table', { className: 'pblsh--table' },
+                    createElement('thead', null,
+                        createElement('tr', null,
+                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'publisher')),
+                            createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'publisher')),
+                            createElement('th', null, __('Date', 'publisher')),
+                            createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'publisher')),
+                        ),
+                    ),
+                    createElement('tbody', null,
+                        releases.length === 0
+                            ? createElement('tr', null,
+                                createElement('td', { colSpan: 4 }, __('No releases yet.', 'publisher')),
+                            )
+                            : releases.map((rel) =>
+                                createElement('tr', { key: String(rel.id) },
+                                    createElement('td', { className: 'pblsh--table__status-cell' },
+                                        createElement(wp.components.Button, {
+                                            isTertiary: true,
+                                            className: 'pblsh--status-btn ' + (rel.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
+                                            label: rel.status === 'publish' ? (pluginData?.status === 'publish' ? __('Public', 'publisher') : __('Public if plugin is public', 'publisher')) : __('Draft', 'publisher'),
+                                            icon: Pblsh.Utils.getSvgIcon('circle'),
+                                            isBusy: Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id),
+                                            disabled: Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id),
+                                            style: {
+                                                opacity: pluginData?.status === 'publish' ? 1 : 0.5,
+                                            },
+                                            onClick: () => {
+                                                const next = rel.status === 'publish' ? 'draft' : 'publish';
+                                                if (typeof onToggleReleaseStatus === 'function') onToggleReleaseStatus(rel.id, next);
+                                            },
+                                        })
+                                    ),
+                                    createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.title)),
+                                    createElement('td', null, safe(rel.date)),
+                                    createElement('td', { className: 'pblsh--table__actions-cell' },
+                                        createElement('div', { className: 'pblsh--table__actions' },
+                                            (() => {
+                                                const base = rel.download_url || '';
+                                                const href = base ? base + (base.indexOf('?') >= 0 ? '&' : '?') + '_wpnonce=' + encodeURIComponent(PblshData.nonce) : '';
+                                                return createElement(Tooltip, { text: __('Download', 'publisher') },
+                                                    createElement('a', {
+                                                        className: 'components-button has-icon is-tertiary',
+                                                        href: href || undefined,
+                                                        rel: 'noopener noreferrer',
+                                                        'aria-label': __('Download', 'publisher'),
+                                                        onClick: (e) => { if (!href) { e.preventDefault(); alert(__('No download available for this release.', 'publisher')); } },
+                                                    },
+                                                        Pblsh.Utils.getSvgIcon('download', { size: 24 }),
+                                                    ),
+                                                );
+                                            })(),
+                                            createElement(wp.components.DropdownMenu, {
+                                                icon: Pblsh.Utils.getSvgIcon('dots_horizontal', { size: 24 }),
+                                                label: __('More options', 'publisher'),
+                                                children: ({ onClose }) => [
+                                                    createElement(wp.components.MenuItem, {
+                                                        key: 'delete',
+                                                        isDestructive: true,
+                                                        onClick: async () => {
+                                                            try {
+                                                                if (!confirm(__('Are you sure you want to permanently delete this release?', 'publisher'))) { onClose(); return; }
+                                                                await Pblsh.API.deleteRelease(rel.id);
+                                                                onClose();
+                                                                if (typeof refreshPlugin === 'function') {
+                                                                    refreshPlugin();
+                                                                }
+                                                            } catch (e) {
+                                                                alert(e?.message || 'Error deleting release');
+                                                            }
+                                                        },
+                                                    },
+                                                        Pblsh.Utils.getSvgIcon('delete_forever', { size: 24 }),
+                                                        __('Delete permanently', 'publisher')
+                                                    ),
+                                                ],
+                                            })
+                                        ),
+                                    ),
+                                ),
+                            ),
+                    ),
+                ),
+            ),
+        ];
+    };
+
+    return createElement('div', { className: 'pblsh--editor' },
+        createElement('div', { className: 'pblsh--editor__content' },
+            createElement('div', { className: 'pblsh--main' },
+                createElement('div', { className: 'pblsh--main__inner' },
+                    createElement('div', { className: 'pblsh--main__content' },
+                        renderInfoBox(),
+                        renderReleasesTable(),
+                    ),
+                ),
+            ),
+        ),
+    );
+});

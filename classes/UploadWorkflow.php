@@ -270,7 +270,7 @@ class UploadWorkflow {
                 ],
             ];
             $cache['data']['phases'][$phase] = $this->get_time_log();
-            @file_put_contents($this->tmp_root . '/cache.json', json_encode($cache, JSON_PRETTY_PRINT));
+            @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
             return [ 'status' => 'ok', 'next' => 'unpack', 'upload_id' => $upload_id ];
         }
 
@@ -279,7 +279,7 @@ class UploadWorkflow {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
         }
         $this->init_tmp_root($upload_id);
-        $cache_file = $this->tmp_root . '/cache.json';
+        $cache_file = $this->tmp_root . 'cache.json';
         if (!file_exists($cache_file)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'upload_not_found', 'message' => 'Upload not found.' ] ] ];
         }
@@ -298,13 +298,12 @@ class UploadWorkflow {
                 return [ 'status' => 'error', 'errors' => [ [ 'code' => 'unzip_failed', 'message' => $unzipped->get_error_message() ] ], 'upload_id' => $upload_id ];
             }
             $cache['data']['phases'][$phase] = $this->get_time_log();
-            @file_put_contents($this->tmp_root . '/cache.json', json_encode($cache, JSON_PRETTY_PRINT));
+            @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
             return [ 'status' => 'ok', 'next' => 'analyze', 'upload_id' => $upload_id ];
         }
 
         if ($phase === 'analyze') {
             $working_dir = $this->tmp_root . 'data/';
-            require_once ABSPATH . 'wp-admin/includes/plugin.php';
 
             // Detect root directory and main plugin file
             $root = $this->detect_root_dir($working_dir);
@@ -350,6 +349,7 @@ class UploadWorkflow {
             $plugin_slug = sanitize_title($plugin_folder_name);
 
             // Get plugin data
+            require_once ABSPATH . 'wp-admin/includes/plugin.php'; // For WordPress before version 6.8 we need to include this file to ensure the function get_plugin_data() is available.
             $plugin_data = $main_file ? get_plugin_data($main_file, false, false) : [];
 
             // Determine if the plugin is valid
@@ -429,7 +429,7 @@ class UploadWorkflow {
             $cache['zip_path'] = $zip_path;
             $cache['data'] = $data;
             $cache['data']['phases'][$phase] = $this->get_time_log();
-            @file_put_contents($this->tmp_root . '/cache.json', json_encode($cache, JSON_PRETTY_PRINT));
+            @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
 
             // Return result
             return [
@@ -452,7 +452,7 @@ class UploadWorkflow {
                     'rebuilt_on_server' => $rebuilt,
                 ];
                 $cache['data']['phases'][$phase] = $this->get_time_log();
-                @file_put_contents($this->tmp_root . '/cache.json', json_encode($cache, JSON_PRETTY_PRINT));
+                @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
                 return [ 'status' => 'ok', 'next' => 'result', 'upload_id' => $upload_id ];
             }
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'rebuild_failed', 'message' => 'Failed to rebuild ZIP.' ] ], 'next' => 'result', 'upload_id' => $upload_id ];
@@ -482,7 +482,7 @@ class UploadWorkflow {
         }
         $user_id = get_current_user_id();
 
-        $subdir = '/tmp/' . $upload_id . '_user-' . $user_id . '/';
+        $subdir = '/tmp/' . $upload_id . '_user-' . $user_id;
         $publisher_upload_dir = publisher_upload_dir();
         $this->tmp_upload_dir = [
             'path' => $publisher_upload_dir['path'] . $subdir,
@@ -941,7 +941,7 @@ class UploadWorkflow {
      * @param string $zip_path Original zip file path.
      * @return string Absolute path to the new zip file.
      */
-    private function build_zip(string $root, string $zip_path): string {
+    private function build_zip(string $root, string $zip_path): string|false {
         // Prepare destination directory and target path
         $zip_new_dir = $this->tmp_root . 'file_new/';
         wp_mkdir_p($zip_new_dir);
@@ -955,6 +955,9 @@ class UploadWorkflow {
                 $files[] = $entry->getPathname();
             }
         }
+
+        get_wp_filesystem(); // Ensure the WordPress file functions are initialized
+        wp_zip_file_is_valid($zip_new_path); // Ensure the respective WordPress zip class is initialized
 
         $created = false;
         $generated_with = '';
@@ -975,17 +978,11 @@ class UploadWorkflow {
         }
 
         // Fallback: use WordPress bundled PclZip if ZipArchive is unavailable or failed
-        if (!$created) {
-            if (!class_exists('\\PclZip')) {
-                require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
-            }
-            if (class_exists('\\PclZip')) {
-                $pcl = new \PclZip($zip_new_path);
-                // Remove the absolute $root prefix so entries are stored relative to it
-                $res = $pcl->create($files, PCLZIP_OPT_REMOVE_PATH, rtrim($root, '/\\') . '/');
-                $created = ($res !== 0);
-                $generated_with = 'pclzip';
-            }
+        if (!$created && class_exists('\\PclZip')) {
+            $pcl = new \PclZip($zip_new_path);
+            $res = $pcl->create($files, PCLZIP_OPT_REMOVE_PATH, $root);
+            $created = ($res !== 0);
+            $generated_with = 'pclzip';
         }
 
         // Abort gracefully if archive creation failed in both strategies

@@ -20,10 +20,10 @@ add_action('plugin_loaded', function($plugin_full_path) {
     if ($done) return;
     $done = true;
 
-    require_once ABSPATH . 'wp-admin/includes/plugin.php';
     $real_wp_version = function_exists('wp_get_wp_version') ? wp_get_wp_version() : $wp_version;
     $user_agent = 'PublisherBootstrapCode/basicV1; WordPress/' . $real_wp_version . '; ' . home_url( '/' );
     $plugin_basename = plugin_basename($plugin_full_path);
+    require_once ABSPATH . 'wp-admin/includes/plugin.php'; // For WordPress before version 6.8 we need to include this file to ensure the function get_plugin_data() is available.
     $update_url = trailingslashit(sanitize_url( get_plugin_data( $plugin_full_path, false, false )['UpdateURI'] ));
     $host = wp_parse_url($update_url, PHP_URL_HOST);
 

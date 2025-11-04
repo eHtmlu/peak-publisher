@@ -40,9 +40,11 @@ if (is_admin()) {
 
 // Initialize API.
 function rest_api_init() {
-    $seems_to_be_admin_api_request = isset($_SERVER['REQUEST_URI']) && str_contains(filter_var(wp_unslash($_SERVER['REQUEST_URI'])), 'pblsh-admin');
+    // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- We only check if the request URI contains the string 'pblsh-admin', so we don't need further sanitization.
+    $seems_to_be_admin_api_request = isset($_SERVER['REQUEST_URI']) && str_contains(wp_unslash($_SERVER['REQUEST_URI']), 'pblsh-admin');
     
     // ATTENTION: This is NOT a security check, but a soft check to avoid unnecessary work for public requests
+    // The APIs have their own security checks.
 
     if ($seems_to_be_admin_api_request) {
         require_once __DIR__ . '/classes/AdminAPI.php';

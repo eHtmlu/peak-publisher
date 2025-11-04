@@ -120,18 +120,8 @@ class PublicAPI {
         }
 
         // Get Domain from client user-agent
-        if (!isset($_SERVER['HTTP_USER_AGENT'])) {
-            return false;
-        }
-        $user_agent = filter_var(wp_unslash($_SERVER['HTTP_USER_AGENT']));
-        if (!preg_match('/^.*?https?:\/\/([^\/\:]+).*$/', $user_agent, $matches)) {
-            return false;
-        }
-        $untrusted_client_domain = $matches[1];
-
-        // Check if domain looks like a valid domain name
-        $untrusted_client_domain_ascii = idn_to_ascii($untrusted_client_domain);
-        if ($untrusted_client_domain_ascii === false || filter_var($untrusted_client_domain_ascii, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+        $untrusted_client_domain = $this->extract_sanitized_but_untrusted_client_domain_from_user_agent();
+        if (empty($untrusted_client_domain)) {
             return false;
         }
 
@@ -150,6 +140,43 @@ class PublicAPI {
         }
         
         return false;
+    }
+
+    private function extract_sanitized_but_untrusted_client_domain_from_user_agent() {
+
+        // Get user agent
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- The sanitization process is not a one-liner, it's done below in this function.
+        $unsanitized_user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? wp_unslash($_SERVER['HTTP_USER_AGENT']) : false;
+        if ($unsanitized_user_agent === false) {
+            return false;
+        }
+
+        // Extracting only a domain name (if there is one) and ignore the rest of the user agent, so we only need to sanitize the domain name
+        if (!preg_match('/^.*?https?:\/\/([^\/\:]+).*$/', $unsanitized_user_agent, $matches)) {
+            return false;
+        }
+        $unsanitized_untrusted_client_domain = $matches[1];
+
+        // Transform domain name to ASCII
+        $unsanitized_untrusted_client_domain_ascii = idn_to_ascii($unsanitized_untrusted_client_domain);
+        if ($unsanitized_untrusted_client_domain_ascii === false) {
+            return false;
+        }
+
+        // Check if ASCII domain is a valid domain name
+        $sanitized_untrusted_client_domain_ascii = filter_var($unsanitized_untrusted_client_domain_ascii, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME);
+        if ($sanitized_untrusted_client_domain_ascii === false) {
+            return false;
+        }
+
+        // Convert ASCII domain name back to UTF-8
+        $sanitized_untrusted_client_domain = idn_to_utf8($sanitized_untrusted_client_domain_ascii);
+        if ($sanitized_untrusted_client_domain === false) {
+            return false;
+        }
+
+        // Return UTF-8 domain name if it is a valid domain name
+        return $sanitized_untrusted_client_domain;
     }
 
     public function ip_in_range(string $ip, string $subnet, int $bits): bool {

@@ -250,13 +250,8 @@ class AdminAPI {
         if ($zip_rel !== '') {
             $zip_abs = trailingslashit(publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
             if (file_exists($zip_abs)) {
-                if (!function_exists('WP_Filesystem')) {
-                    require_once ABSPATH . 'wp-admin/includes/file.php';
-                }
-                global $wp_filesystem;
-                if (empty($wp_filesystem)) { WP_Filesystem(); }
-                if ($wp_filesystem) {
-                    $wp_filesystem->delete($zip_abs, false);
+                if (get_wp_filesystem()) {
+                    get_wp_filesystem()->delete($zip_abs, false);
                 } else {
                     wp_delete_file($zip_abs);
                 }
@@ -357,13 +352,8 @@ class AdminAPI {
             if ($zip_rel !== '') {
                 $zip_abs = trailingslashit(publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
                 if (file_exists($zip_abs)) {
-                    if (!function_exists('WP_Filesystem')) {
-                        require_once ABSPATH . 'wp-admin/includes/file.php';
-                    }
-                    global $wp_filesystem;
-                    if (empty($wp_filesystem)) { WP_Filesystem(); }
-                    if ($wp_filesystem) {
-                        $wp_filesystem->delete($zip_abs, false);
+                    if (get_wp_filesystem()) {
+                        get_wp_filesystem()->delete($zip_abs, false);
                     } else {
                         wp_delete_file($zip_abs);
                     }

@@ -15,7 +15,8 @@ if (is_standalone()) {
 
     // Re-enable redirection from "/admin" to real admin url (because it's disabled by disabling themes)
     add_action('init', function() {
-        if ( isset($_SERVER['REQUEST_URI']) && trim(filter_var(wp_unslash($_SERVER['REQUEST_URI'])), '/') === 'admin' ) {
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- We only check if the request URI is 'admin', so we don't need further sanitization.
+        if ( isset($_SERVER['REQUEST_URI']) && trim(wp_unslash($_SERVER['REQUEST_URI']), '/') === 'admin' ) {
             wp_safe_redirect(admin_url());
             exit;
         }

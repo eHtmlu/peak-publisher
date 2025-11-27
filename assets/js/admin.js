@@ -1,4 +1,4 @@
-// Publisher Admin App
+// Peak Publisher Admin App
 document.addEventListener('DOMContentLoaded', function() {
     'use strict';
     
@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const { getPlugins, getPlugin, updatePlugin, deletePlugin } = Pblsh.API;
 
     // Main App Component
-    const PublisherApp = () => {
+    const PeakPublisherApp = () => {
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [plugins, setPlugins] = useState([]);
         const [currentPlugin, setCurrentPlugin] = useState(null);
@@ -51,8 +51,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const togglePluginStatus = async (pluginId, nextStatus) => {
             try {
-                //if (nextStatus === 'publish' && !confirm(__('Do you want to publish this plugin?', 'publisher'))) return;
-                //if (nextStatus === 'draft' && !confirm(__('Do you want to unpublish this plugin?', 'publisher'))) return;
+                //if (nextStatus === 'publish' && !confirm(__('Do you want to publish this plugin?', 'peak-publisher'))) return;
+                //if (nextStatus === 'draft' && !confirm(__('Do you want to unpublish this plugin?', 'peak-publisher'))) return;
                 setPendingPluginStatus(prev => prev.includes(pluginId) ? prev : [...prev, pluginId]);
                 await Pblsh.API.updatePlugin(pluginId, { status: nextStatus });
                 setPluginInList(pluginId, (p) => ({ ...p, status: nextStatus }));
@@ -66,8 +66,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const toggleReleaseStatus = async (releaseId, nextStatus) => {
             try {
-                //if (nextStatus === 'publish' && !confirm(__('Do you want to publish this release?', 'publisher'))) return;
-                //if (nextStatus === 'draft' && !confirm(__('Do you want to unpublish this release?', 'publisher'))) return;
+                //if (nextStatus === 'publish' && !confirm(__('Do you want to publish this release?', 'peak-publisher'))) return;
+                //if (nextStatus === 'draft' && !confirm(__('Do you want to unpublish this release?', 'peak-publisher'))) return;
                 setPendingReleaseStatus(prev => prev.includes(releaseId) ? prev : [...prev, releaseId]);
                 await Pblsh.API.updateRelease(releaseId, { status: nextStatus });
                 setCurrentPlugin(prev => {
@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // If the deleted plugin is currently open, close editor
                 setCurrentPlugin(prev => prev && prev.id === plugin.id ? null : prev);
                 setView(prev => (prev === 'editor' && currentPlugin && currentPlugin.id === plugin.id) ? 'list' : prev);
-                //showSuccessMessage(__('Plugin deleted successfully.', 'publisher'));
+                //showSuccessMessage(__('Plugin deleted successfully.', 'peak-publisher'));
             } catch (error) {
                 showAlert(error.message, 'error');
                 // reload list to ensure consistency on error
@@ -198,9 +198,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (view === 'addition-process') {
                 return createElement('div', { className: 'pblsh--header' },
                     createElement('h2', { className: 'pblsh--header__title' }, 
-                        __('Publisher', 'publisher'),
+                        __('Peak Publisher', 'peak-publisher'),
                         ' - ',
-                        __('Add New Plugin', 'publisher')
+                        __('Add New Plugin', 'peak-publisher')
                     ),
                     createElement('div', { className: 'pblsh--header__actions' },
                         createElement(Button, {
@@ -208,24 +208,24 @@ document.addEventListener('DOMContentLoaded', function() {
                             onClick: handleCancel,
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
-                        }, __('Cancel', 'publisher')),
+                        }, __('Cancel', 'peak-publisher')),
                     )
                 );
             }
             else if (view === 'editor') {
                 return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, __('Publisher', 'publisher')),
+                    createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--header__actions' },
                         createElement(Button, {
                             isPrimary: true,
                             onClick: handleAddNewPlugin,
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
-                        }, __('Add New Plugin', 'publisher')),
+                        }, __('Add New Plugin', 'peak-publisher')),
                         createElement(Button, {
                             isTertiary: true,
                             onClick: openSettings,
-                            label: __('Settings', 'publisher'),
+                            label: __('Settings', 'peak-publisher'),
                             icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
                             __next40pxDefaultSize: true,
                         })
@@ -233,18 +233,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 );
             } else {
                 return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, __('Publisher', 'publisher')),
+                    createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--header__actions' },
                         createElement(Button, {
                             isPrimary: true,
                             onClick: handleAddNewPlugin,
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
-                        }, __('Add New Plugin', 'publisher')),
+                        }, __('Add New Plugin', 'peak-publisher')),
                         createElement(Button, {
                             isTertiary: true,
                             onClick: openSettings,
-                            label: __('Settings', 'publisher'),
+                            label: __('Settings', 'peak-publisher'),
                             icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
                             __next40pxDefaultSize: true,
                         })
@@ -353,6 +353,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Render the app
     const container = document.getElementById('pblsh-app');
     if (container) {
-        render(createElement(PublisherApp), container);
+        render(createElement(PeakPublisherApp), container);
     }
 }); 

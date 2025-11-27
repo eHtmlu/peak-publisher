@@ -28,7 +28,7 @@ if (is_standalone()) {
         define('CORE_UPGRADE_SKIP_NEW_BUNDLED', true);
     }
 
-    // Redirect to Publisher on login
+    // Redirect to Peak Publisher on login
     add_action('load-index.php', function() {
         if ( defined('DOING_AJAX') && DOING_AJAX ) return;
         if ( ! current_user_can('read') ) return;

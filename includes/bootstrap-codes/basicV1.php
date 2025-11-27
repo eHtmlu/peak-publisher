@@ -7,7 +7,7 @@ exit;
 
 /*********************** BOOTSTRAP CODE START ***********************/
 /**
- * Publisher Bootstrap Code basicV1
+ * Peak Publisher Bootstrap Code basicV1
  * Keep the code as it is, as it is optimized for several requirements.
  * 
  * Compatible with:
@@ -21,7 +21,7 @@ add_action('plugin_loaded', function($plugin_full_path) {
     $done = true;
 
     $real_wp_version = function_exists('wp_get_wp_version') ? wp_get_wp_version() : $wp_version;
-    $user_agent = 'PublisherBootstrapCode/basicV1; WordPress/' . $real_wp_version . '; ' . home_url( '/' );
+    $user_agent = 'PeakPublisherBootstrapCode/basicV1; WordPress/' . $real_wp_version . '; ' . home_url( '/' );
     $plugin_basename = plugin_basename($plugin_full_path);
     require_once ABSPATH . 'wp-admin/includes/plugin.php'; // For WordPress before version 6.8 we need to include this file to ensure the function get_plugin_data() is available.
     $update_url = trailingslashit(sanitize_url( get_plugin_data( $plugin_full_path, false, false )['UpdateURI'] ));

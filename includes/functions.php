@@ -12,7 +12,7 @@ defined('ABSPATH') || exit;
 function is_standalone(): bool {
     static $is_standalone = null;
     if ($is_standalone === null) {
-        $is_standalone = get_publisher_settings()['standalone_mode'] ?? false;
+        $is_standalone = get_peak_publisher_settings()['standalone_mode'] ?? false;
     }
     return $is_standalone;
 }
@@ -40,7 +40,7 @@ function get_bootstrap_code(): string {
 /**
  * Gets plugin settings (defaults + sanitized option).
  */
-function get_publisher_settings(): array {
+function get_peak_publisher_settings(): array {
     $defaults = [
         'standalone_mode' => false,
         'auto_add_top_level_folder' => true,
@@ -75,21 +75,21 @@ function get_publisher_settings(): array {
     ];
     $raw = get_option('pblsh_settings');
     $data = is_array($raw) ? $raw : [];
-    $merged = sanitize_settings(array_merge($defaults, $data));
+    $merged = sanitize_peak_publisher_settings(array_merge($defaults, $data));
     return $merged;
 }
 
 /**
  * Updates the plugin settings.
  */
-function update_settings(array $settings): void {
-    update_option('pblsh_settings', sanitize_settings($settings), false);
+function update_peak_publisher_settings(array $settings): void {
+    update_option('pblsh_settings', sanitize_peak_publisher_settings($settings), false);
 }
 
 /**
  * Sanitizes the plugin settings.
  */
-function sanitize_settings(array $settings): array {
+function sanitize_peak_publisher_settings(array $settings): array {
     $out = [];
     $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
     $out['auto_add_top_level_folder'] = (bool) ($settings['auto_add_top_level_folder'] ?? true);
@@ -118,7 +118,7 @@ function sanitize_settings(array $settings): array {
  * Ensures the upload directory is ready and secured.
  */
 function ensure_upload_dir_is_ready_and_secured(): void {
-    $basedir = publisher_upload_basedir();
+    $basedir = peak_publisher_upload_basedir();
     $htaccess = $basedir . '/.htaccess';
     $indexphp = $basedir . '/index.php';
     if (file_exists($htaccess) && file_exists($indexphp)) {
@@ -141,18 +141,18 @@ function ensure_upload_dir_is_ready_and_secured(): void {
 /**
  * Gets the upload directory basedir.
  */
-function publisher_upload_basedir(): string {
-    return publisher_upload_dir()['basedir'];
+function peak_publisher_upload_basedir(): string {
+    return peak_publisher_upload_dir()['basedir'];
 }
 
 
 /**
  * Gets the upload directory.
  */
-function publisher_upload_dir(): array {
+function peak_publisher_upload_dir(): array {
     $wp_upload_dir = wp_upload_dir();
-    $path = $wp_upload_dir['basedir'] . '/pblsh-publisher';
-    $url = $wp_upload_dir['baseurl'] . '/pblsh-publisher';
+    $path = $wp_upload_dir['basedir'] . '/pblsh-peak-publisher';
+    $url = $wp_upload_dir['baseurl'] . '/pblsh-peak-publisher';
     return [
         'path' => $path,
         'url' => $url,

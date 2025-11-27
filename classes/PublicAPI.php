@@ -46,7 +46,7 @@ class PublicAPI {
     }
 
     public function check_permission(): bool {
-        $settings = get_publisher_settings();
+        $settings = get_peak_publisher_settings();
         $ip_whitelist = $settings['ip_whitelist'];
 
         if (empty($ip_whitelist)) {
@@ -283,7 +283,7 @@ class PublicAPI {
         if ($zip_rel === '') {
             return new \WP_Error('no_file', 'File not found', ['status' => 404]);
         }
-        $zip_abs = trailingslashit(publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
+        $zip_abs = trailingslashit(peak_publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
         if (!file_exists($zip_abs) || !is_readable($zip_abs)) {
             return new \WP_Error('no_file', 'File not found', ['status' => 404]);
         }

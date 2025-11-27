@@ -79,27 +79,27 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         );
     }
     const sections = [
-        { id: 'general', title: __('General', 'publisher'), icon: 'cog' },
-        { id: 'uploads', title: __('Uploads', 'publisher'), icon: 'cloud_upload' },
-        { id: 'security', title: __('Security', 'publisher'), icon: 'security' },
+        { id: 'general', title: __('General', 'peak-publisher'), icon: 'cog' },
+        { id: 'uploads', title: __('Uploads', 'peak-publisher'), icon: 'cloud_upload' },
+        { id: 'security', title: __('Security', 'peak-publisher'), icon: 'security' },
     ];
 
     const renderSection = () => {
         if (currentSection === 'general') {
             return createElement(wp.element.Fragment, null,
                 createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('General', 'publisher')),
+                    createElement('h2', null, __('General', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--settings--main__section-content' },
                         createElement(ToggleControl, {
-                            label: __('Standalone mode', 'publisher'),
+                            label: __('Standalone mode', 'peak-publisher'),
                             help: [
-                                __('Attention: This disables the frontend, several admin menus and other features not needed for Publisher. However, you can simply deactivate standalone mode again at any time, and everything will be back.', 'publisher'),
+                                __('Attention: This disables the frontend, several admin menus and other features not needed for Peak Publisher. However, you can simply deactivate standalone mode again at any time, and everything will be back.', 'peak-publisher'),
                             ],
                             checked: settings.standalone_mode,
                             onChange: (val) => setField('standalone_mode', val),
                             __next40pxDefaultSize: true,
                         }),
-                        createElement('p', null, createElement('strong', null, __('Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'pblsh'))),
+                        createElement('p', null, createElement('strong', null, __('Peak Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Peak Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'peak-publisher'))),
                     ),
                 ),
             );
@@ -107,17 +107,17 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         if (currentSection === 'uploads') {
             return createElement(wp.element.Fragment, null,
                 createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Automatic cleanup of your uploads', 'publisher')),
-                    //createElement('h3', null, __('Fix top-level folder', 'publisher')),
-                    //createElement('p', null, __('If the top-level folder is missing in the ZIP file, it will be generated automatically. When the plugin is installed, WordPress adds this top-level folder unchanged to the /wp-content/plugins/ directory.', 'publisher')),
+                    createElement('h2', null, __('Automatic cleanup of your uploads', 'peak-publisher')),
+                    //createElement('h3', null, __('Fix top-level folder', 'peak-publisher')),
+                    //createElement('p', null, __('If the top-level folder is missing in the ZIP file, it will be generated automatically. When the plugin is installed, WordPress adds this top-level folder unchanged to the /wp-content/plugins/ directory.', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--settings--main__section-content' },
                         createElement(ToggleControl, {
-                            label: __('Add top-level folder if missing', 'publisher'),
+                            label: __('Add top-level folder if missing', 'peak-publisher'),
                             help: [
-                                __('Highly recommended if you usually give the plugin folder and the main file the same name, which is recommended by WordPress anyway. If enabled and the top-level folder in the ZIP file is missing, it will be added automatically and named based on the plugin\'s main file.', 'pblsh'),
+                                __('Highly recommended if you usually give the plugin folder and the main file the same name, which is recommended by WordPress anyway. If enabled and the top-level folder in the ZIP file is missing, it will be added automatically and named based on the plugin\'s main file.', 'peak-publisher'),
                                 createElement('br', null),
                                 createElement('br', null),
-                                __('If this option is disabled and the top-level folder is missing in a plugin ZIP file, WordPress will install the plugin in the /wp-content/plugins/[zip file name]/... folder, which is often not intended.', 'publisher'),
+                                __('If this option is disabled and the top-level folder is missing in a plugin ZIP file, WordPress will install the plugin in the /wp-content/plugins/[zip file name]/... folder, which is often not intended.', 'peak-publisher'),
                             ],
                             checked: settings.auto_add_top_level_folder,
                             onChange: (val) => setField('auto_add_top_level_folder', val),
@@ -125,9 +125,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                         }),
                         createElement('hr'),
                         createElement(ToggleControl, {
-                            label: __('Remove workspace artifacts', 'publisher'),
+                            label: __('Remove workspace artifacts', 'peak-publisher'),
                             help: [
-                                __('Keeps your installation files small and clean by removing files and folders of your operating system and development environment.', 'publisher'),
+                                __('Keeps your installation files small and clean by removing files and folders of your operating system and development environment.', 'peak-publisher'),
                             ],
                             checked: settings.auto_remove_workspace_artifacts,
                             onChange: (val) => setField('auto_remove_workspace_artifacts', val),
@@ -139,13 +139,13 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                                 },
                             },
                             createElement(TextareaControl, {
-                                label: __('Files and folders to remove', 'publisher'),
+                                label: __('Files and folders to remove', 'peak-publisher'),
                                 help: [
-                                    __('One file or folder name per line (no paths). Examples: .git, .svn', 'publisher'),
+                                    __('One file or folder name per line (no paths). Examples: .git, .svn', 'peak-publisher'),
                                     createElement('br', null),
-                                    __('Use * to match any sequence of characters. Examples: *.bak, .env.*', 'publisher'),
+                                    __('Use * to match any sequence of characters. Examples: *.bak, .env.*', 'peak-publisher'),
                                     createElement('br', null),
-                                    createInterpolateElement(__('For more special patterns check out the <a>PHP fnmatch documentation</a>.', 'publisher'),
+                                    createInterpolateElement(__('For more special patterns check out the <a>PHP fnmatch documentation</a>.', 'peak-publisher'),
                                         {
                                             a: createElement('a', { href: 'https://www.php.net/manual/en/function.fnmatch.php', target: '_blank' }),
                                         }
@@ -164,20 +164,20 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         if (currentSection === 'security') {
             return createElement(wp.element.Fragment, null,
                 createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Restrict access to the plugins', 'publisher')),
+                    createElement('h2', null, __('Restrict access to the plugins', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--settings--main__section-content' },
                         createElement(TextareaControl, {
-                            label: __('Whitelist of allowed IP addresses or domain names (one per line)', 'publisher'),
+                            label: __('Whitelist of allowed IP addresses or domain names (one per line)', 'peak-publisher'),
                             help: [
-                                createElement('strong', null, __('SECURITY NOTICE:', 'publisher')),
+                                createElement('strong', null, __('SECURITY NOTICE:', 'peak-publisher')),
                                 ' ',
-                                __('Domain names are resolved to the IP address, and only the IP address can be reliably verified. So, there is a risk that a website on the same server could pretend to be the legitimate website. Never store sensitive data directly in the plugin files.', 'publisher'),
+                                __('Domain names are resolved to the IP address, and only the IP address can be reliably verified. So, there is a risk that a website on the same server could pretend to be the legitimate website. Never store sensitive data directly in the plugin files.', 'peak-publisher'),
                                 //createElement('br', null),
                                 //createElement('br', null),
-                                //__('CIDR notation is also allowed (e.g. 192.168.1.0/24)', 'publisher'),
+                                //__('CIDR notation is also allowed (e.g. 192.168.1.0/24)', 'peak-publisher'),
                             ],
                             value: settings.ip_whitelist,
-                            placeholder: __('Leave blank to allow access from anywhere', 'publisher'),
+                            placeholder: __('Leave blank to allow access from anywhere', 'peak-publisher'),
                             onChange: (val) => setField('ip_whitelist', val),
                             rows: 6,
                             __next40pxDefaultSize: true,
@@ -216,14 +216,14 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                                 isSecondary: true,
                                 onClick: () => { if (typeof onClose === 'function') onClose(); },
                                 __next40pxDefaultSize: true,
-                            }, __('Cancel', 'publisher')),
+                            }, __('Cancel', 'peak-publisher')),
                             ' ',
                             createElement(Button, {
                                 isPrimary: true,
                                 onClick: handleSave,
                                 isBusy: saving,
                                 __next40pxDefaultSize: true,
-                            }, __('Save settings', 'publisher')),
+                            }, __('Save settings', 'peak-publisher')),
                         ),
                     )
                 )

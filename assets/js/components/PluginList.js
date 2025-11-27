@@ -7,7 +7,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
-        if (!confirm(__('Are you sure you want to permanently delete this plugin?', 'publisher'))) {
+        if (!confirm(__('Are you sure you want to permanently delete this plugin?', 'peak-publisher'))) {
             return;
         }
 
@@ -24,17 +24,17 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
 
     return createElement('div', { className: 'pblsh--list' },
         plugins.length === 0 
-            ? createElement('p', { className: 'pblsh--no-plugins' }, __('No plugins created yet.', 'publisher'))
+            ? createElement('p', { className: 'pblsh--no-plugins' }, __('No plugins created yet.', 'peak-publisher'))
             : createElement('div', { className: 'pblsh--table-container' },
                 createElement('table', { className: 'pblsh--table' },
                     createElement('thead', null,
                         createElement('tr', null,
-                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'publisher')),
-                            //createElement('th', { className: 'pblsh--table__icon-header' }, __('Icon', 'publisher')),
-                            createElement('th', { className: 'pblsh--table__name-header' }, __('Plugin Name', 'publisher')),
-                            createElement('th', { className: 'pblsh--table__slug-header' }, __('Slug', 'publisher')),
-                            createElement('th', { className: 'pblsh--table__version-header' }, __('Latest Version', 'publisher')),
-                            createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'publisher'))
+                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
+                            //createElement('th', { className: 'pblsh--table__icon-header' }, __('Icon', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__name-header' }, __('Plugin Name', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__slug-header' }, __('Slug', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__version-header' }, __('Latest Version', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher'))
                         )
                     ),
                     createElement('tbody', null,
@@ -44,7 +44,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                     createElement(wp.components.Button, {
                                         isTertiary: true,
                                         className: 'pblsh--status-btn ' + (plugin.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
-                                        label: plugin.status === 'publish' ? __('Public', 'publisher') : __('Draft', 'publisher'),
+                                        label: plugin.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher'),
                                         icon: Pblsh.Utils.getSvgIcon('circle'),
                                         isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id),
                                         disabled: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id),
@@ -83,12 +83,12 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                         createElement(Button, {
                                             isTertiary: true,
                                             onClick: () => onEdit(plugin.id),
-                                            label: __('Edit', 'publisher'),
+                                            label: __('Edit', 'peak-publisher'),
                                             icon: getSvgIcon('pencil', { size: 24 })
                                         }),
                                         createElement(DropdownMenu, {
                                             icon: getSvgIcon('dots_horizontal', { size: 24 }),
-                                            label: __('More options', 'publisher'),
+                                            label: __('More options', 'peak-publisher'),
                                             children: ({ onClose }) => [
                                                 /* createElement(MenuItem, {
                                                     key: 'export',
@@ -96,7 +96,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                                     disabled: !PblshData.exportSupported
                                                 },
                                                     getSvgIcon('download', { size: 24 }),
-                                                    __('Download Installable', 'publisher')
+                                                    __('Download Installable', 'peak-publisher')
                                                 ), */
                                                 plugin.slug !== PblshData.currentPlugin && createElement(MenuItem, {
                                                     key: 'delete',
@@ -104,7 +104,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                                     onClick: () => { handleDelete(plugin); onClose(); }
                                                 },
                                                     getSvgIcon('delete_forever', { size: 24 }),
-                                                    __('Delete permanently', 'publisher')
+                                                    __('Delete permanently', 'peak-publisher')
                                                 )
                                             ].filter(Boolean)
                                         })

@@ -15,7 +15,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement(Button, {
                             isTertiary: true,
                             className: 'has-icon',
-                            label: __('Back to list', 'publisher'),
+                            label: __('Back to list', 'peak-publisher'),
                             icon: getSvgIcon('arrow_back', { size: 24 }),
                             onClick: () => { if (typeof onBack === 'function') onBack(); },
                         })
@@ -25,7 +25,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             createElement('div', { className: 'pblsh--plugin-header__main' },
                                 createElement('h3', { className: 'pblsh--plugin-title' }, pluginData?.name),
                                 createElement('div', { className: 'pblsh--plugin-meta' },
-                                    createElement('strong', null, __('Slug', 'publisher')),
+                                    createElement('strong', null, __('Slug', 'peak-publisher')),
                                     createElement('code', null, safe(pluginData?.slug) || '—'),
                                 ),
                             ),
@@ -33,7 +33,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 createElement(Button, {
                                     isTertiary: true,
                                     className: 'pblsh--status-btn ' + (pluginData?.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
-                                    label: pluginData?.status === 'publish' ? __('Public', 'publisher') : __('Draft', 'publisher'),
+                                    label: pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher'),
                                     icon: getSvgIcon('circle'),
                                     isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
                                     disabled: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
@@ -43,16 +43,16 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             onTogglePluginStatus(pluginData.id, next);
                                         }
                                     },
-                                }, (pluginData?.status === 'publish' ? __('Public', 'publisher') : __('Draft', 'publisher')))
+                                }, (pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher')))
                             ),
                         ),
                         createElement('div', { className: 'pblsh--plugin-grid' },
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
                                 createElement('div', { className: 'pblsh--plugin-grid__value' }, String((pluginData?.releases || []).length))
                             ),
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Latest Release', 'publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Latest Release', 'peak-publisher')),
                                 createElement('div', { className: 'pblsh--plugin-grid__value' }, safe(pluginData?.version) || '—')
                             ),
                         )
@@ -73,16 +73,16 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                 : createElement('table', { className: 'pblsh--table' },
                     createElement('thead', null,
                         createElement('tr', null,
-                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'publisher')),
-                            createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'publisher')),
-                            createElement('th', null, __('Date', 'publisher')),
-                            createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'publisher')),
+                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
+                            createElement('th', null, __('Date', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher')),
                         ),
                     ),
                     createElement('tbody', null,
                         releases.length === 0
                             ? createElement('tr', null,
-                                createElement('td', { colSpan: 4 }, __('No releases yet.', 'publisher')),
+                                createElement('td', { colSpan: 4 }, __('No releases yet.', 'peak-publisher')),
                             )
                             : releases.map((rel) =>
                                 createElement('tr', { key: String(rel.id) },
@@ -90,7 +90,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                         createElement(wp.components.Button, {
                                             isTertiary: true,
                                             className: 'pblsh--status-btn ' + (rel.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
-                                            label: rel.status === 'publish' ? (pluginData?.status === 'publish' ? __('Public', 'publisher') : __('Public if plugin is public', 'publisher')) : __('Draft', 'publisher'),
+                                            label: rel.status === 'publish' ? (pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Public if plugin is public', 'peak-publisher')) : __('Draft', 'peak-publisher'),
                                             icon: Pblsh.Utils.getSvgIcon('circle'),
                                             isBusy: Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id),
                                             disabled: Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id),
@@ -110,13 +110,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             (() => {
                                                 const base = rel.download_url || '';
                                                 const href = base ? base + (base.indexOf('?') >= 0 ? '&' : '?') + '_wpnonce=' + encodeURIComponent(PblshData.nonce) : '';
-                                                return createElement(Tooltip, { text: __('Download', 'publisher') },
+                                                return createElement(Tooltip, { text: __('Download', 'peak-publisher') },
                                                     createElement('a', {
                                                         className: 'components-button has-icon is-tertiary',
                                                         href: href || undefined,
                                                         rel: 'noopener noreferrer',
-                                                        'aria-label': __('Download', 'publisher'),
-                                                        onClick: (e) => { if (!href) { e.preventDefault(); alert(__('No download available for this release.', 'publisher')); } },
+                                                        'aria-label': __('Download', 'peak-publisher'),
+                                                        onClick: (e) => { if (!href) { e.preventDefault(); alert(__('No download available for this release.', 'peak-publisher')); } },
                                                     },
                                                         Pblsh.Utils.getSvgIcon('download', { size: 24 }),
                                                     ),
@@ -124,14 +124,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             })(),
                                             createElement(wp.components.DropdownMenu, {
                                                 icon: Pblsh.Utils.getSvgIcon('dots_horizontal', { size: 24 }),
-                                                label: __('More options', 'publisher'),
+                                                label: __('More options', 'peak-publisher'),
                                                 children: ({ onClose }) => [
                                                     createElement(wp.components.MenuItem, {
                                                         key: 'delete',
                                                         isDestructive: true,
                                                         onClick: async () => {
                                                             try {
-                                                                if (!confirm(__('Are you sure you want to permanently delete this release?', 'publisher'))) { onClose(); return; }
+                                                                if (!confirm(__('Are you sure you want to permanently delete this release?', 'peak-publisher'))) { onClose(); return; }
                                                                 await Pblsh.API.deleteRelease(rel.id);
                                                                 onClose();
                                                                 if (typeof refreshPlugin === 'function') {
@@ -143,7 +143,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                         },
                                                     },
                                                         Pblsh.Utils.getSvgIcon('delete_forever', { size: 24 }),
-                                                        __('Delete permanently', 'publisher')
+                                                        __('Delete permanently', 'peak-publisher')
                                                     ),
                                                 ],
                                             })

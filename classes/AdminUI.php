@@ -31,20 +31,20 @@ class AdminUI {
      */
     public function add_admin_menu(): void {
         add_menu_page(
-            __('Publisher', 'publisher'),
-            __('Publisher', 'publisher'),
+            __('Peak Publisher', 'peak-publisher'),
+            __('Peak Publisher', 'peak-publisher'),
             'manage_options',
-            'pblsh',
-            [$this, 'render_publisher'],
+            'pblsh-peak-publisher',
+            [$this, 'render_peak_publisher'],
             'dashicons-cloud',
             58,
         );
     }
 
     /**
-     * Render publisher page.
+     * Render Peak Publisher page.
      */
-    public function render_publisher(): void {
+    public function render_peak_publisher(): void {
         echo '<div class="wrap"><div id="pblsh-app" class="pblsh-app"></div></div>';
     }
 
@@ -52,7 +52,7 @@ class AdminUI {
      * Enqueue admin scripts.
      */
     public function enqueue_admin_scripts($hook): void {
-        if ($hook !== 'toplevel_page_pblsh' || !current_user_can('manage_options')) {
+        if ($hook !== 'toplevel_page_pblsh-peak-publisher' || !current_user_can('manage_options')) {
             return;
         }
         

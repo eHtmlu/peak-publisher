@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Plugin Name: Publisher
+ * Plugin Name: Peak Publisher
  * Description: The easiest way to self-host, manage and publish your own custom plugins.
  * Version: 1.0.0
  * Requires at least: 5.8
@@ -10,10 +10,10 @@
  * Author URI: https://ehtmlu.com/
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain: publisher
+ * Text Domain: peak-publisher
  */
 
-namespace Pblsh;
+namespace PeakPublisher;
 
 defined('ABSPATH') || exit;
 

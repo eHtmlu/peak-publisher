@@ -115,14 +115,14 @@ class UploadWorkflow {
         $existing_release_id = $data['related_releases']['existing']['id'] ?? 0;
         if ($existing_release_id) {
             $zip_to_replace_relative_path = (string) (get_post_meta($existing_release_id, '_pblsh_zip_path', true) ?? '');
-            $zip_to_replace_full_path = trailingslashit(publisher_upload_basedir()) . $zip_to_replace_relative_path;
+            $zip_to_replace_full_path = trailingslashit(peak_publisher_upload_basedir()) . $zip_to_replace_relative_path;
             if ($zip_to_replace_relative_path && file_exists($zip_to_replace_full_path)) {
                 get_wp_filesystem()->delete($zip_to_replace_full_path);
             }
         }
 
         // Move the ZIP to the target directory
-        $target_dir = trailingslashit(publisher_upload_basedir()) . 'plugins/' . $plugin_slug . '/' . sanitize_title($data['plugin_info']['normalized_version']) . '/';
+        $target_dir = trailingslashit(peak_publisher_upload_basedir()) . 'plugins/' . $plugin_slug . '/' . sanitize_title($data['plugin_info']['normalized_version']) . '/';
         wp_mkdir_p($target_dir);
         $target_zip = $target_dir . basename($zip_path);
         if (!get_wp_filesystem()->move($zip_path, $target_zip)) {
@@ -155,7 +155,7 @@ class UploadWorkflow {
 
         // Create pblsh_release post (child of plugin)
         $release_meta = [
-            '_pblsh_zip_path' => $this->rel_path($target_zip, publisher_upload_basedir()),
+            '_pblsh_zip_path' => $this->rel_path($target_zip, peak_publisher_upload_basedir()),
             '_pblsh_directory_content_hash' => $data['plugin_info']['content_hash'] ?? '',
         ];
         $release_post_data = [
@@ -222,7 +222,7 @@ class UploadWorkflow {
      */
     public function process(\WP_REST_Request $request): array {
         $phase = sanitize_text_field((string) ($request->get_param('phase') ?? 'upload_prepare'));
-        $settings = get_publisher_settings();
+        $settings = get_peak_publisher_settings();
 
         if ($phase === 'upload_prepare') {
             $files = $request->get_file_params();
@@ -333,7 +333,7 @@ class UploadWorkflow {
             $size_after_cleanup = $this->get_path_size($root);
             $entry_count_after_cleanup = $this->get_path_entry_count($root);
 
-            // If Publisher created the zip file in the browser itself, rename the zip file to the main file name of the plugin so that it has a meaningful name.
+            // If Peak Publisher created the zip file in the browser itself, rename the zip file to the main file name of the plugin so that it has a meaningful name.
             $built_in_browser = (string) ($cache['data']['original_zip']['built_in_browser'] ?? '');
             if ($built_in_browser && $main_file && !$has_top_level_folder) {
                 $new_zip_path = dirname($zip_path) . '/' . preg_replace('/\.php$/i', '', basename($main_file)) . '.zip';
@@ -483,14 +483,14 @@ class UploadWorkflow {
         $user_id = get_current_user_id();
 
         $subdir = '/tmp/' . $upload_id . '_user-' . $user_id;
-        $publisher_upload_dir = publisher_upload_dir();
+        $peak_publisher_upload_dir = peak_publisher_upload_dir();
         $this->tmp_upload_dir = [
-            'path' => $publisher_upload_dir['path'] . $subdir,
-            'url' => $publisher_upload_dir['url'] . $subdir,
+            'path' => $peak_publisher_upload_dir['path'] . $subdir,
+            'url' => $peak_publisher_upload_dir['url'] . $subdir,
             'subdir' => '',
-            'basedir' => $publisher_upload_dir['basedir'] . $subdir,
-            'baseurl' => $publisher_upload_dir['baseurl'] . $subdir,
-            'error' => $publisher_upload_dir['error'],
+            'basedir' => $peak_publisher_upload_dir['basedir'] . $subdir,
+            'baseurl' => $peak_publisher_upload_dir['baseurl'] . $subdir,
+            'error' => $peak_publisher_upload_dir['error'],
         ];
         $this->tmp_root = $this->tmp_upload_dir['path'] . '/';
         if (!file_exists($this->tmp_root)) {
@@ -586,7 +586,7 @@ class UploadWorkflow {
      * @return array List of matches with shape: [ ['path' => 'relative/path', 'type' => 'dir'|'file', 'bytes' => int, 'deleted' => bool], ... ]
      */
     private function find_workspace_artifacts(string $root): array {
-        $settings = get_publisher_settings();
+        $settings = get_peak_publisher_settings();
         $patterns = array_values(array_filter(array_map('strval', (array) ($settings['wordspace_artifacts_to_remove'] ?? []))));
         if (empty($patterns)) {
             return [];
@@ -805,7 +805,7 @@ class UploadWorkflow {
      * @return bool True if the top-level folder was fixed, false otherwise.
      */
     private function add_top_level_folder(string $working_dir, string $main_file): bool {
-        $settings = get_publisher_settings();
+        $settings = get_peak_publisher_settings();
         if (empty($settings['auto_add_top_level_folder'])) {
             return false;
         }

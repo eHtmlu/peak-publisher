@@ -16,26 +16,26 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
     const [validationResult, setValidationResult] = useState(null);
     const [filename, setFilename] = useState('');
     const [useDifferentCustomUpdateServer, setUseDifferentCustomUpdateServer] = useState(false);
-    const [usePublisherForNewUpdateServer, setUsePublisherForNewUpdateServer] = useState(false);
+    const [usePeakPublisherForNewUpdateServer, setUsePeakPublisherForNewUpdateServer] = useState(false);
     const [useWordPressOrgUpdateServer, setUseWordPressOrgUpdateServer] = useState(false);
     const [replaceRelease, setReplaceRelease] = useState(false);
     const [addWithoutTopLevelFolder, setAddWithoutTopLevelFolder] = useState(false);
     const [changePluginFileName, setChangePluginFileName] = useState(false);
     const [useUnexpectedPluginVersion, setUseUnexpectedPluginVersion] = useState(false);
     const [useOlderPluginVersion, setUseOlderPluginVersion] = useState(false);
-    const [useNotPublisherForNewUpdateServer, setUseNotPublisherForNewUpdateServer] = useState(false);
+    const [useNotPeakPublisherForNewUpdateServer, setUseNotPeakPublisherForNewUpdateServer] = useState(false);
     const [keepWorkspaceArtifacts, setKeepWorkspaceArtifacts] = useState(false);
     
     function resetResultDecisions() {
         setUseDifferentCustomUpdateServer(false);
-        setUsePublisherForNewUpdateServer(false);
+        setUsePeakPublisherForNewUpdateServer(false);
         setUseWordPressOrgUpdateServer(false);
         setReplaceRelease(false);
         setAddWithoutTopLevelFolder(false);
         setChangePluginFileName(false);
         setUseUnexpectedPluginVersion(false);
         setUseOlderPluginVersion(false);
-        setUseNotPublisherForNewUpdateServer(false);
+        setUseNotPeakPublisherForNewUpdateServer(false);
         setKeepWorkspaceArtifacts(false);
     }
 
@@ -392,7 +392,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             // Plugin file
             [
                 !previous_release && {
-                    title: __('Valid plugin file', 'publisher'),
+                    title: __('Valid plugin file', 'peak-publisher'),
                     type: 'ok',
                     desc: [
                         meta.plugin_info?.main_file
@@ -401,20 +401,20 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                 previous_release && [
                     // Expected plugin file
                     previous_release.plugin_basename === meta.plugin_info?.plugin_basename && {
-                        title: __('Expected plugin file', 'publisher'),
+                        title: __('Expected plugin file', 'peak-publisher'),
                         type: 'ok',
-                        desc: __('The plugin file name matches the previous release.', 'publisher'),
+                        desc: __('The plugin file name matches the previous release.', 'peak-publisher'),
                     },
                     // Unexpected plugin file
                     previous_release.plugin_basename !== meta.plugin_info?.plugin_basename && {
-                        title: __('Unexpected plugin file', 'publisher'),
+                        title: __('Unexpected plugin file', 'peak-publisher'),
                         type: changePluginFileName ? 'ok' : 'error',
                         desc: [
-                            sprintf(__('The uploaded release %s has the plugin file name %s which does not match the previous release %s with the plugin file name %s.', 'publisher'), pluginData.Version, meta.plugin_info?.plugin_basename.split('/').pop(), previous_release.version, previous_release.plugin_basename.split('/').pop()),
+                            sprintf(__('The uploaded release %s has the plugin file name %s which does not match the previous release %s with the plugin file name %s.', 'peak-publisher'), pluginData.Version, meta.plugin_info?.plugin_basename.split('/').pop(), previous_release.version, previous_release.plugin_basename.split('/').pop()),
                             createElement('br'),
                             createElement(CheckboxControl, {
                                 __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I want to change the plugin filename. I\'m aware that WordPress will interpret this as a different plugin, and that this is very risky and should be avoided if possible.', 'pblsh'),
+                                label: __('That\'s fine, I want to change the plugin filename. I\'m aware that WordPress will interpret this as a different plugin, and that this is very risky and should be avoided if possible.', 'peak-publisher'),
                                 checked: changePluginFileName,
                                 onChange: (value) => setChangePluginFileName(value),
                             }),
@@ -426,50 +426,50 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             // Plugin version number
             [
                 !pluginData.Version && {
-                    title: __('Missing version number', 'publisher'),
+                    title: __('Missing version number', 'peak-publisher'),
                     type: 'error',
-                    desc: __('You need to add a version number to your plugin file.', 'publisher')
+                    desc: __('You need to add a version number to your plugin file.', 'peak-publisher')
                 },
                 pluginData.Version && [
                     !existing_release && [
                         !previous_release && {
-                            title: __('Valid version number', 'publisher'),
+                            title: __('Valid version number', 'peak-publisher'),
                             type: 'ok',
                             desc: pluginData.Version
                         },
                         previous_release && [
                             // Expected version number
                             previous_release.normalized_version === latest_release.normalized_version && is_natural_successor && {
-                                title: __('Expected version number', 'publisher'),
+                                title: __('Expected version number', 'peak-publisher'),
                                 type: 'ok',
                                 desc: [
-                                    sprintf(__('Version %s, as expected after the latest release (%s).', 'publisher'), pluginData.Version, latest_release.version),
+                                    sprintf(__('Version %s, as expected after the latest release (%s).', 'peak-publisher'), pluginData.Version, latest_release.version),
                                 ]
                             },
                             // Unexpected version number
                             (previous_release.normalized_version !== latest_release.normalized_version || !is_natural_successor) && {
-                                title: __('Unexpected version number', 'publisher'),
+                                title: __('Unexpected version number', 'peak-publisher'),
                                 type: (previous_release.normalized_version === latest_release.normalized_version || useOlderPluginVersion) && (is_natural_successor || useUnexpectedPluginVersion) ? 'ok' : 'error',
                                 desc: [
                                     previous_release.normalized_version !== latest_release.normalized_version && [
-                                        latest_release.normalized_version !== next_release.normalized_version && sprintf(__('Releases with higher version numbers (%s to %s) already exist.', 'publisher'), next_release.version, latest_release.version),
-                                        latest_release.normalized_version === next_release.normalized_version && sprintf(__('A release with a higher version number (%s) already exists.', 'publisher'), latest_release.version),
+                                        latest_release.normalized_version !== next_release.normalized_version && sprintf(__('Releases with higher version numbers (%s to %s) already exist.', 'peak-publisher'), next_release.version, latest_release.version),
+                                        latest_release.normalized_version === next_release.normalized_version && sprintf(__('A release with a higher version number (%s) already exists.', 'peak-publisher'), latest_release.version),
                                         createElement('br'),
                                         createElement(CheckboxControl, {
                                             __nextHasNoMarginBottom: true,
-                                            label: __('That\'s fine, this release isn\'t meant to be the latest one.', 'pblsh'),
+                                            label: __('That\'s fine, this release isn\'t meant to be the latest one.', 'peak-publisher'),
                                             checked: useOlderPluginVersion,
                                             onChange: (value) => setUseOlderPluginVersion(value),
                                         }),
                                     ],
                                     !is_natural_successor && [
-                                        sprintf(__('%s is an unexpected successor to the previous release (%s).', 'publisher'), pluginData.Version, previous_release.version),
+                                        sprintf(__('%s is an unexpected successor to the previous release (%s).', 'peak-publisher'), pluginData.Version, previous_release.version),
                                         createElement('br'),
-                                        sprintf(__('Expected would be %s.', 'publisher'), natural_successors.join(', ')),
+                                        sprintf(__('Expected would be %s.', 'peak-publisher'), natural_successors.join(', ')),
                                         createElement('br'),
                                         createElement(CheckboxControl, {
                                             __nextHasNoMarginBottom: true,
-                                            label: sprintf(__('That\'s fine, I want to use the version number %s anyway.', 'pblsh'), pluginData.Version),
+                                            label: sprintf(__('That\'s fine, I want to use the version number %s anyway.', 'peak-publisher'), pluginData.Version),
                                             checked: useUnexpectedPluginVersion,
                                             onChange: (value) => setUseUnexpectedPluginVersion(value),
                                         }),
@@ -479,15 +479,15 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                         ]
                     ],
                     existing_release && {
-                        title: __('Version number already exists', 'publisher'),
+                        title: __('Version number already exists', 'peak-publisher'),
                         type: replaceRelease ? 'ok' : 'error',
                         desc: [
-                            sprintf(__('A release with the version number %s already exists for this plugin.', 'publisher'), pluginData.Version),
+                            sprintf(__('A release with the version number %s already exists for this plugin.', 'peak-publisher'), pluginData.Version),
                             createElement('br'),
                             //createElement('br'),
                             createElement(CheckboxControl, {
                                 __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I want to replace the existing release. I understand that this is not recommended if the existing release is or was already published.', 'pblsh'),
+                                label: __('That\'s fine, I want to replace the existing release. I understand that this is not recommended if the existing release is or was already published.', 'peak-publisher'),
                                 checked: replaceRelease,
                                 onChange: (value) => setReplaceRelease(value),
                             }),
@@ -500,21 +500,21 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             [
                 pluginData?.UpdateURI && [
                     pluginData?.UpdateURI === PblshData?.bootstrapUpdateURI && {
-                        title: __('Expected update URI', 'publisher'),
+                        title: __('Expected update URI', 'peak-publisher'),
                         type: 'ok',
                         desc: pluginData.UpdateURI
                     },
                     pluginData?.UpdateURI !== PblshData?.bootstrapUpdateURI && {
-                        title: __('Unexpected update URI', 'publisher'),
+                        title: __('Unexpected update URI', 'peak-publisher'),
                         type: useDifferentCustomUpdateServer ? 'ok' : 'error',
                         desc: [
-                            sprintf(__('The specified update URI is %s.', 'publisher'), pluginData.UpdateURI),
+                            sprintf(__('The specified update URI is %s.', 'peak-publisher'), pluginData.UpdateURI),
                             createElement('br'),
-                            sprintf(__('Expected would be %s.', 'publisher'), PblshData.bootstrapUpdateURI),
+                            sprintf(__('Expected would be %s.', 'peak-publisher'), PblshData.bootstrapUpdateURI),
                             createElement('br'),
                             createElement(CheckboxControl, {
                                 __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I will use a different update server for this plugin from now on.', 'pblsh'),
+                                label: __('That\'s fine, I will use a different update server for this plugin from now on.', 'peak-publisher'),
                                 checked: useDifferentCustomUpdateServer,
                                 onChange: (value) => setUseDifferentCustomUpdateServer(value),
                             }),
@@ -522,14 +522,14 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                     }
                 ],
                 !pluginData?.UpdateURI && {
-                    title: __('Missing update URI', 'publisher'),
+                    title: __('Missing update URI', 'peak-publisher'),
                     type: useWordPressOrgUpdateServer ? 'ok' : 'error',
                     desc: [
-                        __('You need to add a valid update URI to your plugin file.', 'publisher'),
+                        __('You need to add a valid update URI to your plugin file.', 'peak-publisher'),
                         createElement('br'),
                         createElement(CheckboxControl, {
                             __nextHasNoMarginBottom: true,
-                            label: __('That\'s fine, my new update server will be wordpress.org, so no update URI is needed.', 'pblsh'),
+                            label: __('That\'s fine, my new update server will be wordpress.org, so no update URI is needed.', 'peak-publisher'),
                             checked: useWordPressOrgUpdateServer,
                             onChange: (value) => setUseWordPressOrgUpdateServer(value),
                         }),
@@ -541,54 +541,54 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             [
                 meta.plugin_info?.bootstrap_file && [
                     !useDifferentCustomUpdateServer && !useWordPressOrgUpdateServer && {
-                        title: __('Expected bootstrap code', 'publisher'),
+                        title: __('Expected bootstrap code', 'peak-publisher'),
                         type: 'ok',
-                        desc: sprintf(__('Found in %s.', 'publisher'), meta.plugin_info?.bootstrap_file)
+                        desc: sprintf(__('Found in %s.', 'peak-publisher'), meta.plugin_info?.bootstrap_file)
                     },
                     useDifferentCustomUpdateServer && {
-                        title: __('Found bootstrap code', 'publisher'),
-                        type: usePublisherForNewUpdateServer ? 'ok' : 'error',
+                        title: __('Found bootstrap code', 'peak-publisher'),
+                        type: usePeakPublisherForNewUpdateServer ? 'ok' : 'error',
                         desc: [
-                            sprintf(__('Do you plan to use Publisher again for your new update server? Otherwise, you will need to remove the bootstrap code from %s.', 'publisher'), meta.plugin_info?.bootstrap_file),
+                            sprintf(__('Do you plan to use Peak Publisher again for your new update server? Otherwise, you will need to remove the bootstrap code from %s.', 'peak-publisher'), meta.plugin_info?.bootstrap_file),
                             createElement('br'),
                             createElement(CheckboxControl, {
                                 __nextHasNoMarginBottom: true,
-                                label: __('Yes, I will use Publisher again for my new update server.', 'publisher'),
-                                checked: usePublisherForNewUpdateServer,
-                                onChange: (value) => setUsePublisherForNewUpdateServer(value),
+                                label: __('Yes, I will use Peak Publisher again for my new update server.', 'peak-publisher'),
+                                checked: usePeakPublisherForNewUpdateServer,
+                                onChange: (value) => setUsePeakPublisherForNewUpdateServer(value),
                             })
                         ]
                     },
                     useWordPressOrgUpdateServer && {
-                        title: __('Bootstrap code must be removed', 'publisher'),
+                        title: __('Bootstrap code must be removed', 'peak-publisher'),
                         type: 'error',
-                        desc: sprintf(__('You need to remove the bootstrap code from %s since your new update server is wordpress.org.', 'publisher'), meta.plugin_info?.bootstrap_file)
+                        desc: sprintf(__('You need to remove the bootstrap code from %s since your new update server is wordpress.org.', 'peak-publisher'), meta.plugin_info?.bootstrap_file)
                     }
                 ],
                 !meta.plugin_info?.bootstrap_file && [
                     !useDifferentCustomUpdateServer && !useWordPressOrgUpdateServer && {
-                        title: __('Missing bootstrap code', 'publisher'),
+                        title: __('Missing bootstrap code', 'peak-publisher'),
                         type: 'error',
-                        desc: __('You need to add the bootstrap code to your plugin.', 'publisher')
+                        desc: __('You need to add the bootstrap code to your plugin.', 'peak-publisher')
                     },
                     useDifferentCustomUpdateServer && {
-                        title: __('Bootstrap code not found', 'publisher'),
-                        type: useNotPublisherForNewUpdateServer ? 'ok' : 'error',
+                        title: __('Bootstrap code not found', 'peak-publisher'),
+                        type: useNotPeakPublisherForNewUpdateServer ? 'ok' : 'error',
                         desc: [
-                            __('If you use Publisher again for your new update server, you will need to add the bootstrap code to your plugin.', 'publisher'),
+                            __('If you use Peak Publisher again for your new update server, you will need to add the bootstrap code to your plugin.', 'peak-publisher'),
                             createElement('br'),
                             createElement(CheckboxControl, {
                                 __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I will use something other than Publisher for my new update server.', 'pblsh'),
-                                checked: useNotPublisherForNewUpdateServer,
-                                onChange: (value) => setUseNotPublisherForNewUpdateServer(value),
+                                label: __('That\'s fine, I will use something other than Peak Publisher for my new update server.', 'peak-publisher'),
+                                checked: useNotPeakPublisherForNewUpdateServer,
+                                onChange: (value) => setUseNotPeakPublisherForNewUpdateServer(value),
                             }),
                         ]
                     },
                     useWordPressOrgUpdateServer && {
-                        title: __('Bootstrap code not found', 'publisher'),
+                        title: __('Bootstrap code not found', 'peak-publisher'),
                         type: 'ok',
-                        desc: __('This is as it should be if you plan to use wordpress.org as your new update server.', 'publisher')
+                        desc: __('This is as it should be if you plan to use wordpress.org as your new update server.', 'peak-publisher')
                     },
                 ]
             ],
@@ -596,25 +596,25 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             // Top-level folder
             [
                 (meta?.cleanup_info?.has_top_level_folder || meta?.cleanup_info?.fixed_top_level_folder) && {
-                    title: __('Top-level folder exists', 'publisher'),
+                    title: __('Top-level folder exists', 'peak-publisher'),
                     type: 'ok',
                     desc: [
-                        meta?.cleanup_info?.fixed_top_level_folder && __('It was added to your upload automatically as specified in the settings.', 'publisher'),
-                        !meta?.cleanup_info?.fixed_top_level_folder && __('Your upload has a top-level folder.', 'publisher'),
+                        meta?.cleanup_info?.fixed_top_level_folder && __('It was added to your upload automatically as specified in the settings.', 'peak-publisher'),
+                        !meta?.cleanup_info?.fixed_top_level_folder && __('Your upload has a top-level folder.', 'peak-publisher'),
                         createElement('br'),
-                        sprintf(__('The install folder will be %s.', 'publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
+                        sprintf(__('The install folder will be %s.', 'peak-publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
                     ]
                 },
                 !meta?.cleanup_info?.has_top_level_folder && !meta?.cleanup_info?.fixed_top_level_folder && {
-                    title: __('Top-level folder missing', 'publisher'),
+                    title: __('Top-level folder missing', 'peak-publisher'),
                     type: addWithoutTopLevelFolder ? 'ok' : 'error',
                     desc: [
-                        __('Your upload does not have a top-level folder.', 'publisher'),
+                        __('Your upload does not have a top-level folder.', 'peak-publisher'),
                         createElement('br'),
-                        sprintf(__('The install folder will be %s.', 'publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
+                        sprintf(__('The install folder will be %s.', 'peak-publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
                         createElement(CheckboxControl, {
                             __nextHasNoMarginBottom: true,
-                            label: __('That\'s fine, I want to add the release without a top-level folder.', 'pblsh'),
+                            label: __('That\'s fine, I want to add the release without a top-level folder.', 'peak-publisher'),
                             checked: addWithoutTopLevelFolder,
                             onChange: (value) => setAddWithoutTopLevelFolder(value),
                         }),
@@ -626,22 +626,22 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             [
                 // Nothing to remove
                 free_from_workspace_artifacts && {
-                    title: __('Free from workspace artifacts', 'publisher'),
+                    title: __('Free from workspace artifacts', 'peak-publisher'),
                     type: 'ok',
                     desc: [
-                        workspace_artifacts_count === 0 && sprintf(__('No files or folders from your system or development environment were found.', 'publisher')),
-                        workspace_artifacts_count > 0 && sprintf(__('%s in %s files and folders deleted as specified in the settings.', 'publisher'), workspace_artifacts_size, workspace_artifacts_count),
+                        workspace_artifacts_count === 0 && sprintf(__('No files or folders from your system or development environment were found.', 'peak-publisher')),
+                        workspace_artifacts_count > 0 && sprintf(__('%s in %s files and folders deleted as specified in the settings.', 'peak-publisher'), workspace_artifacts_size, workspace_artifacts_count),
                         createElement('br'),
-                        sprintf(__('The installed release will be %s in total with %s files and folders.', 'publisher'), formatBytes(meta?.cleanup_info?.size_after_cleanup), meta?.cleanup_info?.entry_count_after_cleanup),
+                        sprintf(__('The installed release will be %s in total with %s files and folders.', 'peak-publisher'), formatBytes(meta?.cleanup_info?.size_after_cleanup), meta?.cleanup_info?.entry_count_after_cleanup),
                     ],
                 },
                 // Removed files and folders
                 !free_from_workspace_artifacts && {
-                    title: __('Workspace artifacts found', 'publisher'),
+                    title: __('Workspace artifacts found', 'peak-publisher'),
                     type: keepWorkspaceArtifacts ? 'ok' : 'error',
                     desc: [
-                        settings.auto_remove_workspace_artifacts && __('The following artifacts could not be deleted automatically:', 'publisher'),
-                        !settings.auto_remove_workspace_artifacts && __('Your upload contains the following artifacts:', 'publisher'),
+                        settings.auto_remove_workspace_artifacts && __('The following artifacts could not be deleted automatically:', 'peak-publisher'),
+                        !settings.auto_remove_workspace_artifacts && __('Your upload contains the following artifacts:', 'peak-publisher'),
                         createElement('br'),
                         createElement('textarea', {
                             value: meta?.cleanup_info?.found_workspace_artifacts?.filter(item => !item.deleted).map(file => file.path).join('\n'),
@@ -655,15 +655,15 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                             },
                         }),
                         createElement('br'),
-                        sprintf(__('The artifacts are %s in total with %s files and folders.', 'publisher'), workspace_artifacts_not_deleted_size, workspace_artifacts_not_deleted_count),
+                        sprintf(__('The artifacts are %s in total with %s files and folders.', 'peak-publisher'), workspace_artifacts_not_deleted_size, workspace_artifacts_not_deleted_count),
                         createElement('br'),
                         createElement(CheckboxControl, {
                             __nextHasNoMarginBottom: true,
-                            label: __('That\'s fine, I want to keep the artifacts in the release.', 'pblsh'),
+                            label: __('That\'s fine, I want to keep the artifacts in the release.', 'peak-publisher'),
                             checked: keepWorkspaceArtifacts,
                             onChange: (value) => setKeepWorkspaceArtifacts(value),
                         }),
-                        sprintf(__('The installed release will be %s in total with %s files and folders.', 'publisher'), formatBytes(meta?.cleanup_info?.size_after_cleanup), meta?.cleanup_info?.entry_count_after_cleanup),
+                        sprintf(__('The installed release will be %s in total with %s files and folders.', 'peak-publisher'), formatBytes(meta?.cleanup_info?.size_after_cleanup), meta?.cleanup_info?.entry_count_after_cleanup),
                     ],
                 },
             ]
@@ -685,29 +685,29 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             createElement('header', { className: 'pblsh--upload-result__plugin' },
                 createElement('h2', { className: 'pblsh--upload-result__plugin__headline' },
                     meta.plugin_ok && pluginData.Name,
-                    !meta.plugin_ok && __('Not a plugin', 'publisher'),
+                    !meta.plugin_ok && __('Not a plugin', 'peak-publisher'),
                 ),
                 createElement('div', { className: 'pblsh--upload-result__plugin__desc' },
                     meta.plugin_ok && pluginData.Version,
-                    !meta.plugin_ok && __('No valid plugin main file could be found', 'publisher'),
+                    !meta.plugin_ok && __('No valid plugin main file could be found', 'peak-publisher'),
                 ),
                 createElement('div', { className: 'pblsh--upload-result__plugin__type' },
-                    !meta.plugin_ok && __('Invalid', 'publisher'),
-                    meta.plugin_ok && !meta.existing_plugin && __('New Plugin', 'publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_major_release && __('New Major Release', 'publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_minor_release && __('New Minor Release', 'publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_patch_release && __('New Patch Release', 'publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_unknown_release && __('New Release', 'publisher'),
-                    meta.plugin_ok && meta.existing_plugin && existing_release && __('Replace Existing Release', 'publisher'),
+                    !meta.plugin_ok && __('Invalid', 'peak-publisher'),
+                    meta.plugin_ok && !meta.existing_plugin && __('New Plugin', 'peak-publisher'),
+                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_major_release && __('New Major Release', 'peak-publisher'),
+                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_minor_release && __('New Minor Release', 'peak-publisher'),
+                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_patch_release && __('New Patch Release', 'peak-publisher'),
+                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_unknown_release && __('New Release', 'peak-publisher'),
+                    meta.plugin_ok && meta.existing_plugin && existing_release && __('Replace Existing Release', 'peak-publisher'),
                 ),
                 /* meta.plugin_ok && !meta.existing_plugin && createElement('div', null,
-                    sprintf(__('The plugin slug will be: %s', 'publisher'), meta.plugin_info?.plugin_slug),
+                    sprintf(__('The plugin slug will be: %s', 'peak-publisher'), meta.plugin_info?.plugin_slug),
                     createElement('br'),
-                    sprintf(__('The plugin file name will be: %s', 'publisher'), meta.plugin_info?.plugin_basename.split('/').pop()),
+                    sprintf(__('The plugin file name will be: %s', 'peak-publisher'), meta.plugin_info?.plugin_basename.split('/').pop()),
                     createElement('br'),
-                    sprintf(__('The plugin folder name will be: %s', 'publisher'), meta.plugin_info?.plugin_basename.split('/')[0]),
+                    sprintf(__('The plugin folder name will be: %s', 'peak-publisher'), meta.plugin_info?.plugin_basename.split('/')[0]),
                     createElement('br'),
-                    sprintf(__('The plugin install path will be: %s', 'publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
+                    sprintf(__('The plugin install path will be: %s', 'peak-publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
                 ), */
             ),
             meta.plugin_ok && createElement('div', { className: 'pblsh--upload-result__checks' },
@@ -742,7 +742,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                         }
                     },
                     __next40pxDefaultSize: true,
-                }, __('Discard', 'publisher')),
+                }, __('Discard', 'peak-publisher')),
                 meta.plugin_ok && createElement(Button,
                     {
                         isPrimary: true,
@@ -751,12 +751,12 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                         onClick: () => finalizeCreation(upload_id),
                         __next40pxDefaultSize: true,
                     },
-                    !meta.existing_plugin && __('Add Plugin', 'publisher'),
-                    meta.existing_plugin && !existing_release && is_new_major_release && __('Add Major Release', 'publisher'),
-                    meta.existing_plugin && !existing_release && is_new_minor_release && __('Add Minor Release', 'publisher'),
-                    meta.existing_plugin && !existing_release && is_new_patch_release && __('Add Patch Release', 'publisher'),
-                    meta.existing_plugin && !existing_release && is_new_unknown_release && __('Add Release', 'publisher'),
-                    meta.existing_plugin && existing_release && __('Replace Existing Release', 'publisher'),
+                    !meta.existing_plugin && __('Add Plugin', 'peak-publisher'),
+                    meta.existing_plugin && !existing_release && is_new_major_release && __('Add Major Release', 'peak-publisher'),
+                    meta.existing_plugin && !existing_release && is_new_minor_release && __('Add Minor Release', 'peak-publisher'),
+                    meta.existing_plugin && !existing_release && is_new_patch_release && __('Add Patch Release', 'peak-publisher'),
+                    meta.existing_plugin && !existing_release && is_new_unknown_release && __('Add Release', 'peak-publisher'),
+                    meta.existing_plugin && existing_release && __('Replace Existing Release', 'peak-publisher'),
                 ),
             ),
         );
@@ -772,7 +772,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             createElement('div', { className: 'pblsh--overlay__border' }),
             createElement('div', { className: 'pblsh--overlay__hint' },
                 getSvgIcon('cloud_upload', { size: 36 }),
-                createElement('div', null, __('Drop always anywhere in the Publisher to upload a new plugin or release', 'publisher')),
+                createElement('div', null, __('Drop always anywhere in the Peak Publisher to upload a new plugin or release', 'peak-publisher')),
             ),
         ),
         // Hidden input is always available for programmatic picker
@@ -792,21 +792,21 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         zipProgress !== false && createElement('div', { className: 'pblsh--progress' },
             filename && createElement('div', { className: 'pblsh--file-info' }, filename),
             createElement('div', { className: 'pblsh--progress__bar', style: { '--percentage': zipProgress + '%' } }),
-            createElement('div', { className: 'pblsh--progress__label' }, __('creating zip …', 'publisher'), ' ', Math.floor(zipProgress), '%'),
+            createElement('div', { className: 'pblsh--progress__label' }, __('creating zip …', 'peak-publisher'), ' ', Math.floor(zipProgress), '%'),
         ),
         uploadProgress !== false && createElement('div', { className: 'pblsh--progress' },
             filename && createElement('div', { className: 'pblsh--file-info' }, filename),
             createElement('div', { className: 'pblsh--progress__bar', style: { '--percentage': uploadProgress + '%' } }),
-            createElement('div', { className: 'pblsh--progress__label' }, __('uploading …', 'publisher'), ' ', Math.floor(uploadProgress), '%'),
+            createElement('div', { className: 'pblsh--progress__label' }, __('uploading …', 'peak-publisher'), ' ', Math.floor(uploadProgress), '%'),
         ),
         isProcessing && createElement('div', { className: 'pblsh--processing' },
             createElement('div', { className: 'pblsh--loading__spinner' }),
             createElement('div', { className: 'pblsh--processing__text' }, (
-                processPhase === 'upload_prepare' ? __('validating upload …', 'publisher') :
-                processPhase === 'unpack' ? __('unpacking data …', 'publisher') :
-                processPhase === 'analyze' ? __('analyzing data …', 'publisher') :
-                processPhase === 'rebuild_zip' ? __('rebuilding zip …', 'publisher') :
-                __('loading results …', 'publisher')
+                processPhase === 'upload_prepare' ? __('validating upload …', 'peak-publisher') :
+                processPhase === 'unpack' ? __('unpacking data …', 'peak-publisher') :
+                processPhase === 'analyze' ? __('analyzing data …', 'peak-publisher') :
+                processPhase === 'rebuild_zip' ? __('rebuilding zip …', 'peak-publisher') :
+                __('loading results …', 'peak-publisher')
             )),
         ),
     );

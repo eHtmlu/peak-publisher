@@ -101,12 +101,12 @@ class AdminAPI {
 
         register_rest_route(self::NAMESPACE, '/admin/settings', [
             'methods' => 'GET',
-            'callback' => [$this, 'get_publisher_settings_rest'],
+            'callback' => [$this, 'get_peak_publisher_settings_rest'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
         register_rest_route(self::NAMESPACE, '/admin/settings', [
             'methods' => 'POST',
-            'callback' => [$this, 'save_settings_rest'],
+            'callback' => [$this, 'save_peak_publisher_settings_rest'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
     }
@@ -248,7 +248,7 @@ class AdminAPI {
 
         $zip_rel = (string) get_post_meta($release->ID, '_pblsh_zip_path', true);
         if ($zip_rel !== '') {
-            $zip_abs = trailingslashit(publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
+            $zip_abs = trailingslashit(peak_publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
             if (file_exists($zip_abs)) {
                 if (get_wp_filesystem()) {
                     get_wp_filesystem()->delete($zip_abs, false);
@@ -259,7 +259,7 @@ class AdminAPI {
         }
 
         // Remove all empty folders from the upload directory
-        remove_empty_folders(publisher_upload_basedir());
+        remove_empty_folders(peak_publisher_upload_basedir());
 
         wp_delete_post($release->ID, true);
         return [ 'status' => 'ok' ];
@@ -279,7 +279,7 @@ class AdminAPI {
         if ($zip_rel === '') {
             return new \WP_Error('no_file', 'File not found', ['status' => 404]);
         }
-        $zip_abs = trailingslashit(publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
+        $zip_abs = trailingslashit(peak_publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
         if (!file_exists($zip_abs) || !is_readable($zip_abs)) {
             return new \WP_Error('no_file', 'File not found', ['status' => 404]);
         }
@@ -350,7 +350,7 @@ class AdminAPI {
         foreach ($releases as $release_id) {
             $zip_rel = (string) get_post_meta($release_id, '_pblsh_zip_path', true);
             if ($zip_rel !== '') {
-                $zip_abs = trailingslashit(publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
+                $zip_abs = trailingslashit(peak_publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
                 if (file_exists($zip_abs)) {
                     if (get_wp_filesystem()) {
                         get_wp_filesystem()->delete($zip_abs, false);
@@ -363,7 +363,7 @@ class AdminAPI {
         }
 
         // Remove all empty folders from the upload directory
-        remove_empty_folders(publisher_upload_basedir());
+        remove_empty_folders(peak_publisher_upload_basedir());
 
         // Delete the plugin post itself
         wp_delete_post($plugin->ID, true);
@@ -420,15 +420,15 @@ class AdminAPI {
         return $workflow->discard_upload($request);
     }
 
-    public function get_publisher_settings_rest(): array {
-        return get_publisher_settings();
+    public function get_peak_publisher_settings_rest(): array {
+        return get_peak_publisher_settings();
     }
 
-    public function save_settings_rest(\WP_REST_Request $request): array {
+    public function save_peak_publisher_settings_rest(\WP_REST_Request $request): array {
         $params = $request->get_json_params();
         if (!is_array($params)) { $params = []; }
-        update_settings($params);
-        return get_publisher_settings();
+        update_peak_publisher_settings($params);
+        return get_peak_publisher_settings();
     }
 }
 

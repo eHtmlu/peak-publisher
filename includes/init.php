@@ -22,12 +22,6 @@ if (is_standalone()) {
         }
     });
 
-    // Prevent new bundled themes from being installed during core updates
-    if (!defined('CORE_UPGRADE_SKIP_NEW_BUNDLED')) {
-        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- This is the only allowed and regular way in WordPress to disable new bundled themes during core updates. This constant is NOT a plugin specific constant, therefore it should not be prefixed.
-        define('CORE_UPGRADE_SKIP_NEW_BUNDLED', true);
-    }
-
     // Redirect to Peak Publisher on login
     add_action('load-index.php', function() {
         if ( defined('DOING_AJAX') && DOING_AJAX ) return;

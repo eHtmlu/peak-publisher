@@ -13,7 +13,7 @@
  * Text Domain: peak-publisher
  */
 
-namespace PeakPublisher;
+namespace Pblsh;
 
 defined('ABSPATH') || exit;
 

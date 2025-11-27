@@ -295,6 +295,8 @@ class PublicAPI {
 
         $filename = basename($zip_abs);
         nocache_headers();
+        $filename = sanitize_file_name($filename);
+        header('X-Content-Type-Options: nosniff');
         header('Content-Description: File Transfer');
         header('Content-Type: application/zip');
         header('Content-Disposition: attachment; filename="' . $filename . '"');

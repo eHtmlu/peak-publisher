@@ -1,11 +1,3 @@
-<?php
-
-// The code below is just the bootstrap code intended to be inserted into the hosted plugins.
-// Do not remove this exit statement because this file is NOT intended to be executed in this context.
-exit;
-
-
-/*********************** BOOTSTRAP CODE START ***********************/
 /**
  * Peak Publisher Bootstrap Code basicV1
  * Keep the code as it is, as it is optimized for several requirements.
@@ -62,5 +54,3 @@ add_action('plugin_loaded', function($plugin_full_path) {
         return empty($response) ? $false : (object) $response;
     }, 9, 3);
 }, 10, 1);
-/*********************** BOOTSTRAP CODE END ***********************/
-

@@ -30,10 +30,8 @@ function get_update_uri(): string {
  * Gets the embed code.
  */
 function get_bootstrap_code(): string {
-    $file_content = file_get_contents(PBLSH_PLUGIN_DIR . 'includes/bootstrap-codes/basicV1.php');
-    preg_match('/\/\*+ BOOTSTRAP CODE START \*+\/\s*(.*?)\s*\/\*+ BOOTSTRAP CODE END \*+\//s', $file_content, $matches);
-    $code = $matches[1] ?? '';
-    return $code;
+    $code = @file_get_contents(PBLSH_PLUGIN_DIR . 'assets/bootstrap-codes/basicV1.php.txt');
+    return is_string($code) ? $code : '';
 }
 
 

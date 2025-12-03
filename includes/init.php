@@ -26,7 +26,7 @@ if (is_standalone()) {
     add_action('load-index.php', function() {
         if ( defined('DOING_AJAX') && DOING_AJAX ) return;
         if ( ! current_user_can('read') ) return;
-        wp_safe_redirect( admin_url('admin.php?page=pblsh') );
+        wp_safe_redirect( admin_url('admin.php?page=pblsh-peak-publisher') );
         exit;
     });
 

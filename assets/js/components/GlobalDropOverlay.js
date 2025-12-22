@@ -1,6 +1,7 @@
 // GlobalDropOverlay Component - handles app-wide drag & drop upload
 lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) => {
     const { __ } = wp.i18n;
+    const sprintf = wp.i18n.sprintf ?? window.sprintf;
     const { useState, useEffect, useRef, createElement } = wp.element;
     const { Button, CheckboxControl } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;

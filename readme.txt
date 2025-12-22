@@ -6,7 +6,7 @@ Contributors: eHtmlu
 Donate link: https://www.paypal.com/donate/?hosted_button_id=2G6L8NWVXZ4T4
 Tags: publish, plugins, self-hosted, updates, server
 Requires at least: 5.8
-Requires PHP: 7.4
+Requires PHP: 8.1
 Tested up to: 6.9
 Stable tag: 1.0.1
 License: GPLv2 or later

@@ -5,7 +5,7 @@
  * Description: The easiest way to self-host, manage and publish your own custom plugins.
  * Version: 1.0.1
  * Requires at least: 5.8
- * Requires PHP: 7.4
+ * Requires PHP: 8.1
  * Author: ehtmlu
  * Author URI: https://ehtmlu.com/
  * License: GPL v2 or later

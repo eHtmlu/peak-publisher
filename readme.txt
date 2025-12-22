@@ -1,4 +1,7 @@
 === Peak Publisher ===
+Plugin Name: Peak Publisher
+Author: eHtmlu
+Author URI: https://www.wppeak.com/
 Contributors: eHtmlu
 Donate link: https://www.paypal.com/donate/?hosted_button_id=2G6L8NWVXZ4T4
 Tags: publish, plugins, self-hosted, updates, server

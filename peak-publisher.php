@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Peak Publisher
  * Description: The easiest way to self-host, manage and publish your own custom plugins.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: ehtmlu

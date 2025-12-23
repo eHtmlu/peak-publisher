@@ -41,12 +41,13 @@ Packages are stored in a private, server-protected directory with no direct web 
 
 == HOW IT WORKS ==
 
-1. **Install Peak Publisher** on a dedicated WordPress site (recommended)\nor any site you control.\n
-2. **Follow the "Add New Plugin" flow**\nadd the **`Update URI`** header and the bootstrap code to your plugin.\n
-3. **Upload your plugin**\ndrag & drop the zipped plugin or the plugin folder.\n
-4. **Peak Publisher validates your upload**\nand shows you the validation result.\n
-5. **Click "Add new plugin"**\nto finish the process.\n
-6. **Drop your next release with increased version number**\nonce you have one ready.\n
+1. **Install Peak Publisher** on a dedicated WordPress site (recommended)
+   or any site you control.
+2. **Follow the "Add New Plugin" flow** add the **`Update URI`** header and the bootstrap code to your plugin.
+3. **Upload your plugin** drag & drop the zipped plugin or the plugin folder.
+4. **Peak Publisher validates your upload** and shows you the validation result.
+5. **Click "Add new plugin"** to finish the process.
+6. **Drop your next release with increased version number** once you have one ready.
 
 == WHO IS IT FOR? ==
 

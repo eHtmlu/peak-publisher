@@ -65,6 +65,25 @@ Packages are stored in a private, server-protected directory with no direct web 
 
 Peak Publisher does not collect personal data, does not track usage, and does not use third‑party services. All files are stored on your server in a protected directory. 
 
+== Screenshots ==
+
+1. A fresh installation of Peak Publisher looks like this.
+2. Settings dialog (General): We recommend using standalone mode, which you can activate here.
+3. Settings dialog (Uploads): By default, your uploads are cleaned up. We recommended keeping this settings.
+4. Settings dialog (Security): Here you can restrict access to your plugins to specific IP addresses.
+5. Standalone mode deactivates several admin menu items as well as the entire front end.
+6. When you click on the "Add New Plugin" button, you will see this first step, which instructs you to add the required plugin headers.
+7. The second step instructs you to add the small bootstrap code to your plugin, which checks for updates.
+8. Once you have added the headers and bootstrap code, you can simply drop the plugin folder into Peak Publisher.
+9. For large plugins, the progress bar helps you track the status of the upload.
+10. After uploading, the plugin is automatically analysed and cleaned up if necessary.
+11. Once all steps are complete, you will see whether everything is correct.
+12. Once the new plugin has been added, the plugin's details page is displayed.
+13. The plugin will now also be displayed in the overview of all plugins.
+14. To upload a new plugin or a new plugin version, simply drag a plugin folder into Peak Publisher.
+15. Peak Publisher automatically recognises whether a new upload is a new plugin or a new version of an existing plugin.
+16. All releases are listed in the plugin's details view.
+
 == Frequently Asked Questions ==
 
 = Does this replace wordpress.org? =

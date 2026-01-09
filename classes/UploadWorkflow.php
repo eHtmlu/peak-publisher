@@ -225,6 +225,10 @@ class UploadWorkflow {
         $settings = get_peak_publisher_settings();
 
         if ($phase === 'upload_prepare') {
+
+            // cleanup temporary uploads before starting a new upload
+            maybe_cleanup_tmp_uploads();
+
             $files = $request->get_file_params();
             if (empty($files['file']) || !is_array($files['file'])) {
                 return [

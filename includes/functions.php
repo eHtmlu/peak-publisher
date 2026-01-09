@@ -180,6 +180,70 @@ function remove_empty_folders(string $dir): void {
 
 
 /**
+ * Opportunistically cleans the temporary upload directory.
+ *
+ * Scope:
+ * - Only directories that match our temp naming scheme:
+ *   YYYYMMDD-HHMMSS_[A-Za-z0-9]{8}_user-{ID}[_deleted-{UNIX}-[A-Za-z0-9]+]
+ *
+ * Removes:
+ * - Matching directories that were marked as deleted (suffix "_deleted-...").
+ * - Matching directories older than 24 hours (derived from the timestamp prefix).
+ *
+ * Safe to call during user-triggered requests; ignores unexpected files/folders.
+ */
+function maybe_cleanup_tmp_uploads(): void {
+    $base = peak_publisher_upload_basedir() . '/tmp';
+    if (!is_dir($base) || !is_readable($base)) {
+        return;
+    }
+
+    $now = time();
+    $ttl = 24 * 60 * 60;
+    $fs = get_wp_filesystem();
+
+    try {
+        $dir = new \DirectoryIterator($base);
+    } catch (\Throwable $e) {
+        return;
+    }
+
+    foreach ($dir as $entry) {
+        if ($entry->isDot()) {
+            continue;
+        }
+        if ($entry->isDir()) {
+            $name = $entry->getFilename();
+            $path = $entry->getPathname();
+            // Strictly match our temp folder pattern:
+            //   {YYYYMMDD-HHMMSS}_{RANDOM8}_user-{USERID}[_deleted-{UNIX}-{RANDOM}]
+            $match = [];
+            $matched = (bool) preg_match(
+                '/^(?P<stamp>\d{8}-\d{6})_(?P<rand>[A-Za-z0-9]{8})_user-\d+(?P<deleted>_deleted-\d+-[A-Za-z0-9]+)?$/',
+                $name,
+                $match
+            );
+            if ($matched) {
+                $created_ts = null;
+                $dt = \DateTimeImmutable::createFromFormat('Ymd-His', $match['stamp'], new \DateTimeZone('UTC'));
+                if ($dt instanceof \DateTimeImmutable) {
+                    $created_ts = $dt->getTimestamp();
+                }
+                $is_marked_deleted = !empty($match['deleted']);
+                $is_older_than_ttl = ($created_ts !== null) ? (($now - $created_ts) > $ttl) : false;
+                if ($is_marked_deleted || $is_older_than_ttl) {
+                    // recursive delete; ignore failures
+                    $fs->delete(trailingslashit($path), true);
+                }
+            }
+            continue;
+        }
+        continue;
+    }
+}
+
+
+/**
  * Normalizes a version number.
  */
 function normalize_version_number(string $version): string {

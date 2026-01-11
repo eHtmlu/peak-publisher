@@ -14,6 +14,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         auto_remove_workspace_artifacts: false,
         wordspace_artifacts_to_remove: [],
         ip_whitelist: [],
+        count_plugin_installations: false,
     });
     const [currentSection, setCurrentSection] = useState('general');
 
@@ -29,6 +30,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                     auto_remove_workspace_artifacts: data.auto_remove_workspace_artifacts || false,
                     wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(data.wordspace_artifacts_to_remove) ? data.wordspace_artifacts_to_remove : []),
                     ip_whitelist: getTextareaFromList(Array.isArray(data.ip_whitelist) ? data.ip_whitelist : []),
+                    count_plugin_installations: data.count_plugin_installations || false,
                 });
             } catch (e) {
                 showAlert(e.message, 'error');
@@ -63,6 +65,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 auto_remove_workspace_artifacts: settings.auto_remove_workspace_artifacts || false,
                 wordspace_artifacts_to_remove: normalizeListFromTextarea(settings.wordspace_artifacts_to_remove),
                 ip_whitelist: normalizeListFromTextarea(settings.ip_whitelist),
+                count_plugin_installations: settings.count_plugin_installations || false,
             };
             await saveSettings(payload);
             if (typeof onClose === 'function') onClose();
@@ -80,6 +83,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
     }
     const sections = [
         { id: 'general', title: __('General', 'peak-publisher'), icon: 'cog' },
+        { id: 'analytics', title: __('Analytics', 'peak-publisher'), icon: 'chart_line' },
         { id: 'uploads', title: __('Uploads', 'peak-publisher'), icon: 'cloud_upload' },
         { id: 'security', title: __('Security', 'peak-publisher'), icon: 'security' },
     ];
@@ -100,6 +104,24 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                             __next40pxDefaultSize: true,
                         }),
                         createElement('p', null, createElement('strong', null, __('Peak Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Peak Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'peak-publisher'))),
+                    ),
+                ),
+            );
+        }
+        if (currentSection === 'analytics') {
+            return createElement(wp.element.Fragment, null,
+                createElement('section', { className: 'pblsh--settings--main__section' },
+                    createElement('h2', null, __('Analytics', 'peak-publisher')),
+                    createElement('div', { className: 'pblsh--settings--main__section-content' },
+                        createElement(ToggleControl, {
+                            label: __('Count installations', 'peak-publisher'),
+                            help: [
+                                __('Counts unique plugin installations based on update checks. For technical reasons, there is always a delay of up to 24 hours in the displayed number of installations.', 'peak-publisher'),
+                            ],
+                            checked: !!settings.count_plugin_installations,
+                            onChange: (val) => setField('count_plugin_installations', val),
+                            __next40pxDefaultSize: true,
+                        }),
                     ),
                 ),
             );

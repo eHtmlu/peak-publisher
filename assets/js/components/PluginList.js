@@ -34,6 +34,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                             createElement('th', { className: 'pblsh--table__name-header' }, __('Plugin Name', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__slug-header' }, __('Slug', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Latest Version', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher'))
                         )
                     ),
@@ -77,6 +78,9 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                 ),
                                 createElement('td', { className: 'pblsh--table__version-cell' },
                                     plugin.version
+                                ),
+                                createElement('td', { className: 'pblsh--table__installations-cell' },
+                                    String(plugin.installations_count || 0)
                                 ),
                                 createElement('td', { className: 'pblsh--table__actions-cell' },
                                     createElement('div', { className: 'pblsh--table__actions' },

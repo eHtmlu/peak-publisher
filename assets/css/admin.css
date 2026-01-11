@@ -891,6 +891,15 @@
     max-width: 1px;
 }
 
+/* Installations Column */
+.pblsh--table__installations-header {
+    width: 6.25rem; /* 100px */
+}
+
+.pblsh--table__installations-cell {
+    width: 6.25rem; /* 100px */
+}
+
 /* Status Column */
 .pblsh--table__status-header {
     width: 6.25rem; /* 100px */

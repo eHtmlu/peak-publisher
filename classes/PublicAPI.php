@@ -316,11 +316,13 @@ class PublicAPI {
             return new \WP_Error('invalid_parameters', 'Invalid parameters', ['status' => 400]);
         }
 
+        $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
+
         $results = [
             'plugins' => [],
             'translations' => [],
         ];
-        foreach ($params_plugins['plugins'] as $plugin_basename => $plugin_data) {
+        foreach ($params_plugins['plugins'] as $plugin_basename => $plugin_payload) {
             $slug = explode('/', $plugin_basename, 2)[0];
             $plugin_infos = $this->get_plugin_infos($slug);
             if (empty($plugin_infos)) {
@@ -333,6 +335,10 @@ class PublicAPI {
             $plugin_data = $release_data['plugin_data'];
 
             $requires_plugins = (array) ($plugin_data['RequiresPlugins'] ? array_map('trim', explode(',', $plugin_data['RequiresPlugins'])) : []);
+
+            // Record installation ping (only if a site URL could be extracted)
+            $client_installed_version = (string) ($plugin_payload['Version'] ?? '');
+            record_plugin_installation((int) $plugin->ID, (string) $user_agent, (string) $client_installed_version);
             
             $results['plugins'][$plugin_basename] = array_merge(
                 ['slug' => $plugin->post_name],

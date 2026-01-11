@@ -55,6 +55,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Latest Release', 'peak-publisher')),
                                 createElement('div', { className: 'pblsh--plugin-grid__value' }, safe(pluginData?.version) || '—')
                             ),
+                            createElement('div', { className: 'pblsh--plugin-grid__item' },
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String(pluginData?.installations_count || 0))
+                            ),
                         )
                     )
                 )
@@ -76,13 +80,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
                             createElement('th', null, __('Date', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher')),
                         ),
                     ),
                     createElement('tbody', null,
                         releases.length === 0
                             ? createElement('tr', null,
-                                createElement('td', { colSpan: 4 }, __('No releases yet.', 'peak-publisher')),
+                                createElement('td', { colSpan: 5 }, __('No releases yet.', 'peak-publisher')),
                             )
                             : releases.map((rel) =>
                                 createElement('tr', { key: String(rel.id) },
@@ -105,6 +110,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     ),
                                     createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.title)),
                                     createElement('td', null, safe(rel.date)),
+                                    createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
                                     createElement('td', { className: 'pblsh--table__actions-cell' },
                                         createElement('div', { className: 'pblsh--table__actions' },
                                             (() => {

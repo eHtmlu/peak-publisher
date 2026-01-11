@@ -168,6 +168,7 @@ class AdminAPI {
                 'version' => $latest_version,
                 'status' => $plugin_post->post_status,
                 'count_of_releases' => $count_of_releases,
+                'installations_count' => get_plugin_installations_count((int) $plugin_post->ID),
             ];
         }
         return $out;
@@ -197,17 +198,17 @@ class AdminAPI {
         $latest_normalized = '';
 
         foreach ($releases_query->posts as $release) {
+            $rel_data = json_decode((string) $release->post_content, true) ?? [];
+            $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
+            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
             $releases[] = [
                 'id' => $release->ID,
-                'title' => $release->post_title,
+                'title' => $version,
                 'status' => $release->post_status,
                 'date' => $release->post_date,
                 'download_url' => rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
+                'installations_count' => $normalized !== '' ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0,
             ];
-
-            $rel_data = json_decode((string) ($release->post_content ?? ''), true);
-            $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
             if ($normalized !== '') {
                 if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
                     $latest_normalized = $normalized;
@@ -233,6 +234,7 @@ class AdminAPI {
             'version' => $latest_version,
             'status' => $post->post_status,
             'releases' => $releases,
+            'installations_count' => get_plugin_installations_count((int) $post->ID),
         ];
     }
 

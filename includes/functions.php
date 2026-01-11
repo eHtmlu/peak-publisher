@@ -43,6 +43,7 @@ function get_peak_publisher_settings(): array {
         'standalone_mode' => false,
         'auto_add_top_level_folder' => true,
         'auto_remove_workspace_artifacts' => true,
+        'count_plugin_installations' => true,
         'wordspace_artifacts_to_remove' => [
             '.git',
             '.gitignore',
@@ -92,6 +93,7 @@ function sanitize_peak_publisher_settings(array $settings): array {
     $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
     $out['auto_add_top_level_folder'] = (bool) ($settings['auto_add_top_level_folder'] ?? true);
     $out['auto_remove_workspace_artifacts'] = (bool) ($settings['auto_remove_workspace_artifacts'] ?? true);
+    $out['count_plugin_installations'] = (bool) ($settings['count_plugin_installations'] ?? true);
     $wordspace_artifacts_to_remove = $settings['wordspace_artifacts_to_remove'] ?? [];
     if (!is_array($wordspace_artifacts_to_remove)) {
         $wordspace_artifacts_to_remove = [];
@@ -111,6 +113,117 @@ function sanitize_peak_publisher_settings(array $settings): array {
     return $out;
 }
 
+ 
+/**
+ * Returns a stable salt.
+ */
+function get_secret_salt(): string {
+    $salt = get_option('pblsh_secret_salt');
+    if (!is_string($salt) || $salt === '') {
+        $salt = wp_generate_password(64, true, true);
+        update_option('pblsh_secret_salt', $salt, false);
+    }
+    return $salt;
+}
+
+/**
+ * Records an installation occurrence for the given plugin.
+ */
+function record_plugin_installation(int $plugin_post_id, string $user_agent, string $installed_version = ''): void {
+    if ($plugin_post_id <= 0) {
+        return;
+    }
+    $settings = get_peak_publisher_settings();
+    if (empty($settings['count_plugin_installations'])) {
+        return;
+    }
+    $expected_user_agent_pattern = '#^PeakPublisherBootstrapCode/[^;]+; WordPress/[^;]+; https?://[^;]+(;.*)?$#';
+    if (empty($user_agent) || !preg_match($expected_user_agent_pattern, $user_agent)) {
+        return;
+    }
+
+    // Generate a short key based on the user agent and the secret salt.
+    $key = substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|' . $user_agent, true))), 0, 14);
+
+    // Update the installations list.
+    $list = get_plugin_installations_list($plugin_post_id);
+    $now = time();
+    $installed_version_normalized = $installed_version !== '' ? normalize_version_number($installed_version) : '';
+    if (!isset($list[$key]) || !is_array($list[$key])) {
+        $list[$key] = [
+            'first_seen' => $now,
+            'last_seen' => $now,
+            'count' => 1,
+            'last_version' => $installed_version,
+            'last_version_normalized' => $installed_version_normalized,
+        ];
+    } else {
+        $list[$key]['last_seen'] = $now;
+        $list[$key]['count'] = (int) ($list[$key]['count'] ?? 0) + 1;
+        if ($installed_version !== '') {
+            $list[$key]['last_version'] = $installed_version;
+            $list[$key]['last_version_normalized'] = $installed_version_normalized;
+        }
+    }
+    set_plugin_installations_list($plugin_post_id, $list);
+}
+
+/**
+ * Returns unique installation count for a plugin.
+ */
+function get_plugin_installations_count(int $plugin_post_id): int {
+    $list = get_plugin_installations_list($plugin_post_id);
+    return count($list);
+}
+
+/**
+ * Returns number of installations currently on a specific normalized version.
+ */
+function get_plugin_installations_count_by_version(int $plugin_post_id, string $normalized_version): int {
+    $normalized_version = normalize_version_number($normalized_version);
+    if ($normalized_version === '') {
+        return 0;
+    }
+    $list = get_plugin_installations_list($plugin_post_id);
+    $count = 0;
+    foreach ($list as $row) {
+        $v = (string) ($row['last_version_normalized'] ?? '');
+        if ($v !== '' && $v === $normalized_version) {
+            $count++;
+        }
+    }
+    return $count;
+}
+
+/**
+ * Returns the installations list (filtered by default to active within 24h).
+ */
+function get_plugin_installations_list(int $plugin_post_id): array {
+    $meta_key = '_pblsh_installations';
+    $list = get_post_meta($plugin_post_id, $meta_key, true);
+    if (!is_array($list) || empty($list)) { return []; }
+    $ttl = defined('DAY_IN_SECONDS') ? (int) DAY_IN_SECONDS : 24 * 60 * 60;
+    $now = time();
+    $out = [];
+    foreach ($list as $k => $row) {
+        $last = (int) ($row['last_seen'] ?? 0);
+        if ($last > 0 && ($now - $last) > $ttl) {
+            continue;
+        }
+        $out[$k] = $row;
+    }
+    if (count($out) !== count($list)) { // if some installations are stale, update the list
+        update_post_meta($plugin_post_id, $meta_key, $out);
+    }
+    return $out;
+}
+
+/**
+ * Persists the installations list.
+ */
+function set_plugin_installations_list(int $plugin_post_id, array $list): void {
+    update_post_meta($plugin_post_id, '_pblsh_installations', $list);
+}
  
 /**
  * Ensures the upload directory is ready and secured.

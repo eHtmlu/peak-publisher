@@ -59,7 +59,11 @@ class AdminUI {
         // Define all scripts to enqueue (slugs will be auto-generated from file paths)
         $script_files = [
             'utils.js',
+            'utils-upload.js',
             'api.js',
+            'stores/plugins.js',
+            'stores/releases.js',
+            'stores/settings.js',
             //'components/ListManager.js',
             //'components/ComboboxControl.js',
             //'components/TriStateCheckboxControl.js',
@@ -120,7 +124,7 @@ class AdminUI {
             wp_enqueue_script(
                 $handle,
                 PBLSH_PLUGIN_URL . 'assets/js/' . $file,
-                $previous_handle ? [$previous_handle] : ['wp-element', 'wp-components', 'wp-i18n', 'lodash', 'pblsh-highlightjs', 'pblsh-highlightjs-highlight-lines', 'pblsh-jszip'],
+                $previous_handle ? [$previous_handle] : ['wp-element', 'wp-components', 'wp-i18n', 'wp-data', 'wp-api', 'wp-api-fetch', 'lodash', 'pblsh-highlightjs', 'pblsh-highlightjs-highlight-lines', 'pblsh-jszip'],
                 filemtime(PBLSH_PLUGIN_DIR . 'assets/js/' . $file),
                 true
             );
@@ -142,15 +146,15 @@ class AdminUI {
             filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs/styles/atom-one-dark.css')
         );
         
-        wp_localize_script('pblsh-admin', 'PblshData', [
-            'restUrl' => rest_url('pblsh-admin/v1/'),
-            'nonce' => wp_create_nonce('wp_rest'),
-            'bootstrapUpdateURI' => get_update_uri(),
-            'wpVersion' => function_exists('wp_get_wp_version') ? wp_get_wp_version() : $GLOBALS['wp_version'],
-            'phpVersion' => PHP_VERSION,
-            //'codeEditorSettings' => $settings,
-            // ... more data here ...
-        ]);
+        wp_localize_script(
+            'pblsh-admin',
+            'PblshData',
+            [
+                'bootstrapUpdateURI' => get_update_uri(),
+                'wpVersion' => function_exists('wp_get_wp_version') ? wp_get_wp_version() : $GLOBALS['wp_version'],
+                'phpVersion' => PHP_VERSION,
+            ]
+        );
     }
 }
 

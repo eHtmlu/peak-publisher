@@ -382,9 +382,9 @@ class PublicAPI {
             return null;
         }
 
-        // order releases by version
+        // order releases by version (ascending); latest will be array_key_last
         uksort($releases, function($a, $b) {
-            return version_compare($a, $b, '>');
+            return version_compare($a, $b);
         });
 
         $requested_release = null;

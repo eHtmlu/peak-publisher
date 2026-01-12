@@ -25,12 +25,12 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 const data = await getSettings();
                 if (!mounted) return;
                 setSettings({
-                    standalone_mode: data.standalone_mode || false,
-                    auto_add_top_level_folder: data.auto_add_top_level_folder || false,
-                    auto_remove_workspace_artifacts: data.auto_remove_workspace_artifacts || false,
+                    standalone_mode: !!data.standalone_mode,
+                    auto_add_top_level_folder: !!data.auto_add_top_level_folder,
+                    auto_remove_workspace_artifacts: !!data.auto_remove_workspace_artifacts,
                     wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(data.wordspace_artifacts_to_remove) ? data.wordspace_artifacts_to_remove : []),
                     ip_whitelist: getTextareaFromList(Array.isArray(data.ip_whitelist) ? data.ip_whitelist : []),
-                    count_plugin_installations: data.count_plugin_installations || false,
+                    count_plugin_installations: !!data.count_plugin_installations,
                 });
             } catch (e) {
                 showAlert(e.message, 'error');
@@ -60,12 +60,12 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         setSaving(true);
         try {
             const payload = {
-                standalone_mode: settings.standalone_mode || false,
-                auto_add_top_level_folder: settings.auto_add_top_level_folder || false,
-                auto_remove_workspace_artifacts: settings.auto_remove_workspace_artifacts || false,
+                standalone_mode: !!settings.standalone_mode,
+                auto_add_top_level_folder: !!settings.auto_add_top_level_folder,
+                auto_remove_workspace_artifacts: !!settings.auto_remove_workspace_artifacts,
                 wordspace_artifacts_to_remove: normalizeListFromTextarea(settings.wordspace_artifacts_to_remove),
                 ip_whitelist: normalizeListFromTextarea(settings.ip_whitelist),
-                count_plugin_installations: settings.count_plugin_installations || false,
+                count_plugin_installations: !!settings.count_plugin_installations,
             };
             await saveSettings(payload);
             if (typeof onClose === 'function') onClose();

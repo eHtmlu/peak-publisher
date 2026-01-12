@@ -42,6 +42,11 @@ class AdminAPI {
             'callback' => [$this, 'get_plugin'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/releases', [
+            'methods' => 'GET',
+            'callback' => [$this, 'get_plugin_releases'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
         
         
         
@@ -156,10 +161,6 @@ class AdminAPI {
                 }
             }
 
-            if ($latest_version === '' && $count_of_releases > 0) {
-                $latest_version = (string) ($releases[0]->post_title ?? '');
-            }
-
             $out[] = [
                 'id' => $plugin_post->ID,
                 'name' => $plugin_post->post_title,
@@ -193,10 +194,52 @@ class AdminAPI {
             'post_parent' => $post->ID,
         ]);
 
-        $releases = [];
         $latest_version = '';
         $latest_normalized = '';
 
+        foreach ($releases_query->posts as $release) {
+            $rel_data = json_decode((string) $release->post_content, true) ?? [];
+            $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
+            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
+            if ($normalized !== '') {
+                if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
+                    $latest_normalized = $normalized;
+                    $latest_version = $version;
+                }
+            }
+        }
+
+        return [
+            'id' => $post->ID,
+            'name' => $post->post_title,
+            'slug' => $post->post_name,
+            'icon' => get_post_meta($post->ID, 'pblsh_icon', true),
+            'version' => $latest_version,
+            'status' => $post->post_status,
+            'installations_count' => get_plugin_installations_count((int) $post->ID),
+        ];
+    }
+
+    /**
+     * Get releases list for a plugin.
+     */
+    public function get_plugin_releases(\WP_REST_Request $request): array {
+        $id = (int) $request->get_param('id');
+        $post = get_post($id);
+        if (!$post || $post->post_type !== 'pblsh_plugin') {
+            return [];
+        }
+
+        $releases_query = new \WP_Query([
+            'post_type' => 'pblsh_release',
+            'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
+            'posts_per_page' => 50,
+            'orderby' => 'date',
+            'order' => 'DESC',
+            'post_parent' => $post->ID,
+        ]);
+
+        $releases = [];
         foreach ($releases_query->posts as $release) {
             $rel_data = json_decode((string) $release->post_content, true) ?? [];
             $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
@@ -209,12 +252,6 @@ class AdminAPI {
                 'download_url' => rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
                 'installations_count' => $normalized !== '' ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0,
             ];
-            if ($normalized !== '') {
-                if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
-                    $latest_normalized = $normalized;
-                    $latest_version = $version;
-                }
-            }
         }
 
         // order releases by version (descending)
@@ -222,20 +259,7 @@ class AdminAPI {
             return version_compare((string) $b['version'], (string) $a['version']);
         });
 
-        if ($latest_version === '' && !empty($releases)) {
-            $latest_version = (string) ($releases[0]['version'] ?? '');
-        }
-
-        return [
-            'id' => $post->ID,
-            'name' => $post->post_title,
-            'slug' => $post->post_name,
-            'icon' => get_post_meta($post->ID, 'pblsh_icon', true),
-            'version' => $latest_version,
-            'status' => $post->post_status,
-            'releases' => $releases,
-            'installations_count' => get_plugin_installations_count((int) $post->ID),
-        ];
+        return $releases;
     }
 
     /**

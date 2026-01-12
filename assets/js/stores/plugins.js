@@ -81,6 +81,9 @@
         isLoadingList: function(state) {
             return !!state.isLoadingList;
         },
+        hasLoadedList: function(state) {
+            return !!state.lastFetch;
+        },
         getById: function(state, id) {
             return state.byId[id] || null;
         },

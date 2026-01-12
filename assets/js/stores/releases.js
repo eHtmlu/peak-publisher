@@ -95,6 +95,10 @@
             var b = state.byPluginId[pluginId];
             return !!(b && b.isLoading);
         },
+        hasLoadedForPlugin: function(state, pluginId) {
+            var b = state.byPluginId[pluginId];
+            return !!(b && b.lastFetch);
+        },
         getPendingReleaseIds: function(state) {
             return state.pendingReleaseIds.slice();
         },
@@ -111,9 +115,8 @@
             var dispatch = wp.data.dispatch('pblsh/releases');
             try {
                 dispatch.setLoading(pluginId, true);
-                // The backend returns releases in get_plugin(id)
-                var plugin = await window.Pblsh.API.getPlugin(pluginId);
-                var items = Array.isArray(plugin && plugin.releases) ? plugin.releases : [];
+                var items = await window.Pblsh.API.getPluginReleases(pluginId);
+                if (!Array.isArray(items)) items = [];
                 dispatch.setList(pluginId, items);
             } catch (e) {
                 dispatch.setError(e && e.message ? e.message : 'Failed to load releases');

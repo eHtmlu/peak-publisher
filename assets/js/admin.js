@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [currentPluginId, setCurrentPluginId] = useState(null);
         const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);
+        const hasLoadedList = useSelect((select) => {
+            try { return !!select('pblsh/plugins').hasLoadedList(); } catch (e) { return false; }
+        }, []);
         const plugins = useSelect((select) => select('pblsh/plugins').getPlugins(), []);
         const pendingPluginStatus = useSelect((select) => select('pblsh/plugins').getPendingIds(), []);
 
@@ -52,6 +55,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Load plugins on mount + restore view from URL
         useEffect(() => {
             (async () => {
+                try { await window.Pblsh.Controllers.Settings.fetch(); } catch (e) {}
                 await window.Pblsh.Controllers.Plugins.fetchList();
                 const q = parseQuery();
                 if (q && q.plugin) {
@@ -101,7 +105,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 setCurrentPluginId(id);
                 setQuery({ plugin: id, view: null });
                 await window.Pblsh.Controllers.Plugins.fetchById(id);
-                await window.Pblsh.Controllers.Releases.fetchForPlugin(id);
+                try {
+                    const sel = wp.data.select('pblsh/releases');
+                    const alreadyLoaded = typeof sel.hasLoadedForPlugin === 'function' ? sel.hasLoadedForPlugin(id) : false;
+                    if (!alreadyLoaded) {
+                        await window.Pblsh.Controllers.Releases.fetchForPlugin(id);
+                    }
+                } catch (e) {}
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -203,6 +213,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const handleCreated = async (pluginId) => {
             try {
                 await window.Pblsh.Controllers.Plugins.fetchById(pluginId);
+                await window.Pblsh.Controllers.Releases.fetchForPlugin(pluginId);
                 await window.Pblsh.Controllers.Plugins.fetchList();
                 setCurrentPluginId(pluginId);
                 setIsNew(false);
@@ -244,7 +255,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     onBack: handleCancel,
                 });
             } else {
-                if (isLoading) {
+                if (isLoading || !hasLoadedList) {
                     return createElement('div', { className: 'pblsh--loading' },
                         createElement('div', { className: 'pblsh--loading__spinner' })
                     );

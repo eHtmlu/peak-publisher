@@ -23,6 +23,10 @@ lodash.set(window, 'Pblsh.API', {
     getPlugin: async (id) => {
         return await window.Pblsh.API.request('plugins/' + id);
     },
+    // Get releases for a plugin
+    getPluginReleases: async (id) => {
+        return await window.Pblsh.API.request('plugins/' + id + '/releases');
+    },
     // Update a plugin
     updatePlugin: async (id, plugin) => {
         return await window.Pblsh.API.request('plugins/' + id, {

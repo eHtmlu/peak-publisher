@@ -7,6 +7,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { getSvgIcon } = Pblsh.Utils;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
+    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
+    const showInstallations = !!(serverSettings && serverSettings.count_plugin_installations);
 
     // Prefer releases from store (keeps UI in sync on toggles), fallback to pluginData.releases
     const releasesFromStore = useSelect(
@@ -60,13 +62,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--plugin-grid' },
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String((pluginData?.releases || []).length))
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, (isLoadingReleases || !(wp.data.select('pblsh/releases').hasLoadedForPlugin && wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null))) ? '—' : String((releasesFromStore || []).length))
                             ),
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Latest Release', 'peak-publisher')),
                                 createElement('div', { className: 'pblsh--plugin-grid__value' }, safe(pluginData?.version) || '—')
                             ),
-                            createElement('div', { className: 'pblsh--plugin-grid__item' },
+                            showInstallations && createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
                                 createElement('div', { className: 'pblsh--plugin-grid__value' }, String(pluginData?.installations_count || 0))
                             ),
@@ -78,12 +80,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     };
 
     const renderReleasesTable = () => {
-        const releases = (Array.isArray(releasesFromStore) && releasesFromStore.length > 0)
-            ? releasesFromStore
-            : (Array.isArray(pluginData?.releases) ? pluginData.releases : []);
+        const releases = Array.isArray(releasesFromStore) ? releasesFromStore : [];
+        const hasLoaded = wp.data.select('pblsh/releases').hasLoadedForPlugin
+            ? wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null)
+            : false;
         return [
             createElement('div', { className: 'pblsh--table-container' },
-                isLoadingReleases ?
+                (isLoadingReleases || !hasLoaded) ?
                     createElement('div', { className: 'pblsh--loading pblsh--loading--table' },
                         createElement('div', { className: 'pblsh--loading__spinner' })
                     )
@@ -93,14 +96,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
                             createElement('th', null, __('Date', 'peak-publisher')),
-                            createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
+                            showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher')),
                         ),
                     ),
                     createElement('tbody', null,
-                        releases.length === 0
+                        (hasLoaded && releases.length === 0)
                             ? createElement('tr', null,
-                                createElement('td', { colSpan: 5 }, __('No releases yet.', 'peak-publisher')),
+                                createElement('td', { colSpan: showInstallations ? 5 : 4 }, __('No releases.', 'peak-publisher')),
                             )
                             : releases.map((rel) =>
                                 createElement('tr', { key: String(rel.id) },
@@ -123,7 +126,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     ),
                                     createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.version)),
                                     createElement('td', null, safe(rel.date)),
-                                    createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
+                                    showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
                                     createElement('td', { className: 'pblsh--table__actions-cell' },
                                         createElement('div', { className: 'pblsh--table__actions' },
                                             (() => {

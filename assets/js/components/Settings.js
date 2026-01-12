@@ -2,12 +2,14 @@
 lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
     const { __ } = wp.i18n;
     const { useState, useEffect, createElement, createInterpolateElement } = wp.element;
+    const { useSelect } = wp.data;
     const { Button, Panel, PanelBody, ToggleControl, TextareaControl, SelectControl, RadioControl } = wp.components;
     const { showAlert } = Pblsh.Utils;
-    const { getSettings, saveSettings } = Pblsh.API;
+    const settingsController = window.Pblsh.Controllers && window.Pblsh.Controllers.Settings ? window.Pblsh.Controllers.Settings : null;
 
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
+    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
+    const loading = useSelect((select) => select('pblsh/settings').isLoading(), []);
+    const saving = useSelect((select) => select('pblsh/settings').isSaving(), []);
     const [settings, setSettings] = useState({
         standalone_mode: false,
         auto_add_top_level_folder: false,
@@ -19,27 +21,23 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
     const [currentSection, setCurrentSection] = useState('general');
 
     useEffect(() => {
-        let mounted = true;
-        (async () => {
-            try {
-                const data = await getSettings();
-                if (!mounted) return;
-                setSettings({
-                    standalone_mode: !!data.standalone_mode,
-                    auto_add_top_level_folder: !!data.auto_add_top_level_folder,
-                    auto_remove_workspace_artifacts: !!data.auto_remove_workspace_artifacts,
-                    wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(data.wordspace_artifacts_to_remove) ? data.wordspace_artifacts_to_remove : []),
-                    ip_whitelist: getTextareaFromList(Array.isArray(data.ip_whitelist) ? data.ip_whitelist : []),
-                    count_plugin_installations: !!data.count_plugin_installations,
-                });
-            } catch (e) {
-                showAlert(e.message, 'error');
-            } finally {
-                if (mounted) setLoading(false);
-            }
-        })();
-        return () => { mounted = false; };
+        try {
+            if (settingsController) settingsController.fetch();
+        } catch (e) {}
     }, []);
+
+    useEffect(() => {
+        if (serverSettings) {
+            setSettings({
+                standalone_mode: !!serverSettings.standalone_mode,
+                auto_add_top_level_folder: !!serverSettings.auto_add_top_level_folder,
+                auto_remove_workspace_artifacts: !!serverSettings.auto_remove_workspace_artifacts,
+                wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.wordspace_artifacts_to_remove) ? serverSettings.wordspace_artifacts_to_remove : []),
+                ip_whitelist: getTextareaFromList(Array.isArray(serverSettings.ip_whitelist) ? serverSettings.ip_whitelist : []),
+                count_plugin_installations: !!serverSettings.count_plugin_installations,
+            });
+        }
+    }, [serverSettings && JSON.stringify(serverSettings)]);
 
     const setField = (key, value) => {
         setSettings(prev => ({ ...prev, [key]: value }));
@@ -57,7 +55,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
     };
 
     const handleSave = async () => {
-        setSaving(true);
         try {
             const payload = {
                 standalone_mode: !!settings.standalone_mode,
@@ -67,12 +64,14 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 ip_whitelist: normalizeListFromTextarea(settings.ip_whitelist),
                 count_plugin_installations: !!settings.count_plugin_installations,
             };
-            await saveSettings(payload);
+            if (settingsController) {
+                await settingsController.save(payload);
+            } else {
+                await window.Pblsh.API.saveSettings(payload);
+            }
             if (typeof onClose === 'function') onClose();
         } catch (e) {
             showAlert(e.message, 'error');
-        } finally {
-            setSaving(false);
         }
     };
 

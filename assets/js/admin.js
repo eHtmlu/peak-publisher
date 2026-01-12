@@ -4,122 +4,117 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const { __ } = wp.i18n;
     const { useState, useEffect, useRef, createElement, render } = wp.element;
+    const { useSelect } = wp.data;
     const { Button } = wp.components;
     const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
-    const { getPlugins, getPlugin, updatePlugin, deletePlugin } = Pblsh.API;
 
     // Main App Component
     const PeakPublisherApp = () => {
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
-        const [plugins, setPlugins] = useState([]);
-        const [currentPlugin, setCurrentPlugin] = useState(null);
-        const [isLoading, setIsLoading] = useState(true);
+        const [currentPluginId, setCurrentPluginId] = useState(null);
+        const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);
+        const plugins = useSelect((select) => select('pblsh/plugins').getPlugins(), []);
+        const pendingPluginStatus = useSelect((select) => select('pblsh/plugins').getPendingIds(), []);
+
         const [isNew, setIsNew] = useState(false);
         const settingsDialogRef = useRef(null);
-        const [pendingPluginStatus, setPendingPluginStatus] = useState([]);
-        const [pendingReleaseStatus, setPendingReleaseStatus] = useState([]);
-        const [isLoadingReleases, setIsLoadingReleases] = useState(false);
+        const pendingReleaseStatus = useSelect((select) => select('pblsh/releases').getPendingReleaseIds(), []);
+        const isLoadingReleases = useSelect((select) => currentPluginId ? select('pblsh/releases').isLoadingForPlugin(currentPluginId) : false, [currentPluginId]);
+        const currentPlugin = useSelect((select) => currentPluginId ? select('pblsh/plugins').getById(currentPluginId) : null, [currentPluginId]);
 
-        // Load plugins on mount
-        useEffect(() => {
-            loadPlugins();
-        }, []);
-
-        const loadPlugins = async (silent = false) => {
+        // Helpers for URL state
+        const parseQuery = () => {
             try {
-                if (!silent) {
-                    setIsLoading(true);
-                }
-                const pluginsData = await getPlugins();
-                setPlugins(pluginsData);
-            } catch (error) {
-                if (!silent) {
-                    showAlert(error.message, 'error');
-                }
-            } finally {
-                if (!silent) {
-                    setIsLoading(false);
-                }
+                const params = new URLSearchParams(window.location.search);
+                return {
+                    plugin: params.get('plugin'),
+                    view: params.get('view'),
+                };
+            } catch (e) {
+                return { plugin: null, view: null };
             }
         };
-
-        
-        const setPluginInList = (pluginId, updater) => {
-            setPlugins(prev => prev.map(p => p.id === pluginId ? updater({ ...p }) : p));
+        const setQuery = (next) => {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                if ('plugin' in next) {
+                    if (next.plugin) { params.set('plugin', String(next.plugin)); } else { params.delete('plugin'); }
+                }
+                if ('view' in next) {
+                    if (next.view) { params.set('view', String(next.view)); } else { params.delete('view'); }
+                }
+                const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+                window.history.replaceState({}, '', newUrl);
+            } catch (e) {}
         };
 
+        // Load plugins on mount + restore view from URL
+        useEffect(() => {
+            (async () => {
+                await window.Pblsh.Controllers.Plugins.fetchList();
+                const q = parseQuery();
+                if (q && q.plugin) {
+                    const idNum = Number(q.plugin);
+                    if (!isNaN(idNum)) {
+                        await handleEdit(idNum);
+                        return;
+                    }
+                }
+                if (q && q.view === 'addition') {
+                    handleAddNewPlugin();
+                    return;
+                }
+            })();
+        }, []);
+
+        
         const togglePluginStatus = async (pluginId, nextStatus) => {
             try {
-                //if (nextStatus === 'publish' && !confirm(__('Do you want to publish this plugin?', 'peak-publisher'))) return;
-                //if (nextStatus === 'draft' && !confirm(__('Do you want to unpublish this plugin?', 'peak-publisher'))) return;
-                setPendingPluginStatus(prev => prev.includes(pluginId) ? prev : [...prev, pluginId]);
-                await Pblsh.API.updatePlugin(pluginId, { status: nextStatus });
-                setPluginInList(pluginId, (p) => ({ ...p, status: nextStatus }));
-                setCurrentPlugin(prev => prev && prev.id === pluginId ? { ...prev, status: nextStatus } : prev);
+                await window.Pblsh.Controllers.Plugins.toggleStatus(pluginId, nextStatus);
             } catch (error) {
                 showAlert(error.message, 'error');
-            } finally {
-                setPendingPluginStatus(prev => prev.filter(id => id !== pluginId));
             }
         };
 
         const toggleReleaseStatus = async (releaseId, nextStatus) => {
             try {
-                //if (nextStatus === 'publish' && !confirm(__('Do you want to publish this release?', 'peak-publisher'))) return;
-                //if (nextStatus === 'draft' && !confirm(__('Do you want to unpublish this release?', 'peak-publisher'))) return;
-                setPendingReleaseStatus(prev => prev.includes(releaseId) ? prev : [...prev, releaseId]);
-                await Pblsh.API.updateRelease(releaseId, { status: nextStatus });
-                setCurrentPlugin(prev => {
-                    if (!prev) return prev;
-                    const updatedReleases = Array.isArray(prev.releases) ? prev.releases.map(r => r.id === releaseId ? { ...r, status: nextStatus } : r) : [];
-                    return { ...prev, releases: updatedReleases };
-                });
+                if (!currentPluginId) return;
+                await window.Pblsh.Controllers.Releases.toggleReleaseStatus(currentPluginId, releaseId, nextStatus);
             } catch (error) {
                 showAlert(error.message, 'error');
-            } finally {
-                setPendingReleaseStatus(prev => prev.filter(id => id !== releaseId));
             }
         };
 
 
         const handleAddNewPlugin = () => {
-            setCurrentPlugin(getDefaultConfig());
+            // keep local draft for UI only
             setIsNew(true);
             setView('addition-process');
+            setQuery({ view: 'addition', plugin: null });
         };
 
         const handleEdit = async (id) => {
             try {
-                const fromList = (plugins || []).find(p => p.id === id) || null;
-                if (fromList) {
-                    setCurrentPlugin(fromList);
-                }
                 setIsNew(false);
                 setView('editor');
-                setIsLoadingReleases(true);
-                const pluginData = await getPlugin(id);
-                setCurrentPlugin(pluginData);
+                setCurrentPluginId(id);
+                setQuery({ plugin: id, view: null });
+                await window.Pblsh.Controllers.Plugins.fetchById(id);
+                await window.Pblsh.Controllers.Releases.fetchForPlugin(id);
             } catch (error) {
                 showAlert(error.message, 'error');
-            } finally {
-                setIsLoadingReleases(false);
             }
         };
 
         const handleDelete = async (plugin) => {
             try {
-                // Optimistic remove from list
-                setPlugins(prev => prev.filter(p => p.id !== plugin.id));
-                await deletePlugin(plugin.id);
-                // If the deleted plugin is currently open, close editor
-                setCurrentPlugin(prev => prev && prev.id === plugin.id ? null : prev);
-                setView(prev => (prev === 'editor' && currentPlugin && currentPlugin.id === plugin.id) ? 'list' : prev);
-                //showSuccessMessage(__('Plugin deleted successfully.', 'peak-publisher'));
+                await window.Pblsh.Controllers.Plugins.delete(plugin.id);
+                setView(prev => (prev === 'editor' && currentPluginId === plugin.id) ? 'list' : prev);
+                if (currentPluginId === plugin.id) setCurrentPluginId(null);
             } catch (error) {
                 showAlert(error.message, 'error');
-                // reload list to ensure consistency on error
-                loadPlugins(true);
+                window.Pblsh.Controllers.Plugins.fetchList();
             }
         };
 
@@ -127,60 +122,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const handleCancel = () => {
             setView('list');
-            setCurrentPlugin(null);
+            setCurrentPluginId(null);
             setIsNew(false);
+            setQuery({ plugin: null, view: null });
         };
 
-        const updatePluginData = (updates) => {
-            setCurrentPlugin(prev => ({ ...prev, ...updates }));
-        };
-
-        const updatePluginJson = (path, value) => {
-            setCurrentPlugin(prev => {
-                const newData = deepClone(prev);
-                const keys = path.split('.');
-                let current = newData.theme_json;
-                
-                // Navigate to the parent object
-                for (let i = 0; i < keys.length - 1; i++) {
-                    if (!current[keys[i]]) {
-                        current[keys[i]] = {};
-                    }
-                    current = current[keys[i]];
-                }
-                
-                const lastKey = keys[keys.length - 1];
-                
-                // Check if value should be removed (empty, null, undefined, empty array, empty object)
-                const isEmptyValue = value === '' || 
-                                   value === null || 
-                                   value === undefined || 
-                                   (Array.isArray(value) && value.length === 0) ||
-                                   (typeof value === 'object' && value !== null && Object.keys(value).length === 0);
-                
-                if (isEmptyValue) {
-                    // Remove the property if it exists
-                    if (current.hasOwnProperty(lastKey)) {
-                        delete current[lastKey];
-                    }
-                    
-                    // Clean up empty parent objects
-                    let parent = newData.theme_json;
-                    for (let i = 0; i < keys.length - 1; i++) {
-                        const key = keys[i];
-                        if (parent[key] && Object.keys(parent[key]).length === 0) {
-                            delete parent[key];
-                        }
-                        parent = parent[key];
-                    }
-                } else {
-                    // Set the value normally
-                    current[lastKey] = value;
-                }
-                
-                return newData;
-            });
-        };
 
         const openSettings = () => {
             const dlg = settingsDialogRef.current;
@@ -256,33 +202,28 @@ document.addEventListener('DOMContentLoaded', function() {
         // Render main content
         const handleCreated = async (pluginId) => {
             try {
-                setIsLoading(true);
-                const pluginData = await getPlugin(pluginId);
-                loadPlugins(true);
-                setCurrentPlugin(pluginData);
+                await window.Pblsh.Controllers.Plugins.fetchById(pluginId);
+                await window.Pblsh.Controllers.Plugins.fetchList();
+                setCurrentPluginId(pluginId);
                 setIsNew(false);
                 setView('editor');
+                setQuery({ plugin: pluginId, view: null });
             } catch (error) {
                 showAlert(error.message, 'error');
-            } finally {
-                setIsLoading(false);
             }
         };
 
         // Provide a stable refresh callback for children
         const refreshCurrentPlugin = wp.element.useCallback(async () => {
             try {
-                if (!currentPlugin || !currentPlugin.id) return;
-                setIsLoading(true);
-                const pluginData = await getPlugin(currentPlugin.id);
-                setCurrentPlugin(pluginData);
-                await loadPlugins(true);
+                if (!currentPluginId) return;
+                await window.Pblsh.Controllers.Plugins.fetchById(currentPluginId);
+                await window.Pblsh.Controllers.Plugins.fetchList();
+                await window.Pblsh.Controllers.Releases.fetchForPlugin(currentPluginId);
             } catch (error) {
                 showAlert(error.message, 'error');
-            } finally {
-                setIsLoading(false);
             }
-        }, [currentPlugin && currentPlugin.id]);
+        }, [currentPluginId]);
 
         const renderMainContent = () => {
             if (view === 'addition-process') {
@@ -293,8 +234,6 @@ document.addEventListener('DOMContentLoaded', function() {
             else if (view === 'editor') {
                 return createElement(PluginEditor, {
                     pluginData: currentPlugin,
-                    updatePluginData,
-                    updatePluginJson,
                     isNew,
                     refreshPlugin: refreshCurrentPlugin,
                     onToggleReleaseStatus: toggleReleaseStatus,

@@ -65,7 +65,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === 'function') {
                 // show a short collecting indicator via zipProgress=0
                 setZipProgress(0);
-                gatherFilesFromItems(items).then((result) => {
+                Pblsh.UploadUtils.gatherFilesFromItems(items).then((result) => {
                     const list = result.list;
                     const roots = result.roots;
                     const hasDirectory = result.hasDirectory;
@@ -196,123 +196,55 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         setUploadProgress(false);
         setIsProcessing(false);
         setValidationResult(null);
-        const zip = new window.JSZip();
-        const rootName = filesWithPaths[0]?.relativePath?.split('/')?.[0] || 'folder';
-        const addFilePromises = [];
-        const total = filesWithPaths.length;
-        const totalBytes = filesWithPaths.reduce((sum, it) => sum + (it.file && it.file.size ? it.file.size : 0), 0);
-        const totalMB = totalBytes / (1024 * 1024);
-        const ratio = (total <= 0 && totalMB <= 0) ? 0.5 : (total / (total + Math.max(0.001, totalMB)));
-        const zipMaxPercent = Math.round(20 + (ratio * 60));
-        let processed = 0;
-        for (const item of filesWithPaths) {
-            addFilePromises.push(new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                    const arrayBuffer = reader.result;
-                    const rel = item.relativePath || item.file.name;
-                    zip.file(rel, arrayBuffer);
-                    processed += 1;
-                    const zipPercent = Math.max(0, Math.min(100, Math.floor((processed / total) * zipMaxPercent)));
-                    setZipProgress(prev => Math.max(prev, zipPercent));
-                    resolve();
-                };
-                reader.onerror = () => resolve();
-                reader.readAsArrayBuffer(item.file);
-            }));
-        }
-        Promise.all(addFilePromises)
-            .then(() => zip.generateAsync({ type: 'blob' }, (meta) => {
-                const p = Math.min(100, Math.floor(zipMaxPercent + (meta.percent * (100 - zipMaxPercent) / 100)));
-                setZipProgress(prev => Math.max(prev, p));
-            }))
-            .then((content) => {
-                setZipProgress(false);
-                const zipFile = new File([content], (rootName || 'folder') + '.zip', { type: 'application/zip' });
-                setUploadProgress(0);
-                Pblsh.API.uploadStart(zipFile, (percent) => {
-                    const mapped = percent; // please keep the decimal precision and this comment
-                    setUploadProgress(mapped);
-                    if (mapped >= 100) {
-                        setUploadProgress(false);
-                        setIsProcessing(true);
-                        setProcessPhase('upload_prepare');
-                    }
-                }, { builtInBrowserBy: 'jszip' })
-                .then(async (res1) => {
+        Pblsh.UploadUtils.createZipFromFiles(filesWithPaths, (p) => {
+            setZipProgress(prev => Math.max(prev, Math.floor(p)));
+        })
+        .then((zipFile) => {
+            setZipProgress(false);
+            setUploadProgress(0);
+            Pblsh.API.uploadStart(zipFile, (percent) => {
+                const mapped = percent;
+                setUploadProgress(mapped);
+                if (mapped >= 100) {
                     setUploadProgress(false);
-                    const uploadId = res1 && res1.upload_id ? res1.upload_id : null;
-                    if (!uploadId) throw new Error('Missing upload_id after upload');
-
                     setIsProcessing(true);
-                    setProcessPhase('unpack');
-                    const resUnpack = await Pblsh.API.uploadContinue(uploadId, 'unpack');
-                    setProcessPhase('analyze');
-                    const res2 = await Pblsh.API.uploadContinue(uploadId, 'analyze');
-                    const next = res2 && res2.next ? res2.next : 'result';
-                    if (next === 'rebuild_zip') {
-                        setProcessPhase('rebuild_zip');
-                        await Pblsh.API.uploadContinue(uploadId, 'rebuild_zip');
-                    }
-                    setProcessPhase('result');
-                    const res3 = await Pblsh.API.uploadContinue(uploadId, 'result');
-                    setIsProcessing(false);
-                    setValidationResult(res3);
-                })
-                .catch((err) => {
-                    setUploadProgress(false);
-                    setIsProcessing(false);
-                    setValidationResult({ status: 'error', errors: [ { code: 'upload_error', message: err.message } ], data: {} });
-                });
+                    setProcessPhase('upload_prepare');
+                }
+            }, { builtInBrowserBy: 'jszip' })
+            .then(async (res1) => {
+                setUploadProgress(false);
+                const uploadId = res1 && res1.upload_id ? res1.upload_id : null;
+                if (!uploadId) throw new Error('Missing upload_id after upload');
+
+                setIsProcessing(true);
+                setProcessPhase('unpack');
+                const resUnpack = await Pblsh.API.uploadContinue(uploadId, 'unpack');
+                setProcessPhase('analyze');
+                const res2 = await Pblsh.API.uploadContinue(uploadId, 'analyze');
+                const next = res2 && res2.next ? res2.next : 'result';
+                if (next === 'rebuild_zip') {
+                    setProcessPhase('rebuild_zip');
+                    await Pblsh.API.uploadContinue(uploadId, 'rebuild_zip');
+                }
+                setProcessPhase('result');
+                const res3 = await Pblsh.API.uploadContinue(uploadId, 'result');
+                setIsProcessing(false);
+                setValidationResult(res3);
             })
             .catch((err) => {
-                setZipProgress(false);
                 setUploadProgress(false);
                 setIsProcessing(false);
-                setValidationResult({ status: 'error', errors: [ { code: 'zip_error', message: err?.message || 'Zipping failed' } ], data: {} });
+                setValidationResult({ status: 'error', errors: [ { code: 'upload_error', message: err.message } ], data: {} });
             });
+        })
+        .catch((err) => {
+            setZipProgress(false);
+            setUploadProgress(false);
+            setIsProcessing(false);
+            setValidationResult({ status: 'error', errors: [ { code: 'zip_error', message: err?.message || 'Zipping failed' } ], data: {} });
+        });
     }
-
-    async function gatherFilesFromItems(items) {
-        const entries = [];
-        for (let i = 0; i < items.length; i++) {
-            const it = items[i];
-            const entry = it.webkitGetAsEntry ? it.webkitGetAsEntry() : null;
-            if (entry) entries.push(entry);
-        }
-        const list = [];
-        const rootsSet = new Set();
-        let hasDirectory = false;
-        const traverse = async (entry, path) => {
-            return new Promise((resolve) => {
-                if (entry.isFile) {
-                    entry.file((file) => {
-                        list.push({ file: file, relativePath: path + file.name });
-                        const top = (path.split('/').filter(Boolean)[0]) || file.name;
-                        if (top) rootsSet.add(top);
-                        resolve();
-                    }, () => resolve());
-                } else if (entry.isDirectory) {
-                    hasDirectory = true;
-                    const top = (path.split('/').filter(Boolean)[0]) || entry.name;
-                    if (top) rootsSet.add(top);
-                    const reader = entry.createReader();
-                    reader.readEntries(async (ents) => {
-                        for (const e of ents) {
-                            await traverse(e, path + entry.name + '/');
-                        }
-                        resolve();
-                    }, () => resolve());
-                } else {
-                    resolve();
-                }
-            });
-        };
-        for (const entry of entries) {
-            await traverse(entry, '');
-        }
-        return { list, roots: Array.from(rootsSet), hasDirectory };
-    }
+    
 
     function finalizeCreation(uploadId) {
         if (!uploadId) return;

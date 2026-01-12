@@ -1,22 +1,17 @@
-// API functions for Theme Designer
+// API functions for Peak Publisher (wp.apiFetch-based)
 lodash.set(window, 'Pblsh.API', {
-    request: async (url, options) => {
+    request: async (path, options) => {
         try {
-            const response = await fetch(PblshData.restUrl + url, {
+            const apiFetch = wp.apiFetch;
+            const resp = await apiFetch({
+                path: 'pblsh-admin/v1/' + path.replace(/^\/+/, ''),
                 method: options?.method || 'GET',
-                headers: {
-                    'X-WP-Nonce': PblshData.nonce,
-                    ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
-                    ...(options?.headers || {})
-                },
-                ...(options?.body ? { body: JSON.stringify(options.body) } : {}),
+                data: options?.body,
+                headers: options?.headers || {},
             });
-            if (!response.ok) {
-                throw new Error('Failed to fetch: ' + response.statusText);
-            }
-            return await response.json();
+            return resp;
         } catch (error) {
-            console.error('Error fetching: ' + error.message);
+            console.error('Error fetching: ' + (error?.message || String(error)));
             throw error;
         }
     },
@@ -62,8 +57,8 @@ lodash.set(window, 'Pblsh.API', {
     uploadStart: async (file, onProgress, opts) => {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', PblshData.restUrl + 'admin/upload');
-            xhr.setRequestHeader('X-WP-Nonce', PblshData.nonce);
+            xhr.open('POST', window.wpApiSettings.root + 'pblsh-admin/v1/admin/upload');
+            xhr.setRequestHeader('X-WP-Nonce', window.wpApiSettings.nonce);
             xhr.responseType = 'json';
             xhr.upload.onprogress = (e) => {
                 if (!e.lengthComputable) return;

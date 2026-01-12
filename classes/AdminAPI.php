@@ -203,7 +203,7 @@ class AdminAPI {
             $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
             $releases[] = [
                 'id' => $release->ID,
-                'title' => $version,
+                'version' => $version,
                 'status' => $release->post_status,
                 'date' => $release->post_date,
                 'download_url' => rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
@@ -217,13 +217,13 @@ class AdminAPI {
             }
         }
 
-        // order releases by version
+        // order releases by version (descending)
         usort($releases, function($a, $b) {
-            return version_compare($a['title'], $b['title'], '<');
+            return version_compare((string) $b['version'], (string) $a['version']);
         });
 
         if ($latest_version === '' && !empty($releases)) {
-            $latest_version = (string) ($releases[0]['title'] ?? '');
+            $latest_version = (string) ($releases[0]['version'] ?? '');
         }
 
         return [

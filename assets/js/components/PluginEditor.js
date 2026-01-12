@@ -2,10 +2,21 @@
 lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onToggleReleaseStatus, pendingReleaseIds, onTogglePluginStatus, pendingPluginStatus, isLoadingReleases, onBack }) => {
     const { __ } = wp.i18n;
     const { createElement } = wp.element;
+    const { useSelect } = wp.data;
     const { Tooltip, Button } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
+
+    // Prefer releases from store (keeps UI in sync on toggles), fallback to pluginData.releases
+    const releasesFromStore = useSelect(
+        (select) => {
+            const pid = pluginData && pluginData.id ? pluginData.id : null;
+            if (!pid) return [];
+            return select('pblsh/releases').getForPlugin(pid);
+        },
+        [pluginData && pluginData.id]
+    );
 
     const renderInfoBox = () => {
         return [
@@ -67,7 +78,9 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     };
 
     const renderReleasesTable = () => {
-        const releases = Array.isArray(pluginData?.releases) ? pluginData.releases : [];
+        const releases = (Array.isArray(releasesFromStore) && releasesFromStore.length > 0)
+            ? releasesFromStore
+            : (Array.isArray(pluginData?.releases) ? pluginData.releases : []);
         return [
             createElement('div', { className: 'pblsh--table-container' },
                 isLoadingReleases ?
@@ -108,14 +121,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             },
                                         })
                                     ),
-                                    createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.title)),
+                                    createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.version)),
                                     createElement('td', null, safe(rel.date)),
                                     createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
                                     createElement('td', { className: 'pblsh--table__actions-cell' },
                                         createElement('div', { className: 'pblsh--table__actions' },
                                             (() => {
                                                 const base = rel.download_url || '';
-                                                const href = base ? base + (base.indexOf('?') >= 0 ? '&' : '?') + '_wpnonce=' + encodeURIComponent(PblshData.nonce) : '';
+                                                const href = base ? base + (base.indexOf('?') >= 0 ? '&' : '?') + '_wpnonce=' + encodeURIComponent(window.wpApiSettings.nonce) : '';
                                                 return createElement(Tooltip, { text: __('Download', 'peak-publisher') },
                                                     createElement('a', {
                                                         className: 'components-button has-icon is-tertiary',

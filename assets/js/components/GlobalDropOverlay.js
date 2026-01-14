@@ -307,10 +307,19 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         const is_natural_successor = natural_successors.includes(plugin_version.join('.'));
 
 
-        const is_new_major_release = meta.existing_plugin && previous_release && plugin_version[0] > previous_release_version[0];
-        const is_new_minor_release = meta.existing_plugin && previous_release && plugin_version[0] === previous_release_version[0] && plugin_version[1] > previous_release_version[1];
-        const is_new_patch_release = meta.existing_plugin && previous_release && plugin_version[0] === previous_release_version[0] && plugin_version[1] === previous_release_version[1] && plugin_version[2] > previous_release_version[2];
-        const is_new_unknown_release = meta.existing_plugin && previous_release && !is_new_major_release && !is_new_minor_release && !is_new_patch_release;
+        const is_new_major_release = meta.existing_plugin && (
+            (previous_release && plugin_version[0] > previous_release_version[0]) ||
+            (!previous_release && plugin_version[1] === 0 && plugin_version[2] === 0)
+        );
+        const is_new_minor_release = meta.existing_plugin && (
+            (previous_release && plugin_version[0] === previous_release_version[0] && plugin_version[1] > previous_release_version[1]) ||
+            (!previous_release && plugin_version[1] > 0 && plugin_version[2] === 0)
+        );
+        const is_new_patch_release = meta.existing_plugin && (
+            (previous_release && plugin_version[0] === previous_release_version[0] && plugin_version[1] === previous_release_version[1] && plugin_version[2] > previous_release_version[2]) ||
+            (!previous_release && plugin_version[2] > 0)
+        );
+        const is_new_unknown_release = meta.existing_plugin && !is_new_major_release && !is_new_minor_release && !is_new_patch_release;
 
         const free_from_workspace_artifacts = meta?.cleanup_info?.found_workspace_artifacts?.every(item => item.deleted);
         const workspace_artifacts_count = meta?.cleanup_info?.found_workspace_artifacts?.reduce((total, item) => total + item.count, 0);
@@ -365,14 +374,14 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                 },
                 pluginData.Version && [
                     !existing_release && [
-                        !previous_release && {
+                        !latest_release && {
                             title: __('Valid version number', 'peak-publisher'),
                             type: 'ok',
-                            desc: pluginData.Version
+                            desc: pluginData.Version,
                         },
-                        previous_release && [
+                        latest_release && [
                             // Expected version number
-                            previous_release.normalized_version === latest_release.normalized_version && is_natural_successor && {
+                            is_natural_successor && !next_release && {
                                 title: __('Expected version number', 'peak-publisher'),
                                 type: 'ok',
                                 desc: [
@@ -380,11 +389,11 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                                 ]
                             },
                             // Unexpected version number
-                            (previous_release.normalized_version !== latest_release.normalized_version || !is_natural_successor) && {
+                            (!is_natural_successor || next_release) && {
                                 title: __('Unexpected version number', 'peak-publisher'),
                                 type: (previous_release.normalized_version === latest_release.normalized_version || useOlderPluginVersion) && (is_natural_successor || useUnexpectedPluginVersion) ? 'ok' : 'error',
                                 desc: [
-                                    previous_release.normalized_version !== latest_release.normalized_version && [
+                                    next_release && [
                                         latest_release.normalized_version !== next_release.normalized_version && sprintf(__('Releases with higher version numbers (%s to %s) already exist.', 'peak-publisher'), next_release.version, latest_release.version),
                                         latest_release.normalized_version === next_release.normalized_version && sprintf(__('A release with a higher version number (%s) already exists.', 'peak-publisher'), latest_release.version),
                                         createElement('br'),
@@ -395,7 +404,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                                             onChange: (value) => setUseOlderPluginVersion(value),
                                         }),
                                     ],
-                                    !is_natural_successor && [
+                                    previous_release && !is_natural_successor && [
                                         sprintf(__('%s is an unexpected successor to the previous release (%s).', 'peak-publisher'), pluginData.Version, previous_release.version),
                                         createElement('br'),
                                         sprintf(__('Expected would be %s.', 'peak-publisher'), natural_successors.join(', ')),
@@ -407,9 +416,9 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                                             onChange: (value) => setUseUnexpectedPluginVersion(value),
                                         }),
                                     ],
-                                ],
+                                ]
                             },
-                        ]
+                        ],
                     ],
                     existing_release && {
                         title: __('Version number already exists', 'peak-publisher'),

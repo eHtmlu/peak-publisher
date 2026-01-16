@@ -12,30 +12,45 @@
             const list = [];
             const rootsSet = new Set();
             let hasDirectory = false;
-            const traverse = async (entry, path) => {
+            const readAllEntries = (reader) => {
                 return new Promise((resolve) => {
-                    if (entry.isFile) {
+                    const all = [];
+                    const pump = () => {
+                        reader.readEntries((ents) => {
+                            if (ents.length === 0) {
+                                resolve(all);
+                                return;
+                            }
+                            for (const it of ents) {
+                                all.push(it);
+                            }
+                            pump();
+                        }, () => resolve(all));
+                    };
+                    pump();
+                });
+            };
+            const traverse = async (entry, path) => {
+                if (entry.isFile) {
+                    return new Promise((resolve) => {
                         entry.file((file) => {
                             list.push({ file: file, relativePath: path + file.name });
                             const top = (path.split('/').filter(Boolean)[0]) || file.name;
                             if (top) rootsSet.add(top);
                             resolve();
                         }, () => resolve());
-                    } else if (entry.isDirectory) {
-                        hasDirectory = true;
-                        const top = (path.split('/').filter(Boolean)[0]) || entry.name;
-                        if (top) rootsSet.add(top);
-                        const reader = entry.createReader();
-                        reader.readEntries(async (ents) => {
-                            for (const e of ents) {
-                                await traverse(e, path + entry.name + '/');
-                            }
-                            resolve();
-                        }, () => resolve());
-                    } else {
-                        resolve();
+                    });
+                } else if (entry.isDirectory) {
+                    hasDirectory = true;
+                    const top = (path.split('/').filter(Boolean)[0]) || entry.name;
+                    if (top) rootsSet.add(top);
+                    const reader = entry.createReader();
+                    const ents = await readAllEntries(reader);
+                    for (const e of ents) {
+                        await traverse(e, path + entry.name + '/');
                     }
-                });
+                    return;
+                }
             };
             for (const entry of entries) {
                 await traverse(entry, '');

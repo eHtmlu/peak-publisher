@@ -582,6 +582,11 @@ class PublicAPI {
 
 	/**
      * @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
+     * NOTE: The original wordpress.org implementation used plain string replacements that failed
+     * to replace <dt>/<dd> when attributes were present (e.g. <dt class="...">). As a result,
+     * tags with attributes were left untouched. This plugin fixes that by performing
+     * attribute-preserving replacements (<dt ...> -> <h4 ...>, <dd ...> -> <p ...>) and by
+     * removing <dl> and <h3> wrappers without altering their inner content.
      * ------------------------------------------------------------
 	 * Return a 'simplified' markup for the FAQ screen.
 	 * WordPress only supports a whitelisted selection of tags, `<dl>` is not one of them.
@@ -591,11 +596,38 @@ class PublicAPI {
 	 * @return string Them markup with `<dt>` replaced with `<h4>` and `<dd>` with `<p>`.
 	 */
 	protected function get_simplified_faq_markup( $markup ) {
-		$markup = str_replace(
-			array( '<dl>', '</dl>', '<dt>', '</dt>', '<h3>', '</h3>', '<dd>', '</dd>' ),
-			array( '',     '',      '<h4>', '</h4>', '',      '',     '<p>',  '</p>'  ),
-			$markup
+
+        /*
+        // Original wordpress.org implementation.
+        $markup = str_replace(
+            array( '<dl>', '</dl>', '<dt>', '</dt>', '<h3>', '</h3>', '<dd>', '</dd>' ),
+            array( '',     '',      '<h4>', '</h4>', '',      '',     '<p>',  '</p>'  ),
+            $markup
+        );
+        */
+
+		// Our own implementation.
+		$patterns = array(
+			'/<dl[^>]*>/i',
+			'/<\/dl>/i',
+			'/<dt(\s[^>]*)?>/i',
+			'/<\/dt>/i',
+			'/<h3[^>]*>/i',
+			'/<\/h3>/i',
+			'/<dd(\s[^>]*)?>/i',
+			'/<\/dd>/i',
 		);
+		$replacements = array(
+			'',
+			'',
+			'<h4$1>',
+			'</h4>',
+			'',
+			'',
+			'<p$1>',
+			'</p>',
+		);
+		$markup = preg_replace( $patterns, $replacements, $markup );
 
 		return $markup;
 	}

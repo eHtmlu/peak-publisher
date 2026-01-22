@@ -39,6 +39,11 @@ To provide clean packages and reduce package size, Peak Publisher automatically 
 🔐 **Optional restriction via IP/domain whitelist**
 Packages are stored in a private, server-protected directory with no direct web access. By default, access via the API is still possible from anywhere. Using IP or domain whitelisting, you can restrict access to update metadata and downloads.
 
+= Some More Features =
+
+📈 **Analytics:** You can always see how many active installations there are.
+📄 **Readme.txt:** Provide your users with a description, changelog, tested up to and more.
+
 == HOW IT WORKS ==
 
 1. **Install Peak Publisher**

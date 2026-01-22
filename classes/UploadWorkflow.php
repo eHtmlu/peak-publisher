@@ -165,7 +165,7 @@ class UploadWorkflow {
             'post_title' => $data['plugin_data']['Version'] ?? '',
             'post_name' => $release_slug,
             'post_parent' => (int) $plugin_post_id,
-            'post_content' => json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'post_content' => wp_slash(json_encode($data)),
             'meta_input' => $release_meta,
         ];
         if ($existing_release_id > 0) {
@@ -352,6 +352,22 @@ class UploadWorkflow {
             $plugin_basename = $plugin_folder_name . '/' . basename($main_file);
             $plugin_slug = sanitize_title($plugin_folder_name);
 
+            // Process readme.txt (root-level, case-sensitive), normalize encoding/BOM if configured, and parse
+            $readme_modified = false;
+            $readme_info = ['found' => false, 'file_name' => '', 'content' => []];
+            $readme_abs = $this->find_readme_txt($root);
+            if ($readme_abs) {
+                [$readme_content, $was_modified, $readme_cleanup_info] = $this->ensure_readme_utf8_without_bom($readme_abs);
+                $readme_modified = $was_modified ? true : false;
+                $readme_info['found'] = true;
+                $readme_info['file_name'] = basename($readme_abs);
+
+                // Parse readme.txt and check if it is able to be encoded to JSON, if not, set the content to an empty array to avoid JSON encoding errors later.
+                $readme_content_parsed = $this->parse_readme_txt($readme_content);
+                $readme_cleanup_info['can_be_encoded_to_json'] = json_encode($readme_content_parsed) !== false;
+                $readme_info['content'] = $readme_cleanup_info['can_be_encoded_to_json'] ? $readme_content_parsed : null;
+            }
+
             // Get plugin data
             require_once ABSPATH . 'wp-admin/includes/plugin.php'; // For WordPress before version 6.8 we need to include this file to ensure the function get_plugin_data() is available.
             $plugin_data = $main_file ? get_plugin_data($main_file, false, false) : [];
@@ -415,19 +431,29 @@ class UploadWorkflow {
                     'size_after_cleanup' => (int) $size_after_cleanup,
                     'entry_count_before_cleanup' => (int) $entry_count_before_cleanup,
                     'entry_count_after_cleanup' => (int) $entry_count_after_cleanup,
+                    'readme_txt' => [
+                        'found' => (bool) $readme_abs,
+                        'already_utf8' => (bool) ($readme_cleanup_info['already_utf8'] ?? false),
+                        'already_without_bom' => (bool) ($readme_cleanup_info['already_without_bom'] ?? false),
+                        'detected_encoding' => (string) ($readme_cleanup_info['detected_encoding'] ?? ''),
+                        'converted_to_utf8' => (bool) ($readme_cleanup_info['converted_to_utf8'] ?? false),
+                        'removed_utf8_bom' => (bool) ($readme_cleanup_info['removed_utf8_bom'] ?? false),
+                    ],
                     'settings_on_upload' => array_intersect_key($settings, array_flip([
                         'auto_add_top_level_folder',
                         'auto_remove_workspace_artifacts',
-                        'wordspace_artifacts_to_remove'
+                        'wordspace_artifacts_to_remove',
+                        'readme_txt_convert_to_utf8_without_bom',
                     ])),
                 ],
                 'plugin_data' => $plugin_data,
+                'plugin_readme_txt' => $readme_info,
             ];
 
             // Determine if the ZIP needs to be rebuilt
             $any_deleted = false;
             foreach ($found_workspace_artifacts as $entry) { if (!empty($entry['deleted'])) { $any_deleted = true; break; } }
-            $rebuild_zip_needed = (bool) ($fixed_top_level_folder || $any_deleted);
+            $rebuild_zip_needed = (bool) ($fixed_top_level_folder || $any_deleted || $readme_modified);
 
             // Update cache
             $cache['zip_path'] = $zip_path;
@@ -917,6 +943,117 @@ class UploadWorkflow {
             return substr($file, strlen($root));
         }
         return $file;
+    }
+
+    /**
+     * Finds a root-level, case-sensitive 'readme.txt'. Returns absolute path or null.
+     * 
+     * @param string $root Plugin root directory.
+     * @return string|null Absolute path to the readme.txt file or null if not found.
+     */
+    private function find_readme_txt(string $root): ?string {
+        $root = rtrim($root, '/\\') . '/';
+        try {
+            $files = scandir($root);
+
+            // START - Copy of WordPress.org code ( https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/cli/i18n/class-readme-import.php )
+            $readme_files = preg_grep( '!^readme.(txt|md)$!i', $files );
+            if ( ! $readme_files ) {
+                throw new Exception( 'Plugin has no readme file.' );
+            }
+    
+            $readme_file = reset( $readme_files );
+            foreach ( $readme_files as $f ) {
+                if ( '.txt' == strtolower( substr( $f, - 4 ) ) ) {
+                    $readme_file = $f;
+                    break;
+                }
+            }
+            // END - Copy of WordPress.org code
+
+            return $root . $readme_file;
+        } catch (\Throwable $e) {}
+        return null;
+    }
+
+    /**
+     * Ensures readme.txt is UTF-8 (no BOM if configured). Returns [content_utf8, modified_flag].
+     * If modifications were applied, the file on disk is overwritten.
+     *
+     * @param string $abs Absolute path to the readme.txt file.
+     * @return array Array with the content, modified flag, and cleanup actions.
+     */
+    private function ensure_readme_utf8_without_bom(string $abs): array {
+        $settings = get_peak_publisher_settings();
+        $convert_to_utf8_without_bom = !empty($settings['readme_txt_convert_to_utf8_without_bom']);
+        $actions = [
+            'already_utf8' => false,
+            'already_without_bom' => false,
+            'detected_encoding' => '',
+            'converted_to_utf8' => false,
+            'removed_utf8_bom' => false,
+        ];
+
+        $raw = @file_get_contents($abs);
+        if (!is_string($raw)) {
+            return ['', false, $actions];
+        }
+
+        $modified = false;
+        $content = $raw;
+
+        $detected_encoding = detect_text_encoding($content);
+        $actions['detected_encoding'] = is_string($detected_encoding) ? $detected_encoding : '';
+
+        $is_utf8 = is_utf8($content);
+        $actions['already_utf8'] = $is_utf8;
+
+        // Convert to UTF-8 if needed
+        if ($convert_to_utf8_without_bom && !$is_utf8) {
+            $converted = convert_to_utf8($content, $detected_encoding);
+            if ($converted !== $content) {
+                $content = $converted;
+                $modified = true;
+                $actions['converted_to_utf8'] = true;
+            }
+        }
+
+        $has_utf8_bom = has_utf8_bom($content);
+        $actions['already_without_bom'] = !$has_utf8_bom;
+
+        // Strip UTF-8 BOM if present
+        if ($convert_to_utf8_without_bom && $has_utf8_bom) {
+            $converted = strip_utf8_bom($content);
+            if ($converted !== $content) {
+                $content = $converted;
+                $modified = true;
+                $actions['removed_utf8_bom'] = true;
+            }
+        }
+
+        if ($modified) {
+            // Overwrite file with normalized UTF-8 (without BOM)
+            @file_put_contents($abs, $content);
+        }
+        return [$content, $modified, $actions];
+    }
+
+    /**
+     * Parses a WordPress.org-style readme.txt into headers/sections and includes raw content.
+     * Returns associative array suitable for storage under data.plugin_readme_txt.
+     *
+     * @param string $content Content of the readme.txt file.
+     * @return array Parsed readme.txt content.
+     */
+    private function parse_readme_txt(string $content): array {
+        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/readme/class-parser.php';
+        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/class-markdown.php';
+
+        // Use the official parser of wordpress.org
+        $parser = new \Pblsh\Vendor\WordPressdotorg\Plugin_Directory\Readme\Parser($content);
+        // Return the full parser data structure
+        $data = get_object_vars($parser);
+        return is_array($data) ? $data : [];
     }
 
     /**

@@ -15,6 +15,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         auto_add_top_level_folder: false,
         auto_remove_workspace_artifacts: false,
         wordspace_artifacts_to_remove: [],
+        readme_txt_convert_to_utf8_without_bom: false,
         ip_whitelist: [],
         count_plugin_installations: false,
     });
@@ -32,6 +33,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 standalone_mode: !!serverSettings.standalone_mode,
                 auto_add_top_level_folder: !!serverSettings.auto_add_top_level_folder,
                 auto_remove_workspace_artifacts: !!serverSettings.auto_remove_workspace_artifacts,
+                readme_txt_convert_to_utf8_without_bom: !!serverSettings.readme_txt_convert_to_utf8_without_bom,
                 wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.wordspace_artifacts_to_remove) ? serverSettings.wordspace_artifacts_to_remove : []),
                 ip_whitelist: getTextareaFromList(Array.isArray(serverSettings.ip_whitelist) ? serverSettings.ip_whitelist : []),
                 count_plugin_installations: !!serverSettings.count_plugin_installations,
@@ -60,6 +62,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 standalone_mode: !!settings.standalone_mode,
                 auto_add_top_level_folder: !!settings.auto_add_top_level_folder,
                 auto_remove_workspace_artifacts: !!settings.auto_remove_workspace_artifacts,
+                readme_txt_convert_to_utf8_without_bom: !!settings.readme_txt_convert_to_utf8_without_bom,
                 wordspace_artifacts_to_remove: normalizeListFromTextarea(settings.wordspace_artifacts_to_remove),
                 ip_whitelist: normalizeListFromTextarea(settings.ip_whitelist),
                 count_plugin_installations: !!settings.count_plugin_installations,
@@ -178,6 +181,16 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                                 __next40pxDefaultSize: true,
                             })
                         ),
+                        createElement('hr'),
+                        createElement(ToggleControl, {
+                            label: __('Convert readme.txt to UTF-8 without a BOM', 'peak-publisher'),
+                            help: [
+                                __('To ensure that the information in a plugin\'s readme.txt file is processed and displayed correctly, the file must be UTF-8 encoded. If this option is enabled, readme.txt files that are not encoded in this way will be automatically converted.', 'peak-publisher'),
+                            ],
+                            checked: settings.readme_txt_convert_to_utf8_without_bom,
+                            onChange: (val) => setField('readme_txt_convert_to_utf8_without_bom', val),
+                            __next40pxDefaultSize: true,
+                        }),
                     ),
                 ),
             );

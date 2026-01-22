@@ -2,8 +2,9 @@
 lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) => {
     const { __ } = wp.i18n;
     const sprintf = wp.i18n.sprintf ?? window.sprintf;
-    const { useState, useEffect, useRef, createElement } = wp.element;
+    const { useState, useEffect, useRef, createElement, createInterpolateElement } = wp.element;
     const { Button, CheckboxControl } = wp.components;
+    const { useSelect } = wp.data;
     const { getSvgIcon } = Pblsh.Utils;
 
     const fileInputRef = useRef(null);
@@ -26,7 +27,12 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
     const [useOlderPluginVersion, setUseOlderPluginVersion] = useState(false);
     const [useNotPeakPublisherForNewUpdateServer, setUseNotPeakPublisherForNewUpdateServer] = useState(false);
     const [keepWorkspaceArtifacts, setKeepWorkspaceArtifacts] = useState(false);
-    
+    const [keepReadmeTxtBom, setKeepReadmeTxtBom] = useState(false);
+    const [keepReadmeTxtEncoding, setKeepReadmeTxtEncoding] = useState(false);
+    const [keepReadmeTxtAsIs, setKeepReadmeTxtAsIs] = useState(false);
+
+    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
+
     function resetResultDecisions() {
         setUseDifferentCustomUpdateServer(false);
         setUsePeakPublisherForNewUpdateServer(false);
@@ -38,6 +44,9 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         setUseOlderPluginVersion(false);
         setUseNotPeakPublisherForNewUpdateServer(false);
         setKeepWorkspaceArtifacts(false);
+        setKeepReadmeTxtBom(false);
+        setKeepReadmeTxtEncoding(false);
+        setKeepReadmeTxtAsIs(false);
     }
 
     useEffect(() => {
@@ -279,7 +288,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         const errors = Array.isArray(result?.errors) ? result.errors : [];
         const meta = result?.data || {};
         const pluginData = result?.data?.plugin_data || {};
-        const settings = result?.settings || {};
+        const settings = serverSettings || {};
         const upload_id = result?.upload_id || false;
 
         const previous_release = result?.data?.related_releases?.previous || false;
@@ -328,6 +337,12 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         const workspace_artifacts_not_deleted_count = meta?.cleanup_info?.found_workspace_artifacts?.reduce((total, item) => total + (item.deleted ? 0 : item.count), 0);
         const workspace_artifacts_not_deleted_size = formatBytes(meta?.cleanup_info?.found_workspace_artifacts?.reduce((total, item) => total + (item.deleted ? 0 : item.bytes), 0));
 
+        const readme_txt_already_utf8 = !!meta?.cleanup_info?.readme_txt?.already_utf8;
+        const readme_txt_already_without_bom = !!meta?.cleanup_info?.readme_txt?.already_without_bom;
+        const readme_txt_detected_encoding = meta?.cleanup_info?.readme_txt?.detected_encoding || '';
+        const readme_txt_converted_to_utf8 = !!meta?.cleanup_info?.readme_txt?.converted_to_utf8;
+        const readme_txt_removed_utf8_bom = !!meta?.cleanup_info?.readme_txt?.removed_utf8_bom;
+        const readme_txt_can_be_encoded_to_json = !!meta?.cleanup_info?.readme_txt?.can_be_encoded_to_json;
 
         const resultList = (meta.plugin_ok ? [
 
@@ -608,6 +623,110 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                         sprintf(__('The installed release will be %s in total with %s files and folders.', 'peak-publisher'), formatBytes(meta?.cleanup_info?.size_after_cleanup), meta?.cleanup_info?.entry_count_after_cleanup),
                     ],
                 },
+            ],
+            
+            // Readme.txt presence
+            [
+                meta.plugin_readme_txt?.found && [
+                    {
+                        title: __('Readme file exists', 'peak-publisher'),
+                        type:
+                            (readme_txt_already_utf8 && readme_txt_already_without_bom)
+                            ||
+                            (settings.readme_txt_convert_to_utf8_without_bom && (
+                                (readme_txt_converted_to_utf8 && readme_txt_already_without_bom)
+                                ||
+                                (readme_txt_removed_utf8_bom && readme_txt_already_utf8)
+                                ||
+                                (readme_txt_converted_to_utf8 && readme_txt_removed_utf8_bom)
+                                ||
+                                ((!readme_txt_already_utf8 !== readme_txt_converted_to_utf8 || !readme_txt_already_without_bom !== readme_txt_removed_utf8_bom) && keepReadmeTxtAsIs)
+                            ))
+                            ||
+                            (!settings.readme_txt_convert_to_utf8_without_bom && (
+                                (readme_txt_already_without_bom || keepReadmeTxtBom)
+                                &&
+                                (readme_txt_already_utf8 || keepReadmeTxtEncoding)
+                            ))
+                            ? 'ok' : 'error',
+                        desc: [
+                            meta.plugin_readme_txt?.file_name !== 'readme.txt' && [
+                                sprintf(__('Although %s also works, the officially valid filename is readme.txt.', 'peak-publisher'), meta.plugin_readme_txt.file_name),
+                                createElement('br'),
+                            ],
+                            readme_txt_already_utf8 && readme_txt_already_without_bom && __('The file is a valid UTF-8 file without a BOM, exactly as it should be.', 'peak-publisher'),
+                            (!readme_txt_already_utf8 || !readme_txt_already_without_bom) && [
+                                settings.readme_txt_convert_to_utf8_without_bom && [
+                                    readme_txt_converted_to_utf8 && [
+                                        readme_txt_detected_encoding && sprintf(__('The file was converted from %s to UTF-8 as specified in the settings.', 'peak-publisher'), readme_txt_detected_encoding),
+                                        !readme_txt_detected_encoding && __('The file was converted to UTF-8 as specified in the settings.', 'peak-publisher'),
+                                        createElement('br'),
+                                    ],
+                                    readme_txt_removed_utf8_bom && [
+                                        __('The UTF-8 BOM was removed from the file as specified in the settings.', 'peak-publisher'),
+                                        createElement('br'),
+                                    ],
+                                    (!readme_txt_already_utf8 !== readme_txt_converted_to_utf8 || !readme_txt_already_without_bom !== readme_txt_removed_utf8_bom) && [
+                                        __('The file couldn\'t be converted to UTF-8 without a BOM. Please check it manually.', 'peak-publisher'),
+                                        createElement('br'),
+                                        !readme_txt_can_be_encoded_to_json && [
+                                            __('The file can\'t be processed because it is not a valid UTF-8 file.', 'peak-publisher'),
+                                            createElement('br'),
+                                        ],
+                                        createElement(CheckboxControl, {
+                                            __nextHasNoMarginBottom: true,
+                                            label: [
+                                                readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the current encoding of the file as it is.', 'peak-publisher'),
+                                                !readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the file even no information can be used from it.', 'peak-publisher')
+                                            ],
+                                            checked: keepReadmeTxtAsIs,
+                                            onChange: (value) => setKeepReadmeTxtAsIs(value),
+                                        }),
+                                    ],
+                                ],
+                                !settings.readme_txt_convert_to_utf8_without_bom && [
+                                    !readme_txt_already_without_bom && [
+                                        __('The file has a UTF-8 BOM, which can cause issues.', 'peak-publisher'),
+                                        createElement('br'),
+                                        createElement(CheckboxControl, {
+                                            __nextHasNoMarginBottom: true,
+                                            label: __('That\'s fine, I want to keep the UTF-8 BOM in the file as it is.', 'peak-publisher'),
+                                            checked: keepReadmeTxtBom,
+                                            onChange: (value) => setKeepReadmeTxtBom(value),
+                                        }),
+                                    ],
+                                    !readme_txt_already_utf8 && [
+                                        readme_txt_detected_encoding && sprintf(__('The detected encoding is not UTF-8, but %s.', 'peak-publisher'), readme_txt_detected_encoding),
+                                        !readme_txt_detected_encoding && __('The detected encoding is not UTF-8.', 'peak-publisher'),
+                                        createElement('br'),
+                                        !readme_txt_can_be_encoded_to_json && [
+                                            __('The file can\'t be processed because it is not a valid UTF-8 file.', 'peak-publisher'),
+                                            createElement('br'),
+                                        ],
+                                        createElement(CheckboxControl, {
+                                            __nextHasNoMarginBottom: true,
+                                            label: [
+                                                readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the current encoding of the file as it is.', 'peak-publisher'),
+                                                !readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the file even no information can be used from it.', 'peak-publisher'),
+                                            ],
+                                            checked: keepReadmeTxtEncoding,
+                                            onChange: (value) => setKeepReadmeTxtEncoding(value),
+                                        }),
+                                    ],
+                                ],
+                            ],
+                        ],
+                    }
+                ],
+                !meta.plugin_readme_txt?.found && {
+                    title: __('No readme file found', 'peak-publisher'),
+                    type: 'info',
+                    desc: [
+                        createInterpolateElement(__('A readme.txt is not required but would allow you to provide a description, changelog, and more to your users. Check out the <a>example on wordpress.org</a>.', 'peak-publisher'), {
+                            a: createElement('a', { href: 'https://wordpress.org/plugins/readme.txt', target: '_blank' }),
+                        }),
+                    ],
+                },
             ]
         ] : []).flat(Infinity).filter(Boolean);
 
@@ -654,8 +773,8 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             ),
             meta.plugin_ok && createElement('div', { className: 'pblsh--upload-result__checks' },
                 createElement('ul', { className: 'pblsh--checklist' },
-                    resultList.map((r, i) => createElement('li', { key: 'r' + i, className: 'pblsh--check ' + (r.type === 'ok' ? 'pblsh--check--ok' : 'pblsh--check--error') },
-                        createElement('span', { className: 'pblsh--check__icon' }, r.type === 'ok' ? getSvgIcon('check_bold', { size: 24 }) : getSvgIcon('close_thick', { size: 24 })),
+                    resultList.map((r, i) => createElement('li', { key: 'r' + i, className: 'pblsh--check ' + (r.type === 'ok' ? 'pblsh--check--ok' : (r.type === 'info' ? 'pblsh--check--info' : 'pblsh--check--error')) },
+                        createElement('span', { className: 'pblsh--check__icon' }, r.type === 'ok' ? getSvgIcon('check_bold', { size: 24 }) : (r.type === 'info' ? getSvgIcon('information_outline', { size: 24 }) : getSvgIcon('close_thick', { size: 24 }))),
                         createElement('span', { className: 'pblsh--check__text' },
                             createElement('span', { className: 'pblsh--check__title' }, r.title),
                             r.desc && createElement('span', { className: 'pblsh--check__desc' }, r.desc),
@@ -688,7 +807,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                 meta.plugin_ok && createElement(Button,
                     {
                         isPrimary: true,
-                        disabled: !resultList.every(item => item.type === 'ok'),
+                        disabled: !resultList.every(item => item.type === 'ok' || item.type === 'info'),
                         className: 'pblsh--button--add-plugin',
                         onClick: () => finalizeCreation(upload_id),
                         __next40pxDefaultSize: true,

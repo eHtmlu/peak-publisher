@@ -43,6 +43,7 @@ function get_peak_publisher_settings(): array {
         'standalone_mode' => false,
         'auto_add_top_level_folder' => true,
         'auto_remove_workspace_artifacts' => true,
+        'readme_txt_convert_to_utf8_without_bom' => true,
         'count_plugin_installations' => true,
         'wordspace_artifacts_to_remove' => [
             '.git',
@@ -93,6 +94,7 @@ function sanitize_peak_publisher_settings(array $settings): array {
     $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
     $out['auto_add_top_level_folder'] = (bool) ($settings['auto_add_top_level_folder'] ?? true);
     $out['auto_remove_workspace_artifacts'] = (bool) ($settings['auto_remove_workspace_artifacts'] ?? true);
+    $out['readme_txt_convert_to_utf8_without_bom'] = (bool) ($settings['readme_txt_convert_to_utf8_without_bom'] ?? true);
     $out['count_plugin_installations'] = (bool) ($settings['count_plugin_installations'] ?? true);
     $wordspace_artifacts_to_remove = $settings['wordspace_artifacts_to_remove'] ?? [];
     if (!is_array($wordspace_artifacts_to_remove)) {
@@ -391,6 +393,87 @@ function get_wp_filesystem(): \WP_Filesystem_Base {
     }
     return $wp_filesystem;
 }
+
+
+
+
+
+
+
+/**
+ * Detects the text encoding of a given string.
+ * Returns encoding label (e.g., 'UTF-8', 'UTF-16', 'Windows-1252') or false if unknown.
+ */
+function detect_text_encoding(string $content) {
+    if (function_exists('mb_detect_encoding')) {
+        $content = strip_utf8_bom($content);
+        $detect_order = 'UTF-8, UTF-16, UTF-16LE, UTF-16BE, Windows-1252, ISO-8859-1, ISO-8859-15, ASCII';
+        $enc = @mb_detect_encoding($content, $detect_order, true);
+        if (is_string($enc) && $enc !== '') {
+            return $enc;
+        }
+    }
+    return false;
+}
+
+
+/**
+ * Checks if a string is UTF-8.
+ */
+function is_utf8(string $content): bool {
+    $content = strip_utf8_bom($content);
+    return preg_match('//u', $content) === 1;
+}
+
+
+/**
+ * Checks if the content does NOT start with a UTF-8 BOM.
+ */
+function has_utf8_bom(string $content): bool {
+    return substr($content, 0, 3) === "\xEF\xBB\xBF";
+}
+
+
+/**
+ * Converts a string to UTF-8 using a provided source encoding (if known).
+ * If $source_encoding is falsy or 'UTF-8', performs best-effort cleanup only.
+ */
+function convert_to_utf8(string $content, $source_encoding = null): string {
+    $converted = $content;
+    if (is_string($source_encoding) && strtoupper($source_encoding) !== 'UTF-8') {
+        if (function_exists('mb_convert_encoding')) {
+            $maybe = @mb_convert_encoding($content, 'UTF-8', $source_encoding);
+            if (is_string($maybe) && $maybe !== '') {
+                $converted = $maybe;
+            }
+        } elseif (function_exists('iconv')) {
+            $maybe = @iconv($source_encoding, 'UTF-8//IGNORE', $content);
+            if (is_string($maybe) && $maybe !== '') {
+                $converted = $maybe;
+            }
+        }
+    }
+
+    // Final safety: if still invalid UTF-8, drop invalid sequences.
+    if (function_exists('iconv') && is_utf8($converted)) {
+        $maybe = @iconv('UTF-8', 'UTF-8//IGNORE', $converted);
+        if (is_string($maybe) && $maybe !== '') {
+            $converted = $maybe;
+        }
+    }
+    return is_string($converted) ? $converted : $content;
+}
+
+
+/**
+ * Strips the UTF-8 BOM from a string.
+ */
+function strip_utf8_bom(string $content): string {
+    return has_utf8_bom($content) ? substr($content, 3) : $content;
+}
+
+
+
 
 
 

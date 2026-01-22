@@ -641,6 +641,7 @@
 .pblsh--check--ok .pblsh--check__icon { color: var(--index-color-complete); }
 .pblsh--check--warn .pblsh--check__icon { color: #ffb900; }
 .pblsh--check--error .pblsh--check__icon { color: #dc3232; }
+.pblsh--check--info .pblsh--check__icon { color: inherit; }
 
 .pblsh--check__icon svg {
     width: 100%;

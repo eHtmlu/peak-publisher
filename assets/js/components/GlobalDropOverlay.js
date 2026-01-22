@@ -406,7 +406,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                             // Unexpected version number
                             (!is_natural_successor || next_release) && {
                                 title: __('Unexpected version number', 'peak-publisher'),
-                                type: (previous_release.normalized_version === latest_release.normalized_version || useOlderPluginVersion) && (is_natural_successor || useUnexpectedPluginVersion) ? 'ok' : 'error',
+                                type: (!next_release || useOlderPluginVersion) && (!previous_release || is_natural_successor || (previous_release && !is_natural_successor && useUnexpectedPluginVersion)) ? 'ok' : 'error',
                                 desc: [
                                     next_release && [
                                         latest_release.normalized_version !== next_release.normalized_version && sprintf(__('Releases with higher version numbers (%s to %s) already exist.', 'peak-publisher'), next_release.version, latest_release.version),

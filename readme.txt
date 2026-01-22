@@ -8,7 +8,7 @@ Tags: publish, plugins, self-hosted, updates, server
 Requires at least: 5.8
 Requires PHP: 8.1
 Tested up to: 6.9
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -107,6 +107,9 @@ Yes. You can optionally configure an IP/domain whitelist for the public endpoint
 Yes. The validator recognizes major/minor/patch successions and warns on unexpected jumps.
 
 == Changelog ==
+
+= 1.1.1 - 2026-01-22 =
+* Fixed small issue in version number validation logic
 
 = 1.1.0 - 2026-01-22 =
 * Added Features:

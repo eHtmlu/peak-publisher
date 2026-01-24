@@ -287,7 +287,7 @@ class PublicAPI {
 			$result['sections']['faq'] = $this->get_simplified_faq_markup( $result['sections']['faq'] );
 		}
 
-		$result['short_description'] = $latest_release_content['plugin_readme_txt']['content']['short_description'] ?? '';
+		$result['short_description'] = $latest_release_content['plugin_readme_txt']['content']['short_description'] ?? $plugin_data['Description'] ?? '';
 		$result['description']       = $result['sections']['description'] ?? $result['short_description'];
 		$result['download_link']     = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $latest_release->post_title);
 		$result['upgrade_notice']    = $latest_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';

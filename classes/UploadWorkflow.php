@@ -419,6 +419,8 @@ class UploadWorkflow {
                     'release_slug' => get_release_slug($plugin_slug, $plugin_data['Version'] ?? ''),
                     'main_file' => $main_file ? $this->rel_path($main_file, $root) : false,
                     'bootstrap_file' => $bootstrap['file'] ? $this->rel_path($bootstrap['file'], $root) : false,
+                    'bootstrap_version' => $bootstrap['version'] ?? '',
+                    'bootstrap_is_latest' => $bootstrap['is_latest'] ?? false,
                     'plugin_basename' => $plugin_basename,
                     'plugin_slug' => $plugin_slug,
                     'content_hash' => $this->get_directory_content_hash($root),
@@ -912,22 +914,24 @@ class UploadWorkflow {
 
     /**
      * Searches for expected bootstrap/update-related code patterns in PHP files.
-     * Returns ['found'=>bool, 'file'=>string].
      *
      * @param string $root Plugin root directory.
-     * @return array Array with 'found' boolean and 'file' string.
+     * @return array Array with 'found' boolean, 'file' string, 'type' string, and 'is_latest' boolean.
      */
     private function search_bootstrap_code(string $root): array {
         $files = $this->list_php_files($root, 5);
-        $bootstrap_code = get_bootstrap_code();
-        $minified = preg_replace('/\s+/', '', preg_replace('/\/\*.*?\*\//s', '', $bootstrap_code));
-        foreach ($files as $file) {
-            $contents = @file_get_contents($file);
-            if ($contents === false) continue;
-            $minified_contents = preg_replace('/\s+/', '', $contents);
-            if (strpos($minified_contents, $minified) !== false) return ['found' => true, 'file' => $file];
+        $bootstrap_codes = get_bootstrap_codes();
+        $latest_version = array_key_last($bootstrap_codes);
+        foreach ($bootstrap_codes as $version => $bootstrap_code) {
+            $minified = preg_replace('/\s+/', '', preg_replace('/\/\*.*?\*\//s', '', $bootstrap_code));
+            foreach ($files as $file) {
+                $contents = @file_get_contents($file);
+                if ($contents === false) continue;
+                $minified_contents = preg_replace('/\s+/', '', $contents);
+                if (strpos($minified_contents, $minified) !== false) return ['found' => true, 'file' => $file, 'version' => $version, 'is_latest' => $version === $latest_version];
+            }
         }
-        return ['found' => false, 'file' => ''];
+        return ['found' => false, 'file' => '', 'version' => '', 'is_latest' => false];
     }
 
     /**

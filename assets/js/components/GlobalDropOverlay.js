@@ -30,6 +30,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
     const [keepReadmeTxtBom, setKeepReadmeTxtBom] = useState(false);
     const [keepReadmeTxtEncoding, setKeepReadmeTxtEncoding] = useState(false);
     const [keepReadmeTxtAsIs, setKeepReadmeTxtAsIs] = useState(false);
+    const [keepOldBootstrapCode, setKeepOldBootstrapCode] = useState(false);
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
 
@@ -47,6 +48,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         setKeepReadmeTxtBom(false);
         setKeepReadmeTxtEncoding(false);
         setKeepReadmeTxtAsIs(false);
+        setKeepOldBootstrapCode(false);
     }
 
     useEffect(() => {
@@ -497,11 +499,27 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             // Bootstrap code
             [
                 meta.plugin_info?.bootstrap_file && [
-                    !useDifferentCustomUpdateServer && !useWordPressOrgUpdateServer && {
-                        title: __('Expected bootstrap code', 'peak-publisher'),
-                        type: 'ok',
-                        desc: sprintf(__('Found in %s.', 'peak-publisher'), meta.plugin_info?.bootstrap_file)
-                    },
+                    !useDifferentCustomUpdateServer && !useWordPressOrgUpdateServer && [
+                        meta.plugin_info?.bootstrap_is_latest && {
+                            title: __('Expected bootstrap code', 'peak-publisher'),
+                            type: 'ok',
+                            desc: sprintf(__('Found in %s.', 'peak-publisher'), meta.plugin_info?.bootstrap_file)
+                        },
+                        !meta.plugin_info?.bootstrap_is_latest && {
+                            title: __('Unexpected bootstrap code', 'peak-publisher'),
+                            type: keepOldBootstrapCode ? 'ok' : 'error',
+                            desc: [
+                                sprintf(__('Found in %s, but it is not the latest bootstrap code version.', 'peak-publisher'), meta.plugin_info?.bootstrap_file),
+                                createElement('br'),
+                                createElement(CheckboxControl, {
+                                    __nextHasNoMarginBottom: true,
+                                    label: __('That\'s fine, I want to use the old version of the bootstrap code. I understand that this is not recommended.', 'peak-publisher'),
+                                    checked: keepOldBootstrapCode,
+                                    onChange: (value) => setKeepOldBootstrapCode(value),
+                                }),
+                            ],
+                        },
+                    ],
                     useDifferentCustomUpdateServer && {
                         title: __('Found bootstrap code', 'peak-publisher'),
                         type: usePeakPublisherForNewUpdateServer ? 'ok' : 'error',

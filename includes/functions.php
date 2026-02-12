@@ -29,9 +29,23 @@ function get_update_uri(): string {
 /**
  * Gets the embed code.
  */
-function get_bootstrap_code(): string {
-    $code = @file_get_contents(PBLSH_PLUGIN_DIR . 'assets/bootstrap-codes/basicV1.php.txt');
+function get_bootstrap_code(string $version = 'basicV2'): string {
+    if ($version !== 'basicV1' && $version !== 'basicV2') {
+        return '';
+    }
+    $code = @file_get_contents(PBLSH_PLUGIN_DIR . 'assets/bootstrap-codes/' . $version . '.php.txt');
     return is_string($code) ? $code : '';
+}
+
+
+/**
+ * Gets the bootstrap codes.
+ */
+function get_bootstrap_codes(): array {
+    return [
+        'basicV1' => get_bootstrap_code('basicV1'),
+        'basicV2' => get_bootstrap_code('basicV2'),
+    ];
 }
 
 

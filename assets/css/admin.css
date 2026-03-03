@@ -70,6 +70,39 @@
     100% { transform: rotate(360deg); }
 }
 
+/* Permalink Notice */
+.pblsh--permalink-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 4rem var(--content-padding-inline);
+    max-width: 32rem;
+    margin: 0 auto;
+}
+
+.pblsh--permalink-notice__icon svg {
+    color: var(--color-blue);
+}
+
+.pblsh--permalink-notice__title {
+    font-size: 1.5rem;
+    margin: 1rem 0 0.5rem;
+}
+
+.pblsh--permalink-notice__text {
+    color: #50575e;
+    margin: 0.25rem 0;
+    line-height: 1.5;
+    font-size: 1rem;
+    text-wrap: pretty;
+}
+
+.pblsh--permalink-notice__button {
+    margin-top: 1.5rem;
+    text-decoration: none;
+}
+
 /* Success Message */
 .pblsh--success-message {
     position: fixed;

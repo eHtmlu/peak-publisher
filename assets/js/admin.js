@@ -2,15 +2,59 @@
 document.addEventListener('DOMContentLoaded', function() {
     'use strict';
     
-    const { __ } = wp.i18n;
+    const { __, sprintf } = wp.i18n;
     const { useState, useEffect, useRef, createElement, render } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
     const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
 
+    // Permalink check — shown instead of the app when permalinks are set to "Plain"
+    const PermalinkNotice = () => {
+        const { permalinkPlain, permalinkDayAndName } = PblshData.i18n;
+        return createElement('div', { className: 'pblsh-app' },
+            createElement('div', { className: 'pblsh--header' },
+                createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher'))
+            ),
+            createElement('div', { className: 'pblsh--permalink-notice' },
+                createElement('div', { className: 'pblsh--permalink-notice__icon' },
+                    Pblsh.Utils.getSvgIcon('chat_alert', { size: 48 })
+                ),
+                createElement('h3', { className: 'pblsh--permalink-notice__title' },
+                    __('Pretty Permalinks Required', 'peak-publisher')
+                ),
+                createElement('p', { className: 'pblsh--permalink-notice__text' },
+                    sprintf(
+                        /* translators: %s: name of the "Plain" permalink option (translated by WordPress) */
+                        __('Peak Publisher uses the WordPress REST API, which requires pretty permalinks. Your permalink structure is currently set to "%s", which does not support REST API routes.', 'peak-publisher'),
+                        permalinkPlain
+                    )
+                ),
+                createElement('p', { className: 'pblsh--permalink-notice__text' },
+                    createElement('strong', null,
+                        sprintf(
+                            /* translators: %1$s: "Plain" option name, %2$s: "Day and name" option name (both translated by WordPress) */
+                            __('To fix this, go to the permalink settings and select any structure other than "%1$s" (e.g. "%2$s").', 'peak-publisher'),
+                            permalinkPlain,
+                            permalinkDayAndName
+                        )
+                    ),
+                ),
+                createElement('a', {
+                    className: 'components-button is-primary pblsh--permalink-notice__button',
+                    href: PblshData.permalinkSettingsUrl,
+                }, __('Go to Permalink Settings', 'peak-publisher'))
+            )
+        );
+    };
+
     // Main App Component
     const PeakPublisherApp = () => {
+        // Block the entire app when permalinks are set to "Plain"
+        if (PblshData.hasPlainPermalinks) {
+            return createElement(PermalinkNotice);
+        }
+
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [currentPluginId, setCurrentPluginId] = useState(null);
         const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);

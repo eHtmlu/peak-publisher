@@ -153,6 +153,12 @@ class AdminUI {
                 'bootstrapUpdateURI' => get_update_uri(),
                 'wpVersion' => function_exists('wp_get_wp_version') ? wp_get_wp_version() : $GLOBALS['wp_version'],
                 'phpVersion' => PHP_VERSION,
+                'hasPlainPermalinks' => get_option('permalink_structure') === '',
+                'permalinkSettingsUrl' => admin_url('options-permalink.php'),
+                'i18n' => [
+                    'permalinkPlain'      => __('Plain'),
+                    'permalinkDayAndName' => __('Day and name'),
+                ],
             ]
         );
     }

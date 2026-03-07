@@ -146,6 +146,7 @@ class AdminUI {
             filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs/styles/atom-one-dark.css')
         );
         
+        require_once __DIR__ . '/AssetManager.php';
         wp_localize_script(
             'pblsh-admin',
             'PblshData',
@@ -155,6 +156,7 @@ class AdminUI {
                 'phpVersion' => PHP_VERSION,
                 'hasPlainPermalinks' => get_option('permalink_structure') === '',
                 'permalinkSettingsUrl' => admin_url('options-permalink.php'),
+                'assetSlots' => AssetManager::get_slots(),
                 'i18n' => [
                     'permalinkPlain'      => __('Plain'),
                     'permalinkDayAndName' => __('Day and name'),

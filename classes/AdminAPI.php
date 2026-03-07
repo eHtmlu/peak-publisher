@@ -114,6 +114,28 @@ class AdminAPI {
             'callback' => [$this, 'save_peak_publisher_settings_rest'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
+
+        // Plugin assets
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
+            'methods' => 'GET',
+            'callback' => [$this, 'handle_get_assets'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_upload_asset'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
+            'methods' => 'DELETE',
+            'callback' => [$this, 'handle_delete_asset'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/move', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_move_asset'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
     }
 
     /**
@@ -134,6 +156,9 @@ class AdminAPI {
             'post_status' => 'any',
             'posts_per_page' => -1,
         ]);
+
+        require_once __DIR__ . '/AssetManager.php';
+        $asset_manager = new AssetManager();
 
         foreach ($plugins as $plugin_post) {
             $releases = get_posts([
@@ -165,7 +190,7 @@ class AdminAPI {
                 'id' => $plugin_post->ID,
                 'name' => $plugin_post->post_title,
                 'slug' => $plugin_post->post_name,
-                'icon' => get_post_meta($plugin_post->ID, 'pblsh_icon', true),
+                'icon_url' => $asset_manager->get_best_icon_url($plugin_post->post_name),
                 'version' => $latest_version,
                 'status' => $plugin_post->post_status,
                 'count_of_releases' => $count_of_releases,
@@ -209,11 +234,13 @@ class AdminAPI {
             }
         }
 
+        require_once __DIR__ . '/AssetManager.php';
+        $asset_manager = new AssetManager();
         return [
             'id' => $post->ID,
             'name' => $post->post_title,
             'slug' => $post->post_name,
-            'icon' => get_post_meta($post->ID, 'pblsh_icon', true),
+            'icon_url' => $asset_manager->get_best_icon_url($post->post_name),
             'version' => $latest_version,
             'status' => $post->post_status,
             'installations_count' => get_plugin_installations_count((int) $post->ID),
@@ -390,6 +417,12 @@ class AdminAPI {
             wp_delete_post($release_id, true);
         }
 
+        // Delete the plugin's assets directory.
+        $assets_dir = get_plugin_assets_basedir($plugin->post_name);
+        if (is_dir($assets_dir)) {
+            get_wp_filesystem()->delete(trailingslashit($assets_dir), true);
+        }
+
         // Remove all empty folders from the upload directory
         remove_empty_folders(peak_publisher_upload_basedir());
 
@@ -446,6 +479,131 @@ class AdminAPI {
         require_once __DIR__ . '/UploadWorkflow.php';
         $workflow = new UploadWorkflow();
         return $workflow->discard_upload($request);
+    }
+
+    /**
+     * Get all assets for a plugin.
+     */
+    public function handle_get_assets(\WP_REST_Request $request): array {
+        $id   = (int) $request->get_param('id');
+        $post = get_post($id);
+        if (!$post || $post->post_type !== 'pblsh_plugin') {
+            return ['status' => 'error', 'message' => 'Plugin not found.'];
+        }
+        require_once __DIR__ . '/AssetManager.php';
+        $manager = new AssetManager();
+        $result  = $manager->get_all($post->post_name);
+        $result['screenshot_captions'] = $this->get_screenshot_captions($id);
+        return $result;
+    }
+
+    /**
+     * Get screenshot captions from the latest published release's readme.txt.
+     *
+     * @return object Screenshot captions keyed by number, e.g. {1: "Caption", 2: "Caption"}.
+     */
+    private function get_screenshot_captions(int $plugin_id): object {
+        $latest = get_posts([
+            'post_type'      => 'pblsh_release',
+            'post_status'    => 'publish',
+            'post_parent'    => $plugin_id,
+            'posts_per_page' => 1,
+            'orderby'        => 'date',
+            'order'          => 'DESC',
+        ]);
+        if (empty($latest)) {
+            return (object) [];
+        }
+        $content = json_decode((string) $latest[0]->post_content, true);
+        $screenshots = $content['plugin_readme_txt']['content']['screenshots'] ?? [];
+        if (empty($screenshots) || !is_array($screenshots)) {
+            return (object) [];
+        }
+        // Ensure keys are integers and values are strings.
+        $captions = [];
+        foreach ($screenshots as $n => $caption) {
+            $captions[(int) $n] = (string) $caption;
+        }
+        return (object) $captions;
+    }
+
+    /**
+     * Upload an asset file to a plugin slot.
+     * Expects multipart/form-data with: file (binary), slot (string), screenshot_n (int, optional).
+     */
+    public function handle_upload_asset(\WP_REST_Request $request): array {
+        $id   = (int) $request->get_param('id');
+        $post = get_post($id);
+        if (!$post || $post->post_type !== 'pblsh_plugin') {
+            return ['status' => 'error', 'message' => 'Plugin not found.'];
+        }
+
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below.
+        if (empty($_FILES['file']) || (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            $err_code = (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE);
+            return ['status' => 'error', 'message' => 'No file uploaded (error code ' . $err_code . ').'];
+        }
+
+        $slot         = sanitize_key((string) ($request->get_param('slot') ?? ''));
+        $screenshot_n_raw = $request->get_param('screenshot_n');
+        $screenshot_n = $screenshot_n_raw !== null && $screenshot_n_raw !== '' ? (int) $screenshot_n_raw : null;
+
+        require_once __DIR__ . '/AssetManager.php';
+        $manager   = new AssetManager();
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Passed to AssetManager which validates it.
+        $file_data = $_FILES['file'];
+        return $manager->upload($id, $post->post_name, $slot, $screenshot_n, $file_data);
+    }
+
+    /**
+     * Delete an asset from a plugin slot.
+     * Expects JSON body: { slot: string, screenshot_n?: int }.
+     */
+    public function handle_delete_asset(\WP_REST_Request $request): array {
+        $id   = (int) $request->get_param('id');
+        $post = get_post($id);
+        if (!$post || $post->post_type !== 'pblsh_plugin') {
+            return ['status' => 'error', 'message' => 'Plugin not found.'];
+        }
+
+        $params       = $request->get_json_params();
+        $slot         = sanitize_key((string) ($params['slot'] ?? ''));
+        $screenshot_n_raw = $params['screenshot_n'] ?? null;
+        $screenshot_n = $screenshot_n_raw !== null ? (int) $screenshot_n_raw : null;
+
+        require_once __DIR__ . '/AssetManager.php';
+        $manager = new AssetManager();
+        $deleted = $manager->delete($post->post_name, $slot, $screenshot_n);
+        $assets  = $manager->get_all($post->post_name);
+        $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
+        return ['status' => 'ok', 'deleted' => $deleted, 'assets' => $assets];
+    }
+
+    /**
+     * Move a screenshot from one position to another.
+     * Expects JSON body: { slot: "screenshot", from: int, to: int }.
+     */
+    public function handle_move_asset(\WP_REST_Request $request): array {
+        $id   = (int) $request->get_param('id');
+        $post = get_post($id);
+        if (!$post || $post->post_type !== 'pblsh_plugin') {
+            return ['status' => 'error', 'message' => 'Plugin not found.'];
+        }
+
+        $params = $request->get_json_params();
+        $from   = isset($params['from']) ? (int) $params['from'] : 0;
+        $to     = isset($params['to'])   ? (int) $params['to']   : 0;
+
+        require_once __DIR__ . '/AssetManager.php';
+        $manager = new AssetManager();
+        $result  = $manager->move_screenshot($post->post_name, $from, $to);
+        if ($result['status'] === 'error') {
+            return $result;
+        }
+
+        $assets = $manager->get_all($post->post_name);
+        $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
+        return ['status' => 'ok', 'assets' => $assets];
     }
 
     public function get_peak_publisher_settings_rest(): array {

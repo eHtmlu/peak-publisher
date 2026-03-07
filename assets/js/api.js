@@ -115,4 +115,53 @@ lodash.set(window, 'Pblsh.API', {
             body: settings,
         });
     },
+    // Get all assets for a plugin
+    getPluginAssets: async (pluginId) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets');
+    },
+    // Upload an asset file (slot: icon_128 | icon_256 | icon_svg | banner_sd | banner_hd | banner_svg | screenshot)
+    // screenshotN: null = append new screenshot, number = replace specific screenshot
+    uploadPluginAsset: async (pluginId, slot, screenshotN, file, onProgress) => {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', window.wpApiSettings.root + 'pblsh-admin/v1/plugins/' + pluginId + '/assets');
+            xhr.setRequestHeader('X-WP-Nonce', window.wpApiSettings.nonce);
+            xhr.responseType = 'json';
+            xhr.upload.onprogress = (e) => {
+                if (!e.lengthComputable) return;
+                const percent = e.loaded * 100 / e.total;
+                if (typeof onProgress === 'function') onProgress(percent);
+            };
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(xhr.response || {});
+                } else {
+                    const msg = xhr.response && xhr.response.message ? xhr.response.message : 'Upload failed (status ' + xhr.status + ')';
+                    reject(new Error(msg));
+                }
+            };
+            xhr.onerror = () => reject(new Error('Network error during asset upload.'));
+            const form = new FormData();
+            form.append('file', file, file.name);
+            form.append('slot', slot);
+            if (screenshotN !== null && screenshotN !== undefined) {
+                form.append('screenshot_n', String(screenshotN));
+            }
+            xhr.send(form);
+        });
+    },
+    // Delete an asset from a plugin slot
+    deletePluginAsset: async (pluginId, slot, screenshotN) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets', {
+            method: 'DELETE',
+            body: { slot, screenshot_n: screenshotN !== undefined ? screenshotN : null },
+        });
+    },
+    // Move a screenshot from one position to another
+    moveScreenshot: async (pluginId, fromN, toN) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/move', {
+            method: 'POST',
+            body: { slot: 'screenshot', from: fromN, to: toN },
+        });
+    },
 });

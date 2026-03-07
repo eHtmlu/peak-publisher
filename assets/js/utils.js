@@ -1,9 +1,9 @@
 
 lodash.set(window, 'Pblsh.Utils', {
 
-    // Show alert message (only for errors)
+    // Show alert message (for errors and warnings)
     showAlert: (message, type = 'error') => {
-        if (type === 'error') {
+        if (type === 'error' || type === 'warning') {
             alert(message);
         }
         // For success messages, use the SuccessMessage component instead

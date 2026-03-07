@@ -282,6 +282,7 @@ class PublicAPI {
         foreach ($sections as $section_key => $section_content) {
             $result['sections'][$section_key] = apply_filters( 'the_content', $section_content, $section_key);
         }
+		$result['sections']['screenshots'] = ''; // placeholder to put screenshots prior to reviews at the end.
 
 		if ( ! empty( $result['sections']['faq'] ) ) {
 			$result['sections']['faq'] = $this->get_simplified_faq_markup( $result['sections']['faq'] );
@@ -291,6 +292,26 @@ class PublicAPI {
 		$result['description']       = $result['sections']['description'] ?? $result['short_description'];
 		$result['download_link']     = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $latest_release->post_title);
 		$result['upgrade_notice']    = $latest_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';
+
+        require_once __DIR__ . '/AssetManager.php';
+        $asset_manager = new AssetManager();
+
+		// Reduce images to caption + src
+		$result['screenshots'] = array_map(
+			function( $image ) {
+				return [
+					'src'     => $image['src'],
+					'caption' => $image['caption'],
+				];
+			},
+			$asset_manager->get_api_screenshots($plugin->post_name, $latest_release_content['plugin_readme_txt']['content']['screenshots'] ?? [])
+		);
+
+		if ( $result['screenshots'] ) {
+			$result['sections']['screenshots'] = $this->get_screenshot_markup( $result['screenshots'] );
+		} else {
+			unset( $result['sections']['screenshots'] );
+		}
 
         $terms = array_map(fn($term) => (object) [
             'slug' => sanitize_title($term),
@@ -317,6 +338,34 @@ class PublicAPI {
 		}
 
 		$result['donate_link'] = $latest_release_content['plugin_readme_txt']['content']['donate_link'] ?? '';
+
+		// Banners & icons — mirrors the wordpress.org API structure.
+		// @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
+		// NOTE: Intentionally duplicated in handle_update_check() — kept as a 1:1 copy of the wp.org reference.
+		$result['banners'] = array();
+		if ( $banners = $asset_manager->get_plugin_banner($plugin->post_name) ) {
+			if ( isset( $banners['banner'] ) ) {
+				$result['banners']['low'] = $banners['banner'];
+			}
+			if ( isset( $banners['banner_2x'] ) ) {
+				$result['banners']['high'] = $banners['banner_2x'];
+			}
+		}
+
+		$result['icons'] = array();
+		if ( $icons = $asset_manager->get_plugin_icon($plugin->post_name) ) {
+			if ( ! empty( $icons['icon'] ) && empty( $icons['generated'] ) ) {
+				$result['icons']['1x'] = $icons['icon'];
+			} elseif ( ! empty( $icons['icon'] ) && ! empty( $icons['generated'] ) ) {
+				$result['icons']['default'] = $icons['icon'];
+			}
+			if ( ! empty( $icons['icon_2x'] ) ) {
+				$result['icons']['2x'] = $icons['icon_2x'];
+			}
+			if ( ! empty( $icons['svg'] ) ) {
+				$result['icons']['svg'] = $icons['svg'];
+			}
+		}
 
         $expected_fields = $this->get_expected_fields('plugin_information');
         foreach ($expected_fields as $field => $value) {
@@ -385,6 +434,9 @@ class PublicAPI {
 
         $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
 
+        require_once __DIR__ . '/AssetManager.php';
+        $asset_manager = new AssetManager();
+
         $results = [
             'plugins' => [],
             'translations' => [],
@@ -407,11 +459,43 @@ class PublicAPI {
             $client_installed_version = (string) ($plugin_payload['Version'] ?? '');
             record_plugin_installation((int) $plugin->ID, (string) $user_agent, (string) $client_installed_version);
             
+            $result = [];
+
+            // Banners & icons — mirrors the wordpress.org API structure.
+            // @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
+            // NOTE: Intentionally duplicated in handle_info() — kept as a 1:1 copy of the wp.org reference.
+            $result['banners'] = array();
+            if ( $banners = $asset_manager->get_plugin_banner($plugin->post_name) ) {
+                if ( isset( $banners['banner'] ) ) {
+                    $result['banners']['low'] = $banners['banner'];
+                }
+                if ( isset( $banners['banner_2x'] ) ) {
+                    $result['banners']['high'] = $banners['banner_2x'];
+                }
+            }
+
+            $result['icons'] = array();
+            if ( $icons = $asset_manager->get_plugin_icon($plugin->post_name) ) {
+                if ( ! empty( $icons['icon'] ) && empty( $icons['generated'] ) ) {
+                    $result['icons']['1x'] = $icons['icon'];
+                } elseif ( ! empty( $icons['icon'] ) && ! empty( $icons['generated'] ) ) {
+                    $result['icons']['default'] = $icons['icon'];
+                }
+                if ( ! empty( $icons['icon_2x'] ) ) {
+                    $result['icons']['2x'] = $icons['icon_2x'];
+                }
+                if ( ! empty( $icons['svg'] ) ) {
+                    $result['icons']['svg'] = $icons['svg'];
+                }
+            }
+
             $results['plugins'][$plugin_basename] = array_merge(
                 ['slug' => $plugin->post_name],
                 ['plugin' => $plugin_basename],
                 ['version' => $latest_version],
                 ['package' => rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $latest_version)],
+                empty($result['icons']) ? [] : [ 'icons' => $result['icons'] ],
+                empty($result['banners']) ? [] : [ 'banners' => $result['banners'] ],
                 empty($plugin_data['RequiresWP']) ? [] : [ 'requires' => $plugin_data['RequiresWP'] ],
                 empty($plugin_data['RequiresPHP']) ? [] : [ 'requires_php' => $plugin_data['RequiresPHP'] ],
                 empty($requires_plugins) ? [] : [ 'requires_plugins' => $requires_plugins ]
@@ -629,6 +713,39 @@ class PublicAPI {
 		);
 		$markup = preg_replace( $patterns, $replacements, $markup );
 
+		return $markup;
+	}
+
+    /**
+     * Screenshots markup for the plugin information API
+     * 
+     * It is intentional that $shot['caption'] is not escaped, as it may contain HTML.
+     * It is reduced to allowed tags when parsing the readme.txt file, so $shot['caption'] is considered trusted HTML.
+     * 
+     * @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
+	 * @param array $screenshots The existing Markup.
+	 * @return string Markup
+	 */
+	protected function get_screenshot_markup( $screenshots ) {
+		$markup = '<ol>';
+
+		foreach ( $screenshots as $shot ) {
+			if ( $shot['caption'] ) {
+				$markup .= sprintf(
+					'<li><a href="%1$s"><img src="%1$s" alt="%2$s"></a><p>%3$s</p></li>',
+					esc_attr( $shot['src'] ),
+					esc_attr( $shot['caption'] ),
+					$shot['caption']
+				);
+			} else {
+				$markup .= sprintf(
+					'<li><a href="%1$s"><img src="%1$s" alt=""></a></li>',
+					esc_attr( $shot['src'] )
+				);
+			}
+		}
+
+		$markup .= '</ol>';
 		return $markup;
 	}
 }

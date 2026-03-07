@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [currentPluginId, setCurrentPluginId] = useState(null);
+        const [initialTab, setInitialTab] = useState(null);
         const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);
         const hasLoadedList = useSelect((select) => {
             try { return !!select('pblsh/plugins').hasLoadedList(); } catch (e) { return false; }
@@ -77,6 +78,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return {
                     plugin: params.get('plugin'),
                     view: params.get('view'),
+                    tab: params.get('tab'),
                 };
             } catch (e) {
                 return { plugin: null, view: null };
@@ -90,6 +92,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if ('view' in next) {
                     if (next.view) { params.set('view', String(next.view)); } else { params.delete('view'); }
+                }
+                if ('tab' in next) {
+                    if (next.tab) { params.set('tab', String(next.tab)); } else { params.delete('tab'); }
                 }
                 const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
                 window.history.replaceState({}, '', newUrl);
@@ -105,6 +110,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (q && q.plugin) {
                     const idNum = Number(q.plugin);
                     if (!isNaN(idNum)) {
+                        if (q.tab) setInitialTab(q.tab);
                         await handleEdit(idNum);
                         return;
                     }
@@ -178,7 +184,8 @@ document.addEventListener('DOMContentLoaded', function() {
             setView('list');
             setCurrentPluginId(null);
             setIsNew(false);
-            setQuery({ plugin: null, view: null });
+            setInitialTab(null);
+            setQuery({ plugin: null, view: null, tab: null });
         };
 
 
@@ -297,6 +304,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     pendingPluginStatus: pendingPluginStatus,
                     isLoadingReleases: isLoadingReleases,
                     onBack: handleCancel,
+                    initialTab: initialTab,
+                    onTabChange: (tab) => setQuery({ tab: tab === 'releases' ? null : tab }),
                 });
             } else {
                 if (isLoading || !hasLoadedList) {

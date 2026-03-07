@@ -52,12 +52,17 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
     }
 
     useEffect(() => {
+        // Check if a drag event carries external files (not an internal page drag like screenshot reordering)
+        const isExternalFileDrag = (e) => e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.indexOf('Files') !== -1;
+
         const onDragEnter = (e) => {
+            if (!isExternalFileDrag(e)) return;
             e.preventDefault();
             setDragCounter((c) => c + 1);
             setVisible(true);
         };
         const onDragOver = (e) => {
+            if (!isExternalFileDrag(e)) return;
             e.preventDefault();
         };
         const onDragLeave = (e) => {
@@ -68,6 +73,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             setDragCounter(0);
         };
         const onDrop = (e) => {
+            if (!isExternalFileDrag(e)) return;
             e.preventDefault();
             setDragCounter(0);
             setVisible(true);

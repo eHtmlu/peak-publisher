@@ -42,7 +42,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                     createElement('thead', null,
                         createElement('tr', null,
                             createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
-                            //createElement('th', { className: 'pblsh--table__icon-header' }, __('Icon', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__icon-header' }),
                             createElement('th', { className: 'pblsh--table__name-header' }, __('Plugin Name', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__slug-header' }, __('Slug', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Latest Version', 'peak-publisher')),
@@ -67,19 +67,15 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                         },
                                     })
                                 ),
-                                /* createElement('td', { className: 'pblsh--table__icon-cell' },
-                                    plugin.icon 
-                                        ? createElement('img', { 
-                                            src: plugin.icon, 
-                                            alt: plugin.name,
-                                            className: 'pblsh--table__icon-thumbnail',
-                                            width: 80,
-                                            height: 60
-                                        })
-                                        : createElement('div', { className: 'pblsh--table__no-icon' },
-                                            getSvgIcon('image')
-                                        )
-                                ), */
+                                createElement('td', { className: 'pblsh--table__icon-cell' },
+                                    plugin.icon_url && createElement('img', {
+                                        src: plugin.icon_url,
+                                        alt: '',
+                                        className: 'pblsh--table__icon',
+                                        width: 48,
+                                        height: 48,
+                                    }),
+                                ),
                                 createElement('td', { className: 'pblsh--table__name-cell' },
                                     createElement('strong', null, plugin.name)
                                 ),

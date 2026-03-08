@@ -223,6 +223,8 @@ class AssetManager {
         if (!@rename($source_path, $target_path)) {
             return ['status' => 'error', 'message' => 'Failed to move screenshot file.'];
         }
+        clearstatcache(true, $source_path);
+        clearstatcache(true, $target_path);
 
         return ['status' => 'ok'];
     }
@@ -446,6 +448,7 @@ class AssetManager {
             $path = trailingslashit($assets_dir) . $slot_def['prefix'] . '.' . $ext;
             if (file_exists($path)) {
                 $fs->delete($path, false);
+                clearstatcache(true, $path);
                 $deleted = true;
             }
         }
@@ -464,6 +467,7 @@ class AssetManager {
             $path = trailingslashit($assets_dir) . 'screenshot-' . $screenshot_n . '.' . $ext;
             if (file_exists($path)) {
                 $fs->delete($path, false);
+                clearstatcache(true, $path);
                 $deleted = true;
             }
         }

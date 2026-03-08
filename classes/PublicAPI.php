@@ -305,7 +305,7 @@ class PublicAPI {
 		$result['upgrade_notice']    = $latest_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';
 
         require_once __DIR__ . '/AssetManager.php';
-        $asset_manager = new AssetManager();
+        $asset_manager = AssetManager::init();
 
 		// Reduce images to caption + src
 		$result['screenshots'] = array_map(
@@ -446,7 +446,7 @@ class PublicAPI {
         $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
 
         require_once __DIR__ . '/AssetManager.php';
-        $asset_manager = new AssetManager();
+        $asset_manager = AssetManager::init();
 
         $results = [
             'plugins' => [],

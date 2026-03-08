@@ -6,8 +6,18 @@ defined('ABSPATH') || exit;
 
 
 class AssetManager {
+    private static ?self $instance = null;
 
     private static ?array $slots = null;
+
+    private function __construct() {}
+
+    public static function init(): self {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
 
     /**
      * Fixed slot definitions — single source of truth for backend and frontend.

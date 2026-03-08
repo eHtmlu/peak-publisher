@@ -10,11 +10,24 @@ class AdminAPI {
 
     const NAMESPACE = 'pblsh-admin/v1';
 
+    private ?AssetManager $asset_manager = null;
+
     /**
      * Constructor.
      */
     private function __construct() {
         $this->register_routes();
+    }
+
+    /**
+     * Lazy-load the AssetManager singleton.
+     */
+    private function assets(): AssetManager {
+        if ($this->asset_manager === null) {
+            require_once __DIR__ . '/AssetManager.php';
+            $this->asset_manager = AssetManager::init();
+        }
+        return $this->asset_manager;
     }
 
     /**
@@ -157,9 +170,6 @@ class AdminAPI {
             'posts_per_page' => -1,
         ]);
 
-        require_once __DIR__ . '/AssetManager.php';
-        $asset_manager = new AssetManager();
-
         foreach ($plugins as $plugin_post) {
             $releases = get_posts([
                 'post_type' => 'pblsh_release',
@@ -190,7 +200,7 @@ class AdminAPI {
                 'id' => $plugin_post->ID,
                 'name' => $plugin_post->post_title,
                 'slug' => $plugin_post->post_name,
-                'icon_url' => $asset_manager->get_best_icon_url($plugin_post->post_name),
+                'icon_url' => $this->assets()->get_best_icon_url($plugin_post->post_name),
                 'version' => $latest_version,
                 'status' => $plugin_post->post_status,
                 'count_of_releases' => $count_of_releases,
@@ -234,13 +244,11 @@ class AdminAPI {
             }
         }
 
-        require_once __DIR__ . '/AssetManager.php';
-        $asset_manager = new AssetManager();
         return [
             'id' => $post->ID,
             'name' => $post->post_title,
             'slug' => $post->post_name,
-            'icon_url' => $asset_manager->get_best_icon_url($post->post_name),
+            'icon_url' => $this->assets()->get_best_icon_url($post->post_name),
             'version' => $latest_version,
             'status' => $post->post_status,
             'installations_count' => get_plugin_installations_count((int) $post->ID),
@@ -490,9 +498,7 @@ class AdminAPI {
         if (!$post || $post->post_type !== 'pblsh_plugin') {
             return ['status' => 'error', 'message' => 'Plugin not found.'];
         }
-        require_once __DIR__ . '/AssetManager.php';
-        $manager = new AssetManager();
-        $result  = $manager->get_all($post->post_name);
+        $result  = $this->assets()->get_all($post->post_name);
         $result['screenshot_captions'] = $this->get_screenshot_captions($id);
         return $result;
     }
@@ -548,11 +554,9 @@ class AdminAPI {
         $screenshot_n_raw = $request->get_param('screenshot_n');
         $screenshot_n = $screenshot_n_raw !== null && $screenshot_n_raw !== '' ? (int) $screenshot_n_raw : null;
 
-        require_once __DIR__ . '/AssetManager.php';
-        $manager   = new AssetManager();
         // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Passed to AssetManager which validates it.
         $file_data = $_FILES['file'];
-        $result = $manager->upload($id, $post->post_name, $slot, $screenshot_n, $file_data);
+        $result = $this->assets()->upload($id, $post->post_name, $slot, $screenshot_n, $file_data);
 
         // Calculate banner average color for geopattern fallback icons.
         // Based on WordPress.org Plugin Directory.
@@ -579,9 +583,7 @@ class AdminAPI {
         $screenshot_n_raw = $params['screenshot_n'] ?? null;
         $screenshot_n = $screenshot_n_raw !== null ? (int) $screenshot_n_raw : null;
 
-        require_once __DIR__ . '/AssetManager.php';
-        $manager = new AssetManager();
-        $deleted = $manager->delete($post->post_name, $slot, $screenshot_n);
+        $deleted = $this->assets()->delete($post->post_name, $slot, $screenshot_n);
 
         // Recalculate banner average color for geopattern fallback icons.
         // Based on WordPress.org Plugin Directory.
@@ -589,7 +591,7 @@ class AdminAPI {
             $this->update_banner_color( $id, $post->post_name );
         }
 
-        $assets  = $manager->get_all($post->post_name);
+        $assets  = $this->assets()->get_all($post->post_name);
         $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
         return ['status' => 'ok', 'deleted' => $deleted, 'assets' => $assets];
     }
@@ -609,14 +611,12 @@ class AdminAPI {
         $from   = isset($params['from']) ? (int) $params['from'] : 0;
         $to     = isset($params['to'])   ? (int) $params['to']   : 0;
 
-        require_once __DIR__ . '/AssetManager.php';
-        $manager = new AssetManager();
-        $result  = $manager->move_screenshot($post->post_name, $from, $to);
+        $result = $this->assets()->move_screenshot($post->post_name, $from, $to);
         if ($result['status'] === 'error') {
             return $result;
         }
 
-        $assets = $manager->get_all($post->post_name);
+        $assets = $this->assets()->get_all($post->post_name);
         $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
         return ['status' => 'ok', 'assets' => $assets];
     }

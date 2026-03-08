@@ -890,9 +890,9 @@
     padding: 0 !important;
 }
 .pblsh--table__icon {
+    /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
     width: 3rem;
     height: 3rem;
-    object-fit: contain;
     display: inline-block;
     vertical-align: middle;
 }
@@ -1200,9 +1200,9 @@
     margin-top: 0;
 }
 .pblsh--plugin-header__icon {
+    /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
     width: 5rem;
     height: 5rem;
-    object-fit: contain;
     flex-shrink: 0;
 }
 

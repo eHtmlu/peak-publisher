@@ -583,7 +583,7 @@ class AdminAPI {
         $screenshot_n_raw = $params['screenshot_n'] ?? null;
         $screenshot_n = $screenshot_n_raw !== null ? (int) $screenshot_n_raw : null;
 
-        $deleted = $this->assets()->delete($post->post_name, $slot, $screenshot_n);
+        $deleted = $this->assets()->delete($id, $post->post_name, $slot, $screenshot_n);
 
         // Recalculate banner average color for geopattern fallback icons.
         // Based on WordPress.org Plugin Directory.
@@ -611,7 +611,7 @@ class AdminAPI {
         $from   = isset($params['from']) ? (int) $params['from'] : 0;
         $to     = isset($params['to'])   ? (int) $params['to']   : 0;
 
-        $result = $this->assets()->move_screenshot($post->post_name, $from, $to);
+        $result = $this->assets()->move_screenshot($id, $post->post_name, $from, $to);
         if ($result['status'] === 'error') {
             return $result;
         }
@@ -628,20 +628,18 @@ class AdminAPI {
      * @see https://github.com/WordPress/wordpress.org — class-tools.php
      */
     private function update_banner_color( int $plugin_id, string $plugin_slug ): void {
-        $assets_dir = get_plugin_assets_basedir( $plugin_slug );
         $banner_average_color = '';
 
-        // Find the first available banner file (prefer HD, then SD).
-        $banner_files = [
-            'banner-1544x500.png', 'banner-1544x500.jpg', 'banner-1544x500.gif',
-            'banner-772x250.png', 'banner-772x250.jpg', 'banner-772x250.gif',
-        ];
-        foreach ( $banner_files as $filename ) {
-            $filepath = trailingslashit( $assets_dir ) . $filename;
-            if ( file_exists( $filepath ) ) {
-                $banner_average_color = get_image_average_color( $filepath );
-                if ( ! is_string( $banner_average_color ) ) {
-                    $banner_average_color = '';
+        // Find the first available banner file (prefer HD, then SD) via asset meta.
+        foreach ( [ 'banner_hd', 'banner_sd' ] as $slot ) {
+            $info = $this->assets()->find_file_in_slot( $plugin_slug, $slot );
+            if ( $info !== null ) {
+                $filepath = trailingslashit( get_plugin_assets_basedir( $plugin_slug ) ) . $info['filename'];
+                if ( file_exists( $filepath ) ) {
+                    $banner_average_color = get_image_average_color( $filepath );
+                    if ( ! is_string( $banner_average_color ) ) {
+                        $banner_average_color = '';
+                    }
                 }
                 break;
             }

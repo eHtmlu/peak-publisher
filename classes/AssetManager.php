@@ -10,6 +10,12 @@ class AssetManager {
 
     private static ?array $slots = null;
 
+    /** @var array<string, int|null> Slug → post ID cache (per-request). */
+    private array $slug_to_id_cache = [];
+
+    /** @var array<int, array|null> Plugin ID → cached meta per group (per-request). */
+    private array $meta_cache = [];
+
     private function __construct() {}
 
     public static function init(): self {
@@ -42,6 +48,121 @@ class AssetManager {
         }
         return self::$slots;
     }
+
+    // -------------------------------------------------------------------------
+    // Asset meta (database-backed manifest)
+    //
+    // Based on WordPress.org Plugin Directory asset storage:
+    // Three separate post-meta keys on pblsh_plugin posts track which asset
+    // files exist.  The filesystem remains the storage backend, but the DB is
+    // the source of truth for *which* files are present.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Meta-key mapping: group name → post-meta key.
+     *
+     * Each meta value is an associative array keyed by filename.  The value
+     * for each filename is an array with a single 'resolution' key:
+     * - Icons/banners: pixel dimensions, e.g. "256x256" (false for SVG).
+     * - Screenshots:   the screenshot *number* as a string, e.g. "3".
+     *   (This overloaded use of 'resolution' mirrors the WordPress.org
+     *   Plugin Directory convention and is intentional.)
+     */
+    private const META_KEYS = [
+        'icons'       => 'assets_icons',
+        'banners'     => 'assets_banners',
+        'screenshots' => 'assets_screenshots',
+    ];
+
+    /**
+     * Resolve a plugin slug to its post ID (cached per request).
+     */
+    private function resolve_plugin_id(string $plugin_slug): ?int {
+        if (array_key_exists($plugin_slug, $this->slug_to_id_cache)) {
+            return $this->slug_to_id_cache[$plugin_slug];
+        }
+        $post = get_page_by_path($plugin_slug, OBJECT, 'pblsh_plugin');
+        $id   = $post ? (int) $post->ID : null;
+        $this->slug_to_id_cache[$plugin_slug] = $id;
+        return $id;
+    }
+
+    /**
+     * Read one of the three asset-meta arrays from post meta.
+     *
+     * @param int    $plugin_id Post ID.
+     * @param string $group     'icons', 'banners', or 'screenshots'.
+     * @return array The stored array, or empty array if not set.
+     */
+    private function get_asset_meta(int $plugin_id, string $group): array {
+        $cache_key = $plugin_id . ':' . $group;
+        if (array_key_exists($cache_key, $this->meta_cache)) {
+            return $this->meta_cache[$cache_key];
+        }
+        $meta_key = self::META_KEYS[$group] ?? '';
+        if ($meta_key === '') {
+            return [];
+        }
+        $value = get_post_meta($plugin_id, $meta_key, true);
+        $result = is_array($value) ? $value : [];
+        $this->meta_cache[$cache_key] = $result;
+        return $result;
+    }
+
+    /**
+     * Write one of the three asset-meta arrays to post meta.
+     */
+    private function save_asset_meta(int $plugin_id, string $group, array $data): void {
+        $meta_key = self::META_KEYS[$group] ?? '';
+        if ($meta_key === '') {
+            return;
+        }
+        update_post_meta($plugin_id, $meta_key, $data);
+        // Invalidate per-request cache.
+        $cache_key = $plugin_id . ':' . $group;
+        $this->meta_cache[$cache_key] = $data;
+    }
+
+    /**
+     * Build a meta entry for a newly placed asset file.
+     *
+     * The entry structure mirrors the WordPress.org Plugin Directory SVN
+     * asset metadata (filename, revision, resolution, local).
+     *
+     * - filename:   canonical filename (redundant with the array key, but
+     *               kept for parity with the WordPress.org data model).
+     * - revision:   unix timestamp of the upload — used for cache-busting
+     *               asset URLs without hitting the filesystem.
+     * - resolution: pixel dimensions for icons/banners (e.g. "256x256",
+     *               false for SVG), or the screenshot *number* as string
+     *               for screenshots (e.g. "3"). This overloaded use mirrors
+     *               the WordPress.org Plugin Directory convention.
+     * - local:      reserved for future use (empty string or false for SVG).
+     */
+    private function build_meta_entry(string $filename, string $slot, array $slot_def): array {
+        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        if ($slot === 'screenshot') {
+            preg_match('/^screenshot-(\d+)\./', $filename, $m);
+            $resolution = $m[1] ?? '0';
+            $local = '';
+        } elseif ($ext === 'svg') {
+            $resolution = false;
+            $local = false;
+        } else {
+            $resolution = $slot_def['expectedW'] . 'x' . $slot_def['expectedH'];
+            $local = '';
+        }
+        return [
+            'filename'   => $filename,
+            'revision'   => time(),
+            'resolution' => $resolution,
+            'local'      => $local,
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Public API — Upload / Delete / Move
+    // -------------------------------------------------------------------------
 
     /**
      * Upload a file to a slot.
@@ -113,7 +234,7 @@ class AssetManager {
         // Determine screenshot number and canonical filename.
         if ($slot === 'screenshot') {
             if ($screenshot_n === null) {
-                $screenshot_n = $this->find_next_screenshot_n($plugin_slug);
+                $screenshot_n = $this->find_next_screenshot_n($plugin_id);
             }
             $this->delete_screenshot_files($plugin_slug, $screenshot_n);
             $canonical_name = 'screenshot-' . $screenshot_n . '.' . $validated_ext;
@@ -134,6 +255,30 @@ class AssetManager {
         }
         if (!$moved) {
             return ['status' => 'error', 'message' => 'Failed to save the uploaded file. Please check server permissions.'];
+        }
+
+        // Update asset meta only after the file was placed successfully.
+        $new_entry = $this->build_meta_entry($canonical_name, $slot, $slot_def);
+
+        if ($slot === 'screenshot') {
+            $meta = $this->get_asset_meta($plugin_id, 'screenshots');
+            foreach ($meta as $fname => $entry) {
+                if (($entry['resolution'] ?? '') === (string) $screenshot_n) {
+                    unset($meta[$fname]);
+                }
+            }
+            $meta[$canonical_name] = $new_entry;
+            $this->save_asset_meta($plugin_id, 'screenshots', $meta);
+        } else {
+            $group = $slot_def['group'];
+            $meta  = $this->get_asset_meta($plugin_id, $group);
+            foreach ($meta as $fname => $entry) {
+                if (str_starts_with($fname, $slot_def['prefix'] . '.')) {
+                    unset($meta[$fname]);
+                }
+            }
+            $meta[$canonical_name] = $new_entry;
+            $this->save_asset_meta($plugin_id, $group, $meta);
         }
 
         // Validate dimensions for raster images and generate warnings.
@@ -177,30 +322,60 @@ class AssetManager {
     /**
      * Delete a slot's asset file(s).
      *
+     * @param int      $plugin_id    WP post ID of the plugin.
      * @param string   $plugin_slug
-     * @param string   $slot        SLOT key (e.g. 'icon_128', 'screenshot').
+     * @param string   $slot         SLOT key (e.g. 'icon_128', 'screenshot').
      * @param int|null $screenshot_n Required when $slot === 'screenshot'.
      * @return bool True if at least one file was deleted.
      */
-    public function delete(string $plugin_slug, string $slot, ?int $screenshot_n): bool {
+    public function delete(int $plugin_id, string $plugin_slug, string $slot, ?int $screenshot_n): bool {
+        $slot_def = self::get_slots()[$slot] ?? null;
+        if ($slot_def === null) {
+            return false;
+        }
+
         if ($slot === 'screenshot') {
             if ($screenshot_n === null) {
                 return false;
             }
-            return $this->delete_screenshot_files($plugin_slug, $screenshot_n);
+            $deleted = $this->delete_screenshot_files($plugin_slug, $screenshot_n);
+
+            // Remove from screenshots meta.
+            $meta = $this->get_asset_meta($plugin_id, 'screenshots');
+            foreach ($meta as $fname => $entry) {
+                if (($entry['resolution'] ?? '') === (string) $screenshot_n) {
+                    unset($meta[$fname]);
+                }
+            }
+            $this->save_asset_meta($plugin_id, 'screenshots', $meta);
+            return $deleted;
         }
-        return $this->delete_slot_files($plugin_slug, $slot);
+
+        $deleted = $this->delete_slot_files($plugin_slug, $slot);
+
+        // Remove from icons/banners meta.
+        $group = $slot_def['group'];
+        $meta  = $this->get_asset_meta($plugin_id, $group);
+        foreach ($meta as $fname => $entry) {
+            if (str_starts_with($fname, $slot_def['prefix'] . '.')) {
+                unset($meta[$fname]);
+            }
+        }
+        $this->save_asset_meta($plugin_id, $group, $meta);
+
+        return $deleted;
     }
 
     /**
      * Move a screenshot from one position to another.
      *
+     * @param int    $plugin_id    WP post ID of the plugin.
      * @param string $plugin_slug
      * @param int    $from_n Source screenshot number (must exist).
      * @param int    $to_n   Target screenshot number.
      * @return array ['status' => 'ok'] or ['status' => 'error', 'message' => '...']
      */
-    public function move_screenshot(string $plugin_slug, int $from_n, int $to_n): array {
+    public function move_screenshot(int $plugin_id, string $plugin_slug, int $from_n, int $to_n): array {
         if ($from_n < 1 || $to_n < 1) {
             return ['status' => 'error', 'message' => 'Invalid screenshot numbers.'];
         }
@@ -208,36 +383,52 @@ class AssetManager {
             return ['status' => 'ok'];
         }
 
-        $assets_dir = get_plugin_assets_basedir($plugin_slug);
-
-        // Find the source file.
-        $source_path = null;
-        $source_ext  = null;
-        foreach (self::get_slots()['screenshot']['exts'] as $ext) {
-            $path = trailingslashit($assets_dir) . 'screenshot-' . $from_n . '.' . $ext;
-            if (file_exists($path)) {
-                $source_path = $path;
-                $source_ext  = $ext;
+        // Find the source file via asset meta (DB is source of truth).
+        $meta     = $this->get_asset_meta($plugin_id, 'screenshots');
+        $src_fname = null;
+        foreach ($meta as $fname => $entry) {
+            if (($entry['resolution'] ?? '') === (string) $from_n) {
+                $src_fname = $fname;
                 break;
             }
         }
-        if ($source_path === null) {
+        if ($src_fname === null) {
             return ['status' => 'error', 'message' => 'Source screenshot not found.'];
         }
+
+        $source_ext  = strtolower(pathinfo($src_fname, PATHINFO_EXTENSION));
+        $assets_dir  = get_plugin_assets_basedir($plugin_slug);
+        $source_path = trailingslashit($assets_dir) . $src_fname;
 
         // Delete target if it exists (frontend already confirmed replacement).
         $this->delete_screenshot_files($plugin_slug, $to_n);
 
-        // Move the file — use rename() directly instead of WP_Filesystem::move().
+        // Move the file via WP_Filesystem for virtual FS compatibility.
         $target_path = trailingslashit($assets_dir) . 'screenshot-' . $to_n . '.' . $source_ext;
-        if (!@rename($source_path, $target_path)) {
+        if (!get_wp_filesystem()->move($source_path, $target_path, true)) {
             return ['status' => 'error', 'message' => 'Failed to move screenshot file.'];
         }
-        clearstatcache(true, $source_path);
-        clearstatcache(true, $target_path);
+
+        // Update screenshots meta: remove source entry + target entries, add new target.
+        $new_filename  = 'screenshot-' . $to_n . '.' . $source_ext;
+        $slot_def      = self::get_slots()['screenshot'];
+
+        // Remove old source and any existing target entries.
+        foreach ($meta as $fname => $entry) {
+            $res = $entry['resolution'] ?? '';
+            if ($res === (string) $from_n || $res === (string) $to_n) {
+                unset($meta[$fname]);
+            }
+        }
+        $meta[$new_filename] = $this->build_meta_entry($new_filename, 'screenshot', $slot_def);
+        $this->save_asset_meta($plugin_id, 'screenshots', $meta);
 
         return ['status' => 'ok'];
     }
+
+    // -------------------------------------------------------------------------
+    // Public API — Read
+    // -------------------------------------------------------------------------
 
     /**
      * Get all assets for a plugin, grouped by slot.
@@ -273,18 +464,31 @@ class AssetManager {
             return null;
         }
         $slot_def  = self::get_slots()[$slot];
-        $assets_dir = get_plugin_assets_basedir($plugin_slug);
+        $plugin_id = $this->resolve_plugin_id($plugin_slug);
+        if ($plugin_id === null) {
+            return null;
+        }
 
-        foreach ($slot_def['exts'] as $ext) {
-            $filename = $slot_def['prefix'] . '.' . $ext;
-            $path     = trailingslashit($assets_dir) . $filename;
-            if (file_exists($path) && is_readable($path)) {
-                $info         = $this->get_file_info($path, $filename, $plugin_slug, $slot_def);
-                $info['slot'] = $slot;
-                return $info;
+        $group = $slot_def['group'];
+        $meta  = $this->get_asset_meta($plugin_id, $group);
+
+        // Find the entry matching this slot's prefix.
+        $filename = null;
+        foreach ($meta as $fname => $entry) {
+            if (str_starts_with($fname, $slot_def['prefix'] . '.')) {
+                $filename = $fname;
+                break;
             }
         }
-        return null;
+        if ($filename === null) {
+            return null;
+        }
+
+        $assets_dir = get_plugin_assets_basedir($plugin_slug);
+        $path       = trailingslashit($assets_dir) . $filename;
+        $info         = $this->get_file_info($path, $filename, $plugin_slug, $slot_def);
+        $info['slot'] = $slot;
+        return $info;
     }
 
     /**
@@ -293,33 +497,30 @@ class AssetManager {
      * @return array Array of asset info arrays with 'screenshot_n' key.
      */
     public function get_screenshots(string $plugin_slug): array {
-        $assets_dir = get_plugin_assets_basedir($plugin_slug);
-        if (!is_dir($assets_dir)) {
+        $plugin_id = $this->resolve_plugin_id($plugin_slug);
+        if ($plugin_id === null) {
             return [];
         }
 
+        $meta = $this->get_asset_meta($plugin_id, 'screenshots');
+        if (empty($meta)) {
+            return [];
+        }
+
+        $assets_dir  = get_plugin_assets_basedir($plugin_slug);
         $slot_def    = self::get_slots()['screenshot'];
         $screenshots = [];
 
-        $files = glob(trailingslashit($assets_dir) . 'screenshot-*.*');
-        if ($files === false) {
-            return [];
-        }
-
-        foreach ($files as $path) {
-            $filename = basename($path);
-            $exts_pattern = implode('|', self::get_slots()['screenshot']['exts']);
-            if (!preg_match('/^screenshot-(\d+)\.(' . $exts_pattern . ')$/i', $filename, $m)) {
+        foreach ($meta as $fname => $entry) {
+            $n = (int) ($entry['resolution'] ?? 0);
+            if ($n < 1) {
                 continue;
             }
-            $n = (int) $m[1];
-            if (isset($screenshots[$n])) {
-                continue; // Prefer the first match per number.
-            }
-            $info                = $this->get_file_info($path, $filename, $plugin_slug, $slot_def);
-            $info['slot']        = 'screenshot';
+            $path                 = trailingslashit($assets_dir) . $fname;
+            $info                 = $this->get_file_info($path, $fname, $plugin_slug, $slot_def);
+            $info['slot']         = 'screenshot';
             $info['screenshot_n'] = $n;
-            $screenshots[$n]     = $info;
+            $screenshots[$n]      = $info;
         }
 
         ksort($screenshots);
@@ -333,7 +534,7 @@ class AssetManager {
         foreach (['icon_svg', 'icon_256', 'icon_128'] as $slot) {
             $info = $this->find_file_in_slot($plugin_slug, $slot);
             if ($info !== null) {
-                return $this->get_public_url($plugin_slug, $info['filename']);
+                return $info['url'];
             }
         }
 
@@ -358,27 +559,16 @@ class AssetManager {
      * @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
      */
     public function get_plugin_banner(string $plugin_slug): array {
-        $assets_dir = get_plugin_assets_basedir($plugin_slug);
-        if (!is_dir($assets_dir)) {
-            return [];
-        }
-        $banners    = [];
+        $banners = [];
 
-        // Banners
-        foreach (['banner-1544x500.png', 'banner-1544x500.jpg', 'banner-1544x500.gif', 'banner-772x250.png', 'banner-772x250.jpg', 'banner-772x250.gif'] as $filename) {
-            if (!file_exists(trailingslashit($assets_dir) . $filename)) {
-                continue;
-            }
-            $url = $this->get_public_url($plugin_slug, $filename);
-            if (str_starts_with($filename, 'banner-1544')) {
-                if (!isset($banners['banner_2x'])) {
-                    $banners['banner_2x'] = $url;
-                }
-            } elseif (str_starts_with($filename, 'banner-772')) {
-                if (!isset($banners['banner'])) {
-                    $banners['banner'] = $url;
-                }
-            }
+        $hd_info = $this->find_file_in_slot($plugin_slug, 'banner_hd');
+        if ($hd_info) {
+            $banners['banner_2x'] = $hd_info['url'];
+        }
+
+        $sd_info = $this->find_file_in_slot($plugin_slug, 'banner_sd');
+        if ($sd_info) {
+            $banners['banner'] = $sd_info['url'];
         }
 
         return $banners;
@@ -475,9 +665,8 @@ class AssetManager {
 
         foreach ($slot_def['exts'] as $ext) {
             $path = trailingslashit($assets_dir) . $slot_def['prefix'] . '.' . $ext;
-            if (file_exists($path)) {
+            if ($fs->exists($path)) {
                 $fs->delete($path, false);
-                clearstatcache(true, $path);
                 $deleted = true;
             }
         }
@@ -494,9 +683,8 @@ class AssetManager {
 
         foreach (self::get_slots()['screenshot']['exts'] as $ext) {
             $path = trailingslashit($assets_dir) . 'screenshot-' . $screenshot_n . '.' . $ext;
-            if (file_exists($path)) {
+            if ($fs->exists($path)) {
                 $fs->delete($path, false);
-                clearstatcache(true, $path);
                 $deleted = true;
             }
         }
@@ -506,12 +694,18 @@ class AssetManager {
     /**
      * Find the next available screenshot number (1-based, no gaps required).
      */
-    private function find_next_screenshot_n(string $plugin_slug): int {
-        $screenshots = $this->get_screenshots($plugin_slug);
-        if (empty($screenshots)) {
+    private function find_next_screenshot_n(int $plugin_id): int {
+        $meta = $this->get_asset_meta($plugin_id, 'screenshots');
+        if (empty($meta)) {
             return 1;
         }
-        $max = max(array_column($screenshots, 'screenshot_n'));
+        $max = 0;
+        foreach ($meta as $entry) {
+            $n = (int) ($entry['resolution'] ?? 0);
+            if ($n > $max) {
+                $max = $n;
+            }
+        }
         return $max + 1;
     }
 
@@ -522,26 +716,37 @@ class AssetManager {
         $ext      = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         $width    = null;
         $height   = null;
+        $filesize = 0;
         $warnings = [];
+        $exists   = file_exists($path);
 
-        if ($ext !== 'svg') {
-            $image_size = @getimagesize($path);
-            if ($image_size !== false) {
-                $width  = (int) $image_size[0];
-                $height = (int) $image_size[1];
-                if ($slot_def['expectedW'] !== null && $slot_def['expectedH'] !== null) {
-                    if ($width !== $slot_def['expectedW'] || $height !== $slot_def['expectedH']) {
-                        $warnings[] = [
-                            'code'    => 'wrong_dimensions',
-                            'message' => sprintf(
-                                "Expected: %d×%d px\nFound: %d×%d px",
-                                $slot_def['expectedW'], $slot_def['expectedH'],
-                                $width, $height
-                            ),
-                        ];
+        if ($exists) {
+            $filesize = (int) filesize($path);
+
+            if ($ext !== 'svg') {
+                $image_size = @getimagesize($path);
+                if ($image_size !== false) {
+                    $width  = (int) $image_size[0];
+                    $height = (int) $image_size[1];
+                    if ($slot_def['expectedW'] !== null && $slot_def['expectedH'] !== null) {
+                        if ($width !== $slot_def['expectedW'] || $height !== $slot_def['expectedH']) {
+                            $warnings[] = [
+                                'code'    => 'wrong_dimensions',
+                                'message' => sprintf(
+                                    "Expected: %d×%d px\nFound: %d×%d px",
+                                    $slot_def['expectedW'], $slot_def['expectedH'],
+                                    $width, $height
+                                ),
+                            ];
+                        }
                     }
                 }
             }
+        } else {
+            $warnings[] = [
+                'code'    => 'file_missing',
+                'message' => 'Asset file is registered but missing from disk.',
+            ];
         }
 
         return [
@@ -549,7 +754,7 @@ class AssetManager {
             'url'      => $this->get_public_url($plugin_slug, $filename),
             'width'    => $width,
             'height'   => $height,
-            'filesize' => file_exists($path) ? (int) filesize($path) : 0,
+            'filesize' => $filesize,
             'warnings' => $warnings,
         ];
     }

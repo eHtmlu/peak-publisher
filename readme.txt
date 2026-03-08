@@ -8,7 +8,7 @@ Tags: publish, plugins, self-hosted, updates, server
 Requires at least: 5.8
 Requires PHP: 8.1
 Tested up to: 6.9
-Stable tag: 1.1.3
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -107,6 +107,12 @@ Yes. You can optionally configure an IP/domain whitelist for the public endpoint
 Yes. The validator recognizes major/minor/patch successions and warns on unexpected jumps.
 
 == Changelog ==
+
+= 1.2.0 - 2026-03-08 =
+* Added asset management: upload, replace, reorder, and delete plugin icons, banners, and screenshots directly in the admin UI
+   * Icons, banners, and screenshots are served to client sites via the wordpress.org-compatible API
+   * Geopattern fallback icons for plugins without a custom icon (following the WordPress.org convention)
+* Added permalink structure check: shows a notice when "Plain" permalinks are active (REST API requirement)
 
 = 1.1.3 - 2026-02-12 =
 * New bootstrap code (basicV2): multisite support and safe handling when update transient has no response/no_update keys

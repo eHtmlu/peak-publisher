@@ -43,6 +43,17 @@ class PublicAPI {
                 'version' => ['required' => false, 'default' => ''],
             ],
         ]);
+
+        // Geopattern fallback icon endpoint — public, no permission check.
+        // Based on WordPress.org Plugin Directory.
+        register_rest_route(self::NAMESPACE, '/plugins/geopattern-icon/(?P<file>[a-z0-9_-]+\.svg)', [
+            'methods' => 'GET',
+            'callback' => [$this, 'handle_geopattern_icon'],
+            'permission_callback' => '__return_true',
+            'args' => [
+                'file' => ['required' => true],
+            ],
+        ]);
     }
 
     public function check_permission(): bool {
@@ -748,6 +759,45 @@ class PublicAPI {
 		$markup .= '</ol>';
 		return $markup;
 	}
+
+    /**
+     * Output a SVG Geopattern for a given plugin slug.
+     *
+     * Based on WordPress.org Plugin Directory.
+     * @see https://github.com/WordPress/wordpress.org — geopattern_icon_route()
+     */
+    public function handle_geopattern_icon( \WP_REST_Request $request ) {
+        $file = $request->get_param( 'file' );
+        // Strip .svg extension.
+        $name = preg_replace( '/\.svg$/', '', $file );
+
+        // Parse slug and optional color from filename: {slug}_{6-hex-chars} or just {slug}.
+        $slug  = $name;
+        $color = '';
+        if ( preg_match( '/^(.+)_([a-f0-9]{6})$/', $name, $m ) ) {
+            $slug  = $m[1];
+            $color = $m[2];
+        }
+
+        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/libs/geopattern-1.1.0/geopattern_loader.php';
+
+        $icon = new \Pblsh\Vendor\RedeyeVentures\GeoPattern\GeoPattern();
+        $icon->setString( $slug );
+        if ( strlen( $color ) === 6 && strspn( $color, 'abcdef0123456789' ) === 6 ) {
+            $icon->setColor( '#' . $color );
+        }
+
+        $svg = $icon->toSVG();
+        $year_in_seconds = 365 * DAY_IN_SECONDS;
+
+        header( 'Content-Type: image/svg+xml' );
+        header( 'Cache-Control: public, max-age=' . $year_in_seconds );
+        header( 'Expires: ' . gmdate( 'D, d M Y H:i:s \G\M\T', time() + $year_in_seconds ) );
+
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- SVG output from trusted library.
+        echo $svg;
+        exit;
+    }
 }
 
 PublicAPI::init();

@@ -528,6 +528,118 @@ function strip_utf8_bom(string $content): string {
 
 
 /**
+ * Retrieve the average color of a specified image.
+ *
+ * Samples five points (rule of thirds + center) and averages their RGB values.
+ * Algorithm matches Jetpack's Tonesque library used by WordPress.org Plugin Directory.
+ *
+ * Based on WordPress.org Plugin Directory.
+ * @see https://github.com/WordPress/wordpress.org — class-tools.php
+ * @see Jetpack Tonesque — grab_points() / grab_color() / get_color()
+ *
+ * @param string $file_path Absolute filesystem path to the image.
+ * @return string|false Average color as a 6-char lowercase hex value (no #), false on failure.
+ */
+function get_image_average_color( string $file_path ) {
+    if ( ! function_exists( 'imagecreatefromstring' ) ) {
+        return false;
+    }
+
+    if ( ! file_exists( $file_path ) || ! is_readable( $file_path ) ) {
+        return false;
+    }
+
+    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file read.
+    $data = file_get_contents( $file_path );
+    if ( $data === false ) {
+        return false;
+    }
+
+    $img = @imagecreatefromstring( $data );
+    if ( ! $img ) {
+        return false;
+    }
+
+    $width  = imagesx( $img );
+    $height = imagesy( $img );
+
+    // Sample five points based on rule of thirds and center (same as Tonesque::grab_points).
+    $left_x   = (int) round( $width / 3 );
+    $right_x  = (int) round( ( $width / 3 ) * 2 );
+    $top_y    = (int) round( $height / 3 );
+    $bottom_y = (int) round( ( $height / 3 ) * 2 );
+    $center_x = (int) round( $width / 2 );
+    $center_y = (int) round( $height / 2 );
+
+    $points = [
+        imagecolorat( $img, $left_x,   $top_y ),
+        imagecolorat( $img, $right_x,  $top_y ),
+        imagecolorat( $img, $left_x,   $bottom_y ),
+        imagecolorat( $img, $right_x,  $bottom_y ),
+        imagecolorat( $img, $center_x, $center_y ),
+    ];
+
+    // Average the RGB channels (same as Tonesque::grab_color).
+    $r = [];
+    $g = [];
+    $b = [];
+    foreach ( $points as $color_index ) {
+        $c  = imagecolorsforindex( $img, $color_index );
+        $r[] = $c['red'];
+        $g[] = $c['green'];
+        $b[] = $c['blue'];
+    }
+
+    imagedestroy( $img );
+
+    $red   = (int) round( array_sum( $r ) / 5 );
+    $green = (int) round( array_sum( $g ) / 5 );
+    $blue  = (int) round( array_sum( $b ) / 5 );
+
+    return sprintf( '%02x%02x%02x', $red, $green, $blue );
+}
+
+
+/**
+ * Retrieve the Geopattern SVG URL for a given plugin.
+ *
+ * Based on WordPress.org Plugin Directory.
+ * @see https://github.com/WordPress/wordpress.org — class-template.php
+ *
+ * @param \WP_Post|int|string $post   Post object, ID, or plugin slug.
+ * @param string|null         $color  Optional hex color (6 chars, no #). If null, read from post meta.
+ * @return string Geopattern icon URL.
+ */
+function get_geopattern_icon_url( $post = null, ?string $color = null ): string {
+    if ( is_string( $post ) ) {
+        // Treat as slug — look up the post.
+        $plugin = get_page_by_path( $post, OBJECT, 'pblsh_plugin' );
+    } else {
+        $plugin = get_post( $post );
+    }
+
+    if ( ! $plugin ) {
+        return '';
+    }
+
+    if ( is_null( $color ) ) {
+        $color = get_post_meta( $plugin->ID, 'assets_banners_color', true );
+    }
+
+    if ( strlen( $color ) === 6 && strspn( $color, 'abcdef0123456789' ) === 6 ) {
+        $color = "_{$color}";
+    } else {
+        $color = '';
+    }
+
+    // The slug + color combine to form the cache buster, like on wordpress.org.
+    $url = rest_url( 'pblsh/v1/plugins/geopattern-icon/' . $plugin->post_name . $color . '.svg' );
+
+    return $url;
+}
+
+
+/**
  * Polyfills for PHP 8.0 functions.
  */
 if (!function_exists('str_starts_with')) {

@@ -326,7 +326,10 @@ class AssetManager {
                 return $this->get_public_url($plugin_slug, $info['filename']);
             }
         }
-        return null;
+
+        // Geopattern fallback when no icon was uploaded.
+        $geopattern_url = get_geopattern_icon_url( $plugin_slug );
+        return $geopattern_url ?: null;
     }
 
     /**
@@ -374,35 +377,51 @@ class AssetManager {
     /**
      * Build the icons array for the public API response (update-check & plugin_information).
      *
+     * Follows the same logic as WordPress.org Plugin Directory:
+     * - SVG has priority — if present, raster icons are ignored.
+     * - If no SVG, look for 128x128 (1x) and 256x256 (2x) separately.
+     * - If only 2x exists, it doubles as the main icon.
+     * - Geopattern fallback when no icon was uploaded.
+     *
+     * Always returns an array with exactly four keys. Values are either a URL string or false:
+     * - 'svg'       — SVG icon URL, or false.
+     * - 'icon'      — Primary icon URL (SVG, 1x raster, 2x fallback, or geopattern), or false.
+     * - 'icon_2x'   — 2x raster icon URL, or false. Not set when SVG or geopattern is used.
+     * - 'generated' — true if the icon is a generated geopattern fallback, false otherwise.
+     *
      * @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
+     *
+     * @return array{svg: string|false, icon: string|false, icon_2x: string|false, generated: bool}
      */
     public function get_plugin_icon(string $plugin_slug): array {
-        $assets_dir = get_plugin_assets_basedir($plugin_slug);
-        if (!is_dir($assets_dir)) {
-            return [];
-        }
-        $icons      = [];
+        $icon      = false;
+        $icon_2x   = false;
+        $svg       = false;
+        $generated = false;
 
-        // Icons
-        foreach (['icon.svg', 'icon-256x256.png', 'icon-256x256.jpg', 'icon-256x256.gif', 'icon-128x128.png', 'icon-128x128.jpg', 'icon-128x128.gif'] as $filename) {
-            if (!file_exists(trailingslashit($assets_dir) . $filename)) {
-                continue;
-            }
-            $url = $this->get_public_url($plugin_slug, $filename);
-            if ($filename === 'icon.svg') {
-                $icons['svg'] = $url;
-            } elseif (str_starts_with($filename, 'icon-256')) {
-                if (!isset($icons['icon_2x'])) {
-                    $icons['icon_2x'] = $url;
-                }
-            } elseif (str_starts_with($filename, 'icon-128')) {
-                if (!isset($icons['icon'])) {
-                    $icons['icon'] = $url;
-                }
-            }
+        // Check for SVG first — it takes priority over raster icons.
+        $svg_info = $this->find_file_in_slot($plugin_slug, 'icon_svg');
+        if ($svg_info) {
+            $svg  = $svg_info['url'];
+            $icon = $svg_info['url'];
+        } else {
+            // Look for raster icons.
+            $icon_1x_info = $this->find_file_in_slot($plugin_slug, 'icon_128');
+            $icon_2x_info = $this->find_file_in_slot($plugin_slug, 'icon_256');
+
+            $icon_2x = $icon_2x_info ? $icon_2x_info['url'] : false;
+            $icon    = $icon_1x_info ? $icon_1x_info['url'] : ($icon_2x ?: false);
         }
 
-        return $icons;
+        // Geopattern fallback when no icon was uploaded.
+        // Based on WordPress.org Plugin Directory.
+        if (!$icon) {
+            $generated = true;
+            $icon_2x   = false;
+            $icon      = get_geopattern_icon_url($plugin_slug) ?: false;
+        }
+
+        return compact('svg', 'icon', 'icon_2x', 'generated');
     }
 
     /**

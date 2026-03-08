@@ -552,7 +552,15 @@ class AdminAPI {
         $manager   = new AssetManager();
         // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Passed to AssetManager which validates it.
         $file_data = $_FILES['file'];
-        return $manager->upload($id, $post->post_name, $slot, $screenshot_n, $file_data);
+        $result = $manager->upload($id, $post->post_name, $slot, $screenshot_n, $file_data);
+
+        // Calculate banner average color for geopattern fallback icons.
+        // Based on WordPress.org Plugin Directory.
+        if ( in_array( $slot, [ 'banner_sd', 'banner_hd', 'banner_svg' ], true ) && ( $result['status'] ?? '' ) !== 'error' ) {
+            $this->update_banner_color( $id, $post->post_name );
+        }
+
+        return $result;
     }
 
     /**
@@ -574,6 +582,13 @@ class AdminAPI {
         require_once __DIR__ . '/AssetManager.php';
         $manager = new AssetManager();
         $deleted = $manager->delete($post->post_name, $slot, $screenshot_n);
+
+        // Recalculate banner average color for geopattern fallback icons.
+        // Based on WordPress.org Plugin Directory.
+        if ( in_array( $slot, [ 'banner_sd', 'banner_hd', 'banner_svg' ], true ) ) {
+            $this->update_banner_color( $id, $post->post_name );
+        }
+
         $assets  = $manager->get_all($post->post_name);
         $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
         return ['status' => 'ok', 'deleted' => $deleted, 'assets' => $assets];
@@ -604,6 +619,39 @@ class AdminAPI {
         $assets = $manager->get_all($post->post_name);
         $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
         return ['status' => 'ok', 'assets' => $assets];
+    }
+
+    /**
+     * Recalculate and store the banner average color for geopattern fallback icons.
+     *
+     * Based on WordPress.org Plugin Directory.
+     * @see https://github.com/WordPress/wordpress.org — class-tools.php
+     */
+    private function update_banner_color( int $plugin_id, string $plugin_slug ): void {
+        $assets_dir = get_plugin_assets_basedir( $plugin_slug );
+        $banner_average_color = '';
+
+        // Find the first available banner file (prefer HD, then SD).
+        $banner_files = [
+            'banner-1544x500.png', 'banner-1544x500.jpg', 'banner-1544x500.gif',
+            'banner-772x250.png', 'banner-772x250.jpg', 'banner-772x250.gif',
+        ];
+        foreach ( $banner_files as $filename ) {
+            $filepath = trailingslashit( $assets_dir ) . $filename;
+            if ( file_exists( $filepath ) ) {
+                $banner_average_color = get_image_average_color( $filepath );
+                if ( ! is_string( $banner_average_color ) ) {
+                    $banner_average_color = '';
+                }
+                break;
+            }
+        }
+
+        if ( $banner_average_color !== '' ) {
+            update_post_meta( $plugin_id, 'assets_banners_color', wp_slash( $banner_average_color ) );
+        } else {
+            delete_post_meta( $plugin_id, 'assets_banners_color' );
+        }
     }
 
     public function get_peak_publisher_settings_rest(): array {

@@ -556,7 +556,7 @@ class AdminAPI {
 
         // Calculate banner average color for geopattern fallback icons.
         // Based on WordPress.org Plugin Directory.
-        if ( in_array( $slot, [ 'banner_sd', 'banner_hd', 'banner_svg' ], true ) && ( $result['status'] ?? '' ) !== 'error' ) {
+        if ( in_array( $slot, [ 'banner_sd', 'banner_hd' ], true ) && ( $result['status'] ?? '' ) !== 'error' ) {
             $this->update_banner_color( $id, $post->post_name );
         }
 
@@ -585,7 +585,7 @@ class AdminAPI {
 
         // Recalculate banner average color for geopattern fallback icons.
         // Based on WordPress.org Plugin Directory.
-        if ( in_array( $slot, [ 'banner_sd', 'banner_hd', 'banner_svg' ], true ) ) {
+        if ( in_array( $slot, [ 'banner_sd', 'banner_hd' ], true ) ) {
             $this->update_banner_color( $id, $post->post_name );
         }
 

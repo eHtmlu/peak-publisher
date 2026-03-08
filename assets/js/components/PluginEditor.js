@@ -125,8 +125,9 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const slotHint   = (s) => s.prefix + '.{' + (s.exts || []).join('|') + '}';
 
     const renderAssetBox = (slot, assetData, screenshotN = null, caption = null) => {
+        const stripTags = (html) => { const el = document.createElement('div'); el.innerHTML = html; return el.textContent || ''; };
         const screenshotLabel = caption
-            ? screenshotN + '. ' + caption
+            ? screenshotN + '. ' + stripTags(caption)
             : __('Screenshot', 'peak-publisher') + ' ' + screenshotN;
         const raw = ASSET_SLOTS[slot];
         const def = slot === 'screenshot'

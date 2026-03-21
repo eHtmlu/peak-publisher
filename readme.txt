@@ -8,7 +8,7 @@ Tags: publish, plugins, self-hosted, updates, server
 Requires at least: 5.8
 Requires PHP: 8.1
 Tested up to: 6.9
-Stable tag: 1.2.0
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -107,6 +107,10 @@ Yes. You can optionally configure an IP/domain whitelist for the public endpoint
 Yes. The validator recognizes major/minor/patch successions and warns on unexpected jumps.
 
 == Changelog ==
+
+= 1.3.0 - 2026-03-21 =
+* Added standalone redirect URL setting for redirecting frontend visitors in standalone mode
+* Added visual highlighting of the update notification icon in the admin toolbar in standalone mode
 
 = 1.2.0 - 2026-03-08 =
 * Added asset management: upload, replace, reorder, and delete plugin icons, banners, and screenshots directly in the admin UI

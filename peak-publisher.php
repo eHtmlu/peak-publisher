@@ -6,8 +6,8 @@
  * Version: 1.2.0
  * Requires at least: 5.8
  * Requires PHP: 8.1
- * Author: ehtmlu
- * Author URI: https://ehtmlu.com/
+ * Author: wppeak.com
+ * Author URI: https://wppeak.com/
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: peak-publisher

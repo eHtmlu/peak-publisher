@@ -7,7 +7,7 @@
  * Requires at least: 5.8
  * Requires PHP: 8.1
  * Author: wppeak.com
- * Author URI: https://wppeak.com/
+ * Author URI: https://www.wppeak.com/
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: peak-publisher

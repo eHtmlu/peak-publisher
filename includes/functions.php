@@ -86,6 +86,7 @@ function get_peak_publisher_settings(): array {
             '._*',
         ],
         'ip_whitelist' => [],
+        'standalone_redirect_url' => '',
     ];
     $raw = get_option('pblsh_settings');
     $data = is_array($raw) ? $raw : [];
@@ -126,6 +127,8 @@ function sanitize_peak_publisher_settings(array $settings): array {
     $out['ip_whitelist'] = array_values(array_filter(array_map(function($ip){
         return trim((string) $ip);
     }, $ips)));
+    $redirect_url = trim((string) ($settings['standalone_redirect_url'] ?? ''));
+    $out['standalone_redirect_url'] = $redirect_url !== '' ? esc_url_raw($redirect_url) : '';
     return $out;
 }
 

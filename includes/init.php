@@ -13,6 +13,15 @@ if (is_standalone()) {
     // Disable themes.
     add_filter('wp_using_themes', '__return_false');
 
+    // Redirect frontend visitors to a configured URL.
+    $standalone_redirect_url = get_peak_publisher_settings()['standalone_redirect_url'] ?? '';
+    if ($standalone_redirect_url !== '') {
+        add_action('wp', function() use ($standalone_redirect_url) {
+            wp_redirect($standalone_redirect_url, 302);
+            exit;
+        }, 9999);
+    }
+
     // Re-enable redirection from "/admin" to real admin url (because it's disabled by disabling themes)
     add_action('init', function() {
         // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- We only check if the request URI is 'admin', so we don't need further sanitization.

@@ -3,7 +3,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
     const { __ } = wp.i18n;
     const { useState, useEffect, createElement, createInterpolateElement } = wp.element;
     const { useSelect } = wp.data;
-    const { Button, Panel, PanelBody, ToggleControl, TextareaControl, SelectControl, RadioControl } = wp.components;
+    const { Button, Panel, PanelBody, ToggleControl, TextControl, TextareaControl, SelectControl, RadioControl } = wp.components;
     const { showAlert } = Pblsh.Utils;
     const settingsController = window.Pblsh.Controllers && window.Pblsh.Controllers.Settings ? window.Pblsh.Controllers.Settings : null;
 
@@ -18,6 +18,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         readme_txt_convert_to_utf8_without_bom: false,
         ip_whitelist: [],
         count_plugin_installations: false,
+        standalone_redirect_url: '',
     });
     const [currentSection, setCurrentSection] = useState('general');
 
@@ -37,6 +38,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.wordspace_artifacts_to_remove) ? serverSettings.wordspace_artifacts_to_remove : []),
                 ip_whitelist: getTextareaFromList(Array.isArray(serverSettings.ip_whitelist) ? serverSettings.ip_whitelist : []),
                 count_plugin_installations: !!serverSettings.count_plugin_installations,
+                standalone_redirect_url: serverSettings.standalone_redirect_url || '',
             });
         }
     }, [serverSettings && JSON.stringify(serverSettings)]);
@@ -66,6 +68,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 wordspace_artifacts_to_remove: normalizeListFromTextarea(settings.wordspace_artifacts_to_remove),
                 ip_whitelist: normalizeListFromTextarea(settings.ip_whitelist),
                 count_plugin_installations: !!settings.count_plugin_installations,
+                standalone_redirect_url: settings.standalone_redirect_url || '',
             };
             if (settingsController) {
                 await settingsController.save(payload);
@@ -105,6 +108,21 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                             onChange: (val) => setField('standalone_mode', val),
                             __next40pxDefaultSize: true,
                         }),
+                        settings.standalone_mode ? createElement('div', {
+                                style: {
+                                    marginInlineStart: '40px',
+                                },
+                            },
+                            createElement(TextControl, {
+                                type: 'url',
+                                label: __('Frontend redirect URL', 'peak-publisher'),
+                                help: __('Leave blank to show a white page.', 'peak-publisher'),
+                                value: settings.standalone_redirect_url,
+                                placeholder: 'https://',
+                                onChange: (val) => setField('standalone_redirect_url', val),
+                                __next40pxDefaultSize: true,
+                            })
+                        ) : null,
                         createElement('p', null, createElement('strong', null, __('Peak Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Peak Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'peak-publisher'))),
                     ),
                 ),

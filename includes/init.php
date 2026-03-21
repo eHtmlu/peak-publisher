@@ -80,34 +80,36 @@ if (is_standalone()) {
     add_action('admin_head', function() {
         ?>
         <style>
-            .admin-color-fresh     { --pblsh-wp-update-notif-bg: #d63638; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #d63638; --pblsh-wp-update-notif-hover-text: #fff; }
-            .admin-color-light     { --pblsh-wp-update-notif-bg: #d64e07; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #fff;    --pblsh-wp-update-notif-hover-text: #04a4cc; }
-            .admin-color-modern    { --pblsh-wp-update-notif-bg: #3858e9; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #0c0c0c; --pblsh-wp-update-notif-hover-text: #7b90ff; }
-            .admin-color-blue      { --pblsh-wp-update-notif-bg: #e1a948; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #4796b3; --pblsh-wp-update-notif-hover-text: #fff;    }
-            .admin-color-midnight  { --pblsh-wp-update-notif-bg: #69a8bb; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #262b2c; --pblsh-wp-update-notif-hover-text: #e14d43; }
-            .admin-color-coffee    { --pblsh-wp-update-notif-bg: #9ea476; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #46403c; --pblsh-wp-update-notif-hover-text: #c7a589; }
-            .admin-color-sunrise   { --pblsh-wp-update-notif-bg: #ccaf0b; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #be3631; --pblsh-wp-update-notif-hover-text: #f7e3d3; }
-            .admin-color-ectoplasm { --pblsh-wp-update-notif-bg: #d46f15; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #413256; --pblsh-wp-update-notif-hover-text: #a3b745; }
-            .admin-color-ocean     { --pblsh-wp-update-notif-bg: #aa9d88; --pblsh-wp-update-notif-text: #fff; --pblsh-wp-update-notif-hover-bg: #627d83; --pblsh-wp-update-notif-hover-text: #9ebaa0; }
+            .admin-color-fresh     { --pblsh-wp-update-notif-bg: #d63638; }
+            .admin-color-light     { --pblsh-wp-update-notif-bg: #d64e07; }
+            .admin-color-modern    { --pblsh-wp-update-notif-bg: #3858e9; }
+            .admin-color-blue      { --pblsh-wp-update-notif-bg: #e1a948; }
+            .admin-color-midnight  { --pblsh-wp-update-notif-bg: #69a8bb; }
+            .admin-color-coffee    { --pblsh-wp-update-notif-bg: #9ea476; }
+            .admin-color-sunrise   { --pblsh-wp-update-notif-bg: #ccaf0b; }
+            .admin-color-ectoplasm { --pblsh-wp-update-notif-bg: #d46f15; }
+            .admin-color-ocean     { --pblsh-wp-update-notif-bg: #aa9d88; }
 
-            #wpadminbar #wp-admin-bar-updates > .ab-item {
-                background-color: var(--pblsh-wp-update-notif-bg) !important;
-            }
-            #wpadminbar #wp-admin-bar-updates > .ab-item,
-            #wpadminbar #wp-admin-bar-updates .ab-icon:before,
             #wpadminbar #wp-admin-bar-updates .ab-label {
-                color: var(--pblsh-wp-update-notif-text) !important;
+                position: relative;
+                color: #fff !important;
+                margin-left: 4px;
+                margin-right: 6px;
+                z-index: 0;
             }
-            #wpadminbar:not(.mobile) .ab-top-menu > #wp-admin-bar-updates > .ab-item:hover,
-            #wpadminbar .ab-top-menu > #wp-admin-bar-updates.hover > .ab-item {
-                background-color: var(--pblsh-wp-update-notif-hover-bg) !important;
-                color: var(--pblsh-wp-update-notif-hover-text) !important;
-            }
-            #wpadminbar:not(.mobile) .ab-top-menu > #wp-admin-bar-updates:hover .ab-icon:before,
-            #wpadminbar .ab-top-menu > #wp-admin-bar-updates.hover .ab-icon:before,
-            #wpadminbar:not(.mobile) .ab-top-menu > #wp-admin-bar-updates:hover .ab-label,
-            #wpadminbar .ab-top-menu > #wp-admin-bar-updates.hover .ab-label {
-                color: var(--pblsh-wp-update-notif-hover-text) !important;
+
+            #wpadminbar #wp-admin-bar-updates .ab-label::after {
+                content: " ";
+                position: absolute;
+                min-width: 20px;
+                width: calc(6px + 100% + 6px);
+                height: 20px;
+                background: var(--pblsh-wp-update-notif-bg);
+                border-radius: 10px;
+                bottom: 50%;
+                right: 50%;
+                z-index: -1;
+                transform: translate(50%, 50%);
             }
         </style>
         <?php

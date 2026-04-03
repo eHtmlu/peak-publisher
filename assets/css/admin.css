@@ -410,6 +410,11 @@
 
 .pblsh--copy-btn {
     margin: 0 !important;
+    background: rgba(255, 255, 255, .85) !important;
+    min-height: 0 !important;
+    line-height: 1.5 !important;
+    padding: 0.15rem 0.6rem !important;
+    font-size: 0.8125rem !important;
 }
 
 

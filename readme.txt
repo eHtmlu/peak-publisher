@@ -7,8 +7,8 @@ Donate link: https://www.paypal.com/donate/?hosted_button_id=2G6L8NWVXZ4T4
 Tags: publish, plugins, self-hosted, updates, server
 Requires at least: 5.8
 Requires PHP: 8.1
-Tested up to: 6.9
-Stable tag: 1.3.0
+Tested up to: 7.0
+Stable tag: 1.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -107,6 +107,9 @@ Yes. You can optionally configure an IP/domain whitelist for the public endpoint
 Yes. The validator recognizes major/minor/patch successions and warns on unexpected jumps.
 
 == Changelog ==
+
+= 1.3.1 - 2026-04-04 =
+* Fixed minor compatibility issues with WordPress 7.0
 
 = 1.3.0 - 2026-03-21 =
 * Added standalone redirect URL setting for redirecting frontend visitors in standalone mode

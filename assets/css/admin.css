@@ -1,6 +1,10 @@
 /* Peak Publisher Admin Styles - React Version */
 
-:root {
+/* Prevent layout shift from scrollbar appearing/disappearing.
+   The .pblsh-force-scrollbar class is added by an inline script only when
+   NOT inside an iframe (e.g. WordPress Playground), where overflow-y on
+   :root can interfere with the host frame's resize/scroll monitoring. */
+:root.pblsh-force-scrollbar {
     overflow-y: scroll;
 }
 

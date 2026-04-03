@@ -131,6 +131,13 @@ class AdminUI {
             $previous_handle = $handle;
         }
         
+        // Force persistent scrollbar only when NOT inside an iframe (avoids
+        // WordPress Playground crash where overflow-y on :root conflicts with
+        // the host frame's resize/scroll monitoring).
+        add_action('admin_head', function () {
+            echo "<script>if(window.self===window.top)document.documentElement.classList.add('pblsh-force-scrollbar')</script>\n";
+        }, 1);
+
         // Enqueue styles
         wp_enqueue_style(
             'pblsh-admin',

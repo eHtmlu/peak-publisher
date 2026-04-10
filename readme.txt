@@ -22,6 +22,16 @@ With a modern, task‑focused admin UI, you can add new plugins and releases via
 
 **With this solution, you can have your own self-hosted plugin update server in just 5 minutes, allowing you to centrally manage your plugins and deploy updates with incredible ease.**
 
+--
+
+== ❇️ COMING SOON ❇️ ==
+
+**Managing and Updating wp.org Plugins**
+
+In just a few weeks, Peak Publisher will let you manage plugins hosted on wordpress.org the same way you already manage self-hosted ones. Drag and drop your plugin folder onto Peak Publisher, and everything else is handled automatically — no more SVN.
+
+--
+
 == KEY FEATURES ==
 
 🚀 **Clean admin UI with a guided “Add New Plugin” flow**

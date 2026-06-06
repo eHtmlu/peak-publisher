@@ -52,7 +52,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                     ),
                     createElement('tbody', null,
                         plugins.map(plugin => 
-                            createElement('tr', { key: plugin.slug, className: 'pblsh--row' },
+                            createElement('tr', { key: plugin.id, className: 'pblsh--row' },
                                 createElement('td', { className: 'pblsh--table__status-cell' },
                                     createElement(wp.components.Button, {
                                         isTertiary: true,

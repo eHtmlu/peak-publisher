@@ -168,7 +168,7 @@ class AdminAPI {
             'posts_per_page' => -1,
         ]);
         $plugin_ids = array_map('intval', wp_list_pluck($plugins, 'ID'));
-        $releases_by_parent = $this->fetch_releases_grouped_by_parent($plugin_ids);
+        $releases_by_parent = fetch_releases_grouped_by_parent($plugin_ids);
 
         $out = [];
         foreach ($plugins as $plugin_post) {
@@ -187,41 +187,8 @@ class AdminAPI {
             return [];
         }
 
-        $releases_by_parent = $this->fetch_releases_grouped_by_parent([(int) $post->ID]);
+        $releases_by_parent = fetch_releases_grouped_by_parent([(int) $post->ID]);
         return $this->serialize_plugin_post($post, true, $releases_by_parent[(int) $post->ID] ?? []);
-    }
-
-    /**
-     * Load releases for multiple plugin posts in one query, grouped by parent ID.
-     *
-     * @param int[] $plugin_ids
-     * @return array<int, \WP_Post[]>
-     */
-    private function fetch_releases_grouped_by_parent(array $plugin_ids): array {
-        $plugin_ids = array_values(array_filter(array_map('intval', $plugin_ids)));
-        if (empty($plugin_ids)) {
-            return [];
-        }
-
-        $grouped = array_fill_keys($plugin_ids, []);
-        $releases = get_posts([
-            'post_type' => 'pblsh_release',
-            'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
-            'post_parent__in' => $plugin_ids,
-            'posts_per_page' => -1,
-            'orderby' => 'date',
-            'order' => 'DESC',
-        ]);
-
-        foreach ($releases as $release) {
-            $parent_id = (int) $release->post_parent;
-            if (!array_key_exists($parent_id, $grouped)) {
-                $grouped[$parent_id] = [];
-            }
-            $grouped[$parent_id][] = $release;
-        }
-
-        return $grouped;
     }
 
     /**

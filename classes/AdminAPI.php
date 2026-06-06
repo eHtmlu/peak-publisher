@@ -162,50 +162,17 @@ class AdminAPI {
      * Get plugins.
      */
     public function get_plugins(): array {
-        $out = [];
-
         $plugins = get_posts([
-            'post_type' => 'pblsh_plugin',
+            'post_type' => PBLSH_PLUGIN_POST_TYPES,
             'post_status' => 'any',
             'posts_per_page' => -1,
         ]);
+        $plugin_ids = array_map('intval', wp_list_pluck($plugins, 'ID'));
+        $releases_by_parent = $this->fetch_releases_grouped_by_parent($plugin_ids);
 
+        $out = [];
         foreach ($plugins as $plugin_post) {
-            $releases = get_posts([
-                'post_type' => 'pblsh_release',
-                'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
-                'post_parent' => $plugin_post->ID,
-                'posts_per_page' => -1,
-                'orderby' => 'date',
-                'order' => 'DESC',
-            ]);
-
-            $latest_version = '';
-            $latest_normalized = '';
-            $count_of_releases = count($releases);
-
-            foreach ($releases as $rel) {
-                $rel_data = json_decode((string) ($rel->post_content ?? ''), true);
-                $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-                $version = (string) ($rel_data['plugin_data']['Version'] ?? ($rel->post_title ?? ''));
-                if ($normalized !== '') {
-                    if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
-                        $latest_normalized = $normalized;
-                        $latest_version = $version;
-                    }
-                }
-            }
-
-            $out[] = [
-                'id' => $plugin_post->ID,
-                'name' => $plugin_post->post_title,
-                'slug' => $plugin_post->post_name,
-                'icon_url' => $this->assets()->get_best_icon_url($plugin_post->post_name),
-                'version' => $latest_version,
-                'status' => $plugin_post->post_status,
-                'count_of_releases' => $count_of_releases,
-                'installations_count' => get_plugin_installations_count((int) $plugin_post->ID),
-            ];
+            $out[] = $this->serialize_plugin_post($plugin_post, false, $releases_by_parent[(int) $plugin_post->ID] ?? []);
         }
         return $out;
     }
@@ -216,43 +183,106 @@ class AdminAPI {
     public function get_plugin(\WP_REST_Request $request): array {
         $id = (int) $request->get_param('id');
         $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
+        if (!is_plugin_post($post)) {
             return [];
         }
 
-        $releases_query = new \WP_Query([
+        $releases_by_parent = $this->fetch_releases_grouped_by_parent([(int) $post->ID]);
+        return $this->serialize_plugin_post($post, true, $releases_by_parent[(int) $post->ID] ?? []);
+    }
+
+    /**
+     * Load releases for multiple plugin posts in one query, grouped by parent ID.
+     *
+     * @param int[] $plugin_ids
+     * @return array<int, \WP_Post[]>
+     */
+    private function fetch_releases_grouped_by_parent(array $plugin_ids): array {
+        $plugin_ids = array_values(array_filter(array_map('intval', $plugin_ids)));
+        if (empty($plugin_ids)) {
+            return [];
+        }
+
+        $grouped = array_fill_keys($plugin_ids, []);
+        $releases = get_posts([
             'post_type' => 'pblsh_release',
             'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
-            'posts_per_page' => 50,
+            'post_parent__in' => $plugin_ids,
+            'posts_per_page' => -1,
             'orderby' => 'date',
             'order' => 'DESC',
-            'post_parent' => $post->ID,
         ]);
 
-        $latest_version = '';
-        $latest_normalized = '';
-
-        foreach ($releases_query->posts as $release) {
-            $rel_data = json_decode((string) $release->post_content, true) ?? [];
-            $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
-            if ($normalized !== '') {
-                if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
-                    $latest_normalized = $normalized;
-                    $latest_version = $version;
-                }
+        foreach ($releases as $release) {
+            $parent_id = (int) $release->post_parent;
+            if (!array_key_exists($parent_id, $grouped)) {
+                $grouped[$parent_id] = [];
             }
+            $grouped[$parent_id][] = $release;
         }
+
+        return $grouped;
+    }
+
+    /**
+     * Serialize a plugin post for admin REST responses.
+     *
+     * @param \WP_Post[] $releases
+     */
+    private function serialize_plugin_post(\WP_Post $post, bool $detail, array $releases = []): array {
+        $hosting_type = get_plugin_hosting_type($post);
+        [$latest_version, $count_of_releases] = $this->derive_release_info($releases);
+        $is_self_hosted = $hosting_type === 'self_hosted';
 
         return [
             'id' => $post->ID,
             'name' => $post->post_title,
             'slug' => $post->post_name,
-            'icon_url' => $this->assets()->get_best_icon_url($post->post_name),
+            'hosting_type' => $hosting_type,
+            'icon_url' => $is_self_hosted ? $this->assets()->get_best_icon_url($post->post_name) : null,
             'version' => $latest_version,
             'status' => $post->post_status,
-            'installations_count' => get_plugin_installations_count((int) $post->ID),
+            'count_of_releases' => $count_of_releases,
+            'installations_count' => $is_self_hosted ? get_plugin_installations_count((int) $post->ID) : 0,
         ];
+    }
+
+    /**
+     * Derive the latest version and release count from release posts.
+     *
+     * @param \WP_Post[] $releases
+     * @return array{0:string,1:int}
+     */
+    private function derive_release_info(array $releases): array {
+        $latest_version = '';
+        $latest_normalized = '';
+
+        foreach ($releases as $release) {
+            if (!$release instanceof \WP_Post) {
+                continue;
+            }
+
+            $rel_data = json_decode((string) ($release->post_content ?? ''), true);
+            if (!is_array($rel_data)) {
+                $rel_data = [];
+            }
+
+            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
+            $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
+            if ($normalized === '' && $version !== '') {
+                $normalized = normalize_version_number($version);
+            }
+            if ($normalized === '') {
+                continue;
+            }
+
+            if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
+                $latest_normalized = $normalized;
+                $latest_version = $version;
+            }
+        }
+
+        return [$latest_version, count($releases)];
     }
 
     /**

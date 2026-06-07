@@ -6,12 +6,39 @@ defined('ABSPATH') || exit;
 
 
 /**
+ * Gets settings needed during early plugin bootstrap.
+ *
+ * This intentionally avoids the full settings API builder because it also adds
+ * admin-only credential metadata.
+ *
+ * @return array{standalone_mode:bool,standalone_redirect_url:string}
+ */
+function get_peak_publisher_boot_settings(): array {
+    static $boot_settings = null;
+    if ($boot_settings !== null) {
+        return $boot_settings;
+    }
+
+    $raw = get_option('pblsh_settings');
+    $data = is_array($raw) ? $raw : [];
+    $redirect_url = trim((string) ($data['standalone_redirect_url'] ?? ''));
+
+    $boot_settings = [
+        'standalone_mode' => (bool) ($data['standalone_mode'] ?? false),
+        'standalone_redirect_url' => $redirect_url !== '' ? esc_url_raw($redirect_url) : '',
+    ];
+
+    return $boot_settings;
+}
+
+
+/**
  * Checks if the operating mode is standalone.
  */
 function is_standalone(): bool {
     static $is_standalone = null;
     if ($is_standalone === null) {
-        $is_standalone = get_peak_publisher_settings()['standalone_mode'] ?? false;
+        $is_standalone = get_peak_publisher_boot_settings()['standalone_mode'];
     }
     return $is_standalone;
 }

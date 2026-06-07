@@ -25,10 +25,16 @@ define('PBLSH_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('PBLSH_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 
-// General setup.
+// Include helper functions.
+require_once __DIR__ . '/includes/settings.php';
+require_once __DIR__ . '/includes/uploads.php';
+require_once __DIR__ . '/includes/hosting.php';
+require_once __DIR__ . '/includes/wporg_cache.php';
 require_once __DIR__ . '/includes/functions.php';
-require_once __DIR__ . '/includes/init.php';
 
+
+// Initialize general setup.
+require_once __DIR__ . '/includes/init.php';
 
 
 // Initialize admin interface.

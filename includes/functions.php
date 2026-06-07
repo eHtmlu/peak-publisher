@@ -5,13 +5,6 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
-require_once __DIR__ . '/settings.php';
-require_once __DIR__ . '/uploads.php';
-require_once __DIR__ . '/hosting.php';
-require_once __DIR__ . '/wporg_cache.php';
-
-
-
 /**
  * Gets Update URI.
  */

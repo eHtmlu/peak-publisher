@@ -21,6 +21,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         standalone_redirect_url: '',
     });
     const [currentSection, setCurrentSection] = useState('general');
+    const [checkingEncryptionKey, setCheckingEncryptionKey] = useState(false);
 
     useEffect(() => {
         try {
@@ -58,6 +59,24 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         return (Array.isArray(list) ? list : []).join('\n');
     };
 
+    const getEncryptionKeyStatus = () => {
+        return serverSettings && serverSettings.wporg_credentials
+            ? (serverSettings.wporg_credentials.encryption_key_status || 'missing')
+            : 'missing';
+    };
+
+    const handleCheckEncryptionKey = async () => {
+        try {
+            setCheckingEncryptionKey(true);
+            const nextSettings = await window.Pblsh.API.getSettings();
+            wp.data.dispatch('pblsh/settings').setServer(nextSettings);
+        } catch (e) {
+            showAlert(e && e.message ? e.message : __('Could not check the encryption key status.', 'peak-publisher'), 'error');
+        } finally {
+            setCheckingEncryptionKey(false);
+        }
+    };
+
     const handleSave = async () => {
         try {
             const payload = {
@@ -91,9 +110,19 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         { id: 'analytics', title: __('Analytics', 'peak-publisher'), icon: 'chart_line' },
         { id: 'uploads', title: __('Uploads', 'peak-publisher'), icon: 'cloud_upload' },
         { id: 'security', title: __('Security', 'peak-publisher'), icon: 'security' },
+        { id: 'wordpress-org', title: __('wordpress.org', 'peak-publisher'), icon: 'wordpress', separatorBefore: true },
     ];
 
     const renderSection = () => {
+        const encryptionKeyStatus = getEncryptionKeyStatus();
+        const encryptionKeyIsValid = encryptionKeyStatus === 'valid';
+        const encryptionKeyMessage = serverSettings && serverSettings.wporg_credentials
+            ? (serverSettings.wporg_credentials.encryption_key_message || '')
+            : '';
+        const encryptionKeySnippet = serverSettings && serverSettings.wporg_credentials
+            ? (serverSettings.wporg_credentials.wp_config_snippet || '')
+            : '';
+
         if (currentSection === 'general') {
             return createElement(wp.element.Fragment, null,
                 createElement('section', { className: 'pblsh--settings--main__section' },
@@ -238,6 +267,35 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 ),
             );
         }
+        if (currentSection === 'wordpress-org') {
+            return createElement(wp.element.Fragment, null,
+                createElement('section', { className: 'pblsh--settings--main__section' },
+                    createElement('h2', null, __('wordpress.org', 'peak-publisher')),
+                    createElement('div', { className: 'pblsh--settings--main__section-content' },
+                        !encryptionKeyIsValid ? createElement('div', { className: 'pblsh--settings-wporg-encryption-setup' },
+                            createElement('h3', { className: 'pblsh--settings-wporg-encryption-setup__title' }, __('First step:', 'peak-publisher')),
+                            createElement('p', { className: 'pblsh--settings-wporg-encryption-setup__text' }, __('Before adding your WordPress.org credentials, you need to configure encrypted storage of those credentials.', 'peak-publisher')),
+                            createElement('p', { className: 'pblsh--settings-wporg-encryption-setup__text' }, __('Please add the following line to your wp-config.php file:', 'peak-publisher')),
+                            encryptionKeySnippet ? createElement('code', { className: 'pblsh--settings-wporg-encryption-setup__code' }, encryptionKeySnippet) : null,
+                            createElement('h4', { className: 'pblsh--settings-wporg-encryption-setup__status-label' }, __('Status', 'peak-publisher')),
+                            createElement('div', { className: 'pblsh--settings-wporg-encryption-setup__status-row' },
+                                createElement('span', { className: `pblsh--settings-wporg-encryption-setup__status pblsh--settings-wporg-encryption-setup__status--${encryptionKeyStatus}` },
+                                    createElement('span', null, encryptionKeyMessage)
+                                ),
+                                createElement(Button, {
+                                    className: 'pblsh--settings-wporg-encryption-setup__status-check',
+                                    isSecondary: true,
+                                    onClick: handleCheckEncryptionKey,
+                                    isBusy: checkingEncryptionKey,
+                                    disabled: checkingEncryptionKey,
+                                    __next40pxDefaultSize: true,
+                                }, __('Check again', 'peak-publisher'))
+                            )
+                        ) : null,
+                    )
+                )
+            );
+        }
         return null;
     };
 
@@ -245,14 +303,16 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         createElement('div', { className: 'pblsh--settings__inner' },
             createElement('div', { className: 'pblsh--settings--sidebar' },
                 createElement('div', { className: 'pblsh--settings--sidebar__nav' },
-                    sections.map(section => 
-                        createElement('div', {
-                            key: section.id,
-                            className: `pblsh--settings--sidebar__nav-item ${currentSection === section.id ? 'pblsh--settings--sidebar__nav-item--active' : ''}`,
-                            onClick: () => setCurrentSection(section.id)
-                        },
-                            Pblsh.Utils.getSvgIcon(section.icon),
-                            createElement('span', { className: 'pblsh--settings--sidebar__nav-title' }, section.title)
+                    sections.map(section =>
+                        createElement(wp.element.Fragment, { key: section.id },
+                            section.separatorBefore ? createElement('div', { className: 'pblsh--settings--sidebar__nav-separator' }) : null,
+                            createElement('div', {
+                                className: `pblsh--settings--sidebar__nav-item ${currentSection === section.id ? 'pblsh--settings--sidebar__nav-item--active' : ''}`,
+                                onClick: () => setCurrentSection(section.id)
+                            },
+                                Pblsh.Utils.getSvgIcon(section.icon),
+                                createElement('span', { className: 'pblsh--settings--sidebar__nav-title' }, section.title)
+                            )
                         )
                     )
                 )

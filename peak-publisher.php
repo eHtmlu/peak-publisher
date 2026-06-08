@@ -26,6 +26,7 @@ define('PBLSH_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 
 // Include helper functions.
+require_once __DIR__ . '/includes/encryption.php';
 require_once __DIR__ . '/includes/settings.php';
 require_once __DIR__ . '/includes/uploads.php';
 require_once __DIR__ . '/includes/hosting.php';

@@ -86,6 +86,14 @@ function get_peak_publisher_settings(): array {
     $raw = get_option('pblsh_settings');
     $data = is_array($raw) ? $raw : [];
     $merged = sanitize_peak_publisher_settings(array_merge($defaults, $data));
+
+    $key_status = get_encryption_key_status();
+    $merged['wporg_credentials'] = [
+        'encryption_key_status' => $key_status['status'],
+        'encryption_key_message' => $key_status['message'],
+        'wp_config_snippet' => generate_encryption_key_snippet(),
+    ];
+
     return $merged;
 }
 

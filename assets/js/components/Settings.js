@@ -184,6 +184,15 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         }
     };
 
+    const handleRemoveWporgAccount = () => {
+        setSettings(prev => ({
+            ...prev,
+            wporg_username: '',
+            wporg_password: '',
+        }));
+        setCredentialTestStatus(null);
+    };
+
     if (loading) {
         return createElement('div', { className: 'pblsh--loading' },
             createElement('div', { className: 'pblsh--loading__spinner' }),
@@ -206,6 +215,8 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         const encryptionKeySnippet = serverSettings && serverSettings.wporg_credentials
             ? (serverSettings.wporg_credentials.wp_config_snippet || '')
             : '';
+        const hasStoredWporgAccount = !!settings.wporg_original_username;
+        const wporgAccountMarkedForRemoval = hasStoredWporgAccount && settings.wporg_username === '' && settings.wporg_password === '';
 
         if (currentSection === 'general') {
             return createElement(wp.element.Fragment, null,
@@ -374,6 +385,23 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                                     disabled: checkingEncryptionKey,
                                     __next40pxDefaultSize: true,
                                 }, __('Check again', 'peak-publisher'))
+                            ),
+                        ) : null,
+                        !encryptionKeyIsValid && hasStoredWporgAccount ? createElement('div', { className: 'pblsh--settings-wporg-account pblsh--settings-wporg-account--key-blocked' },
+                            createElement('h4', { className: 'pblsh--settings-wporg-account__title' }, __('Saved account', 'peak-publisher')),
+                            createElement('div', { className: 'pblsh--settings-wporg-account__row' },
+                                createElement('p', { className: 'pblsh--settings-wporg-account__username' }, createElement(wporgAccountMarkedForRemoval ? 'del' : 'span', null,
+                                    __('Username: ', 'peak-publisher'),
+                                    settings.wporg_original_username
+                                )),
+                                wporgAccountMarkedForRemoval
+                                    ? createElement('p', { className: 'pblsh--settings-wporg-account__pending-removal' }, __('Save settings now to complete the removal.', 'peak-publisher'))
+                                    : createElement(Button, {
+                                        isSecondary: true,
+                                        isDestructive: true,
+                                        onClick: handleRemoveWporgAccount,
+                                        __next40pxDefaultSize: true,
+                                    }, __('Remove saved account', 'peak-publisher'))
                             )
                         ) : null,
                         encryptionKeyIsValid && [

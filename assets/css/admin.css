@@ -1471,6 +1471,52 @@
     margin-top: 1.25rem;
 }
 
+.pblsh--settings-wporg-account--key-blocked {
+    padding-top: 0.25rem;
+}
+
+.pblsh--settings-wporg-account__title {
+    margin: 0;
+    color: #646970;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.pblsh--settings-wporg-account__row {
+    display: flex;
+    align-items: stretch;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.pblsh--settings-wporg-account__row > .components-button {
+    flex: 0 0 auto;
+}
+
+.pblsh--settings-wporg-account__username {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
+    padding: 0.25rem 0.625rem;
+    background: #fff;
+    border: 1px solid #d7e4f5;
+    border-radius: 0.25rem;
+    color: #1d2327;
+    overflow-wrap: anywhere;
+}
+
+.pblsh--settings-wporg-account__pending-removal {
+    flex: 1 1 auto;
+    max-width: 10rem;
+    margin: 0;
+    color: #8a5a00;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+}
+
 body.toplevel_page_pblsh-peak-publisher [data-lastpass-icon-root],
 body.toplevel_page_pblsh-peak-publisher [data-lastpass-root],
 body.toplevel_page_pblsh-peak-publisher [data-lastpass-infield],

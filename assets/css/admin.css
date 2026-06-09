@@ -1488,6 +1488,25 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     overflow: hidden !important;
 }
 
+.pblsh--settings-wporg-account__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.pblsh--settings-wporg-account__status {
+    font-weight: 600;
+}
+
+.pblsh--settings-wporg-account__status--success {
+    color: var(--color-green);
+}
+
+.pblsh--settings-wporg-account__status--error {
+    color: var(--color-red);
+}
+
 
 
 

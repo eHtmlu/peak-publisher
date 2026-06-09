@@ -33,7 +33,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         wporg_original_username: '',
     });
     const [currentSection, setCurrentSection] = useState('general');
+    const [testingCredentials, setTestingCredentials] = useState(false);
     const [checkingEncryptionKey, setCheckingEncryptionKey] = useState(false);
+    const [credentialTestStatus, setCredentialTestStatus] = useState(null);
 
     useEffect(() => {
         try {
@@ -60,6 +62,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 wporg_password: firstHasPassword ? PASSWORD_MASKED : '',
                 wporg_original_username: firstUsername,
             });
+            setCredentialTestStatus(null);
         }
     }, [serverSettings && JSON.stringify(serverSettings)]);
 
@@ -94,28 +97,18 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
             }
             return next;
         });
+        setCredentialTestStatus(null);
     };
 
     const setWporgPassword = (value) => {
         setSettings(prev => ({ ...prev, wporg_password: value }));
+        setCredentialTestStatus(null);
     };
 
     const getEncryptionKeyStatus = () => {
         return serverSettings && serverSettings.wporg_credentials
             ? (serverSettings.wporg_credentials.encryption_key_status || 'missing')
             : 'missing';
-    };
-
-    const handleCheckEncryptionKey = async () => {
-        try {
-            setCheckingEncryptionKey(true);
-            const nextSettings = await window.Pblsh.API.getSettings();
-            wp.data.dispatch('pblsh/settings').setServer(nextSettings);
-        } catch (e) {
-            showAlert(e && e.message ? e.message : __('Could not check the encryption key status.', 'peak-publisher'), 'error');
-        } finally {
-            setCheckingEncryptionKey(false);
-        }
     };
 
     const buildSavePayload = () => {
@@ -159,6 +152,35 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
             if (typeof onClose === 'function') onClose();
         } catch (e) {
             showAlert(e.message, 'error');
+        }
+    };
+
+    const handleTestCredentials = async () => {
+        try {
+            setTestingCredentials(true);
+            setCredentialTestStatus(null);
+            const result = await window.Pblsh.API.testSvnCredentials(settings.wporg_username || '', settings.wporg_password || '');
+            if (result && result.status === 'ok') {
+                setCredentialTestStatus({ type: 'success', message: __('Connection successful.', 'peak-publisher') });
+            } else {
+                setCredentialTestStatus({ type: 'error', message: __('Connection test failed.', 'peak-publisher') });
+            }
+        } catch (e) {
+            setCredentialTestStatus({ type: 'error', message: e && e.message ? e.message : __('Connection test failed.', 'peak-publisher') });
+        } finally {
+            setTestingCredentials(false);
+        }
+    };
+
+    const handleCheckEncryptionKey = async () => {
+        try {
+            setCheckingEncryptionKey(true);
+            const nextSettings = await window.Pblsh.API.getSettings();
+            wp.data.dispatch('pblsh/settings').setServer(nextSettings);
+        } catch (e) {
+            showAlert(e && e.message ? e.message : __('Could not check the encryption key status.', 'peak-publisher'), 'error');
+        } finally {
+            setCheckingEncryptionKey(false);
         }
     };
 
@@ -383,7 +405,19 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                                         }
                                     ),
                                     __next40pxDefaultSize: true,
-                                })
+                                }),
+                                createElement('div', { className: 'pblsh--settings-wporg-account__actions' },
+                                    createElement(Button, {
+                                        isSecondary: true,
+                                        onClick: handleTestCredentials,
+                                        isBusy: testingCredentials,
+                                        disabled: !encryptionKeyIsValid || testingCredentials || !settings.wporg_username || !settings.wporg_password,
+                                        __next40pxDefaultSize: true,
+                                    }, __('Test connection', 'peak-publisher')),
+                                    credentialTestStatus ? createElement('span', {
+                                        className: `pblsh--settings-wporg-account__status pblsh--settings-wporg-account__status--${credentialTestStatus.type}`,
+                                    }, credentialTestStatus.message) : null
+                                )
                             )
                         ]
                     )
@@ -437,5 +471,3 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         )
     );
 });
-
-

@@ -115,6 +115,12 @@ lodash.set(window, 'Pblsh.API', {
             body: settings,
         });
     },
+    testSvnCredentials: async (username, password) => {
+        return await window.Pblsh.API.request('admin/svn/test-credentials', {
+            method: 'POST',
+            body: { username, password },
+        });
+    },
     // Get all assets for a plugin
     getPluginAssets: async (pluginId) => {
         return await window.Pblsh.API.request('plugins/' + pluginId + '/assets');

@@ -128,6 +128,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/admin/svn/test-credentials', [
+            'methods' => 'POST',
+            'callback' => [$this, 'test_svn_credentials'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         // Plugin assets
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
             'methods' => 'GET',
@@ -668,6 +674,84 @@ class AdminAPI {
             ));
         }
         return get_peak_publisher_settings();
+    }
+
+    public function test_svn_credentials(\WP_REST_Request $request) {
+        // Accept only JSON object bodies; malformed requests fall back to empty input.
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+
+        // Normalize the username exactly like the settings save pipeline does.
+        $username = normalize_wporg_username($params['username'] ?? null);
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+
+        // Preserve password bytes except for requiring an actual string value.
+        $password = wporg_string_from_value($params['password'] ?? '');
+        if ($password === '') {
+            return $this->rest_error_response($this->make_rest_error(
+                'invalid_credentials',
+                __('Invalid wordpress.org username or password.', 'peak-publisher'),
+                401
+            ));
+        }
+
+        // A masked password means the user is testing the stored credential.
+        if ($password === WPORG_PASSWORD_MASKED) {
+            $credentials = get_wporg_credentials($username);
+            if (is_wp_error($credentials)) {
+                return $this->rest_error_response($credentials);
+            }
+            // Missing stored credentials should behave like an authentication failure.
+            if ($credentials === null) {
+                return $this->rest_error_response($this->make_rest_error(
+                    'invalid_credentials',
+                    __('Invalid wordpress.org username or password.', 'peak-publisher'),
+                    401
+                ));
+            }
+            $password = $credentials['password'];
+        } else {
+            // Keep testing aligned with saving: credentials are only accepted when they can be stored securely.
+            $key = get_encryption_key();
+            if (is_wp_error($key)) {
+                return $this->rest_error_response($key);
+            }
+        }
+
+        // Load the wordpress.org plugin SVN client only for the endpoint that needs it.
+        require_once __DIR__ . '/WporgPluginSvnClient.php';
+        try {
+            // PROPFIND against the repository root verifies Basic Auth without checking plugin permissions.
+            $client = new WporgPluginSvnClient($username, $password);
+            $client->test_credentials();
+            return [ 'status' => 'ok' ];
+        } catch (WporgPluginSvnClientException $e) {
+            // Known SVN failures keep their normalized error code and HTTP status.
+            return $this->rest_error_response($this->make_rest_error(
+                $e->get_error_code(),
+                $e->getMessage(),
+                $e->get_http_status()
+            ));
+        } catch (\RuntimeException $e) {
+            // Unexpected runtime failures are hidden behind a generic SVN auth error.
+            return $this->rest_error_response($this->make_rest_error(
+                'svn_auth_check_failed',
+                __('wordpress.org SVN returned an unexpected authentication response.', 'peak-publisher'),
+                502
+            ));
+        }
+    }
+
+    private function make_rest_error(string $code, string $message, int $status, ?string $field = null): \WP_Error {
+        $data = [ 'status' => $status ];
+        if ($field !== null && $field !== '') {
+            $data['field'] = $field;
+        }
+        return new \WP_Error($code, $message, $data);
     }
 
     private function rest_error_response(\WP_Error $error): \WP_REST_Response {

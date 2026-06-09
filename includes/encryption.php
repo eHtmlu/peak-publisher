@@ -236,6 +236,74 @@ function encrypt_wporg_password(string $plain) {
 /**
  * @return string|\WP_Error
  */
+function decrypt_wporg_password(string $encrypted) {
+    // Validate the configured key before attempting to decrypt.
+    $base_key = get_encryption_key();
+    if (is_wp_error($base_key)) {
+        return $base_key;
+    }
+
+    // Only values with the expected prefix are treated as encrypted passwords.
+    if (!wporg_is_encrypted_password($encrypted)) {
+        return wporg_credentials_error(
+            'credential_decrypt_failed',
+            __('Stored wordpress.org credentials could not be decrypted.', 'peak-publisher'),
+            400
+        );
+    }
+
+    // Decode and minimally validate the stored IV, tag, and ciphertext payload.
+    $payload = base64_decode(substr($encrypted, strlen(WPORG_ENCRYPTED_PREFIX)), true);
+    if (!is_string($payload) || strlen($payload) < 29) {
+        return wporg_credentials_error(
+            'credential_decrypt_failed',
+            __('Stored wordpress.org credentials could not be decrypted.', 'peak-publisher'),
+            400
+        );
+    }
+
+    // Decryption must not create a missing context behind the user's back.
+    $context_id = get_encryption_context_id(false);
+    if (is_wp_error($context_id)) {
+        return wporg_credentials_error(
+            'credential_decrypt_failed',
+            __('Stored wordpress.org credentials could not be decrypted.', 'peak-publisher'),
+            400
+        );
+    }
+
+    // Split the packed payload back into the AES-GCM parameters.
+    $iv = substr($payload, 0, 12);
+    $tag = substr($payload, 12, 16);
+    $ciphertext = substr($payload, 28);
+    // Use the same site-specific derived key that was used for encryption.
+    $data_key = derive_site_encryption_key($base_key, $context_id);
+    $plain = openssl_decrypt(
+        $ciphertext,
+        'aes-256-gcm',
+        $data_key,
+        OPENSSL_RAW_DATA,
+        $iv,
+        $tag,
+        WPORG_CREDENTIAL_AAD
+    );
+
+    // Authentication failure or malformed ciphertext must fail closed.
+    if (!is_string($plain)) {
+        return wporg_credentials_error(
+            'credential_decrypt_failed',
+            __('Stored wordpress.org credentials could not be decrypted.', 'peak-publisher'),
+            400
+        );
+    }
+
+    return $plain;
+}
+
+
+/**
+ * @return string|\WP_Error
+ */
 function normalize_wporg_username($username, ?string $field = null) {
     // Trim admin input while rejecting non-string values as empty.
     $trimmed = trim(wporg_string_from_value($username));
@@ -449,6 +517,48 @@ function sanitize_wporg_accounts(array $resolved_accounts) {
     }
 
     return $out;
+}
+
+
+/**
+ * @return array{username:string,password:string}|null|\WP_Error
+ */
+function get_wporg_credentials(string $username) {
+    // Normalize the requested username before matching stored accounts.
+    $normalized = normalize_wporg_username($username);
+    if (is_wp_error($normalized)) {
+        return $normalized;
+    }
+
+    // Load stored accounts directly to avoid the masked settings API output.
+    $settings = get_option('pblsh_settings');
+    $accounts = is_array($settings) && is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
+    foreach ($accounts as $account) {
+        // Skip malformed stored rows.
+        if (!is_array($account)) {
+            continue;
+        }
+        // Match only the exact normalized wordpress.org username.
+        $stored_username = normalize_wporg_username($account['username'] ?? null);
+        if (is_wp_error($stored_username) || $stored_username !== $normalized) {
+            continue;
+        }
+
+        // Decrypt only the selected account's password.
+        $password = decrypt_wporg_password(wporg_string_from_value($account['password'] ?? ''));
+        if (is_wp_error($password)) {
+            return $password;
+        }
+
+        // Return plaintext only to internal backend callers.
+        return [
+            'username' => $normalized,
+            'password' => $password,
+        ];
+    }
+
+    // No account exists for this username.
+    return null;
 }
 
 

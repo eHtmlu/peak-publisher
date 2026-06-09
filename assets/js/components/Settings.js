@@ -3,9 +3,18 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
     const { __ } = wp.i18n;
     const { useState, useEffect, createElement, createInterpolateElement } = wp.element;
     const { useSelect } = wp.data;
-    const { Button, Panel, PanelBody, ToggleControl, TextControl, TextareaControl, SelectControl, RadioControl } = wp.components;
+    const { Button, ToggleControl, TextControl, TextareaControl } = wp.components;
     const { showAlert } = Pblsh.Utils;
     const settingsController = window.Pblsh.Controllers && window.Pblsh.Controllers.Settings ? window.Pblsh.Controllers.Settings : null;
+    const PASSWORD_MASKED = '__MASKED__';
+    const PASSWORD_MANAGER_IGNORE_PROPS = {
+        autoComplete: 'off',
+        'data-lpignore': 'true',
+        'data-1p-ignore': 'true',
+        'data-bwignore': 'true',
+        'data-dashlane-disabled-on-field': 'true',
+        'data-form-type': 'other',
+    };
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const loading = useSelect((select) => select('pblsh/settings').isLoading(), []);
@@ -19,6 +28,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         ip_whitelist: [],
         count_plugin_installations: false,
         standalone_redirect_url: '',
+        wporg_username: '',
+        wporg_password: '',
+        wporg_original_username: '',
     });
     const [currentSection, setCurrentSection] = useState('general');
     const [checkingEncryptionKey, setCheckingEncryptionKey] = useState(false);
@@ -31,6 +43,10 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
 
     useEffect(() => {
         if (serverSettings) {
+            const accounts = Array.isArray(serverSettings.wporg_accounts) ? serverSettings.wporg_accounts : [];
+            const firstAccount = accounts[0] || {};
+            const firstUsername = firstAccount.username || '';
+            const firstHasPassword = !!firstAccount.has_password;
             setSettings({
                 standalone_mode: !!serverSettings.standalone_mode,
                 auto_add_top_level_folder: !!serverSettings.auto_add_top_level_folder,
@@ -40,6 +56,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 ip_whitelist: getTextareaFromList(Array.isArray(serverSettings.ip_whitelist) ? serverSettings.ip_whitelist : []),
                 count_plugin_installations: !!serverSettings.count_plugin_installations,
                 standalone_redirect_url: serverSettings.standalone_redirect_url || '',
+                wporg_username: firstUsername,
+                wporg_password: firstHasPassword ? PASSWORD_MASKED : '',
+                wporg_original_username: firstUsername,
             });
         }
     }, [serverSettings && JSON.stringify(serverSettings)]);
@@ -57,6 +76,28 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
 
     const getTextareaFromList = (list) => {
         return (Array.isArray(list) ? list : []).join('\n');
+    };
+
+    const cloneServerSettings = () => {
+        try {
+            return JSON.parse(JSON.stringify(serverSettings || {}));
+        } catch (e) {
+            return {};
+        }
+    };
+
+    const setWporgUsername = (value) => {
+        setSettings(prev => {
+            const next = { ...prev, wporg_username: value };
+            if (prev.wporg_password === PASSWORD_MASKED && value !== prev.wporg_original_username) {
+                next.wporg_password = '';
+            }
+            return next;
+        });
+    };
+
+    const setWporgPassword = (value) => {
+        setSettings(prev => ({ ...prev, wporg_password: value }));
     };
 
     const getEncryptionKeyStatus = () => {
@@ -77,18 +118,39 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         }
     };
 
+    const buildSavePayload = () => {
+        const payload = cloneServerSettings();
+        delete payload.wporg_credentials;
+
+        payload.standalone_mode = !!settings.standalone_mode;
+        payload.auto_add_top_level_folder = !!settings.auto_add_top_level_folder;
+        payload.auto_remove_workspace_artifacts = !!settings.auto_remove_workspace_artifacts;
+        payload.readme_txt_convert_to_utf8_without_bom = !!settings.readme_txt_convert_to_utf8_without_bom;
+        payload.wordspace_artifacts_to_remove = normalizeListFromTextarea(settings.wordspace_artifacts_to_remove);
+        payload.ip_whitelist = normalizeListFromTextarea(settings.ip_whitelist);
+        payload.count_plugin_installations = !!settings.count_plugin_installations;
+        payload.standalone_redirect_url = settings.standalone_redirect_url || '';
+
+        const accounts = Array.isArray(payload.wporg_accounts) ? payload.wporg_accounts : [];
+        const firstAccount = {
+            ...(accounts[0] && typeof accounts[0] === 'object' ? accounts[0] : {}),
+            username: settings.wporg_username || '',
+            password: settings.wporg_password || '',
+        };
+
+        if (accounts.length > 0 || firstAccount.username !== '' || firstAccount.password !== '') {
+            accounts[0] = firstAccount;
+            payload.wporg_accounts = accounts;
+        } else {
+            payload.wporg_accounts = [];
+        }
+
+        return payload;
+    };
+
     const handleSave = async () => {
         try {
-            const payload = {
-                standalone_mode: !!settings.standalone_mode,
-                auto_add_top_level_folder: !!settings.auto_add_top_level_folder,
-                auto_remove_workspace_artifacts: !!settings.auto_remove_workspace_artifacts,
-                readme_txt_convert_to_utf8_without_bom: !!settings.readme_txt_convert_to_utf8_without_bom,
-                wordspace_artifacts_to_remove: normalizeListFromTextarea(settings.wordspace_artifacts_to_remove),
-                ip_whitelist: normalizeListFromTextarea(settings.ip_whitelist),
-                count_plugin_installations: !!settings.count_plugin_installations,
-                standalone_redirect_url: settings.standalone_redirect_url || '',
-            };
+            const payload = buildSavePayload();
             if (settingsController) {
                 await settingsController.save(payload);
             } else {
@@ -292,6 +354,38 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                                 }, __('Check again', 'peak-publisher'))
                             )
                         ) : null,
+                        encryptionKeyIsValid && [
+                            createElement('p', null, __('Connect your wordpress.org account to manage your plugins in the wordpress.org SVN repository.', 'peak-publisher')),
+                            createElement('div', { className: 'pblsh--settings-wporg-account' },
+                                createElement(TextControl, {
+                                    label: __('WordPress.org username', 'peak-publisher'),
+                                    value: settings.wporg_username,
+                                    onChange: setWporgUsername,
+                                    ...PASSWORD_MANAGER_IGNORE_PROPS,
+                                    help: __('Use your case-sensitive WordPress.org username, not your email address.', 'peak-publisher'),
+                                    __next40pxDefaultSize: true,
+                                }),
+                                createElement(TextControl, {
+                                    type: 'password',
+                                    label: __('SVN Password', 'peak-publisher'),
+                                    value: settings.wporg_password,
+                                    onChange: setWporgPassword,
+                                    disabled: !encryptionKeyIsValid,
+                                    ...PASSWORD_MANAGER_IGNORE_PROPS,
+                                    help: createInterpolateElement(
+                                        __('Use your WordPress.org <profileLink>SVN password</profileLink>, not your regular login password.', 'peak-publisher'),
+                                        {
+                                            profileLink: createElement('a', {
+                                                href: 'https://profiles.wordpress.org/me/profile/edit/group/3/?screen=svn-password',
+                                                target: '_blank',
+                                                rel: 'noreferrer',
+                                            }),
+                                        }
+                                    ),
+                                    __next40pxDefaultSize: true,
+                                })
+                            )
+                        ]
                     )
                 )
             );

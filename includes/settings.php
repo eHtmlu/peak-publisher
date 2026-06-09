@@ -45,10 +45,10 @@ function is_standalone(): bool {
 
 
 /**
- * Gets plugin settings (defaults + sanitized option).
+ * Gets default plugin settings.
  */
-function get_peak_publisher_settings(): array {
-    $defaults = [
+function get_peak_publisher_settings_defaults(): array {
+    return [
         'standalone_mode' => false,
         'auto_add_top_level_folder' => true,
         'auto_remove_workspace_artifacts' => true,
@@ -82,32 +82,62 @@ function get_peak_publisher_settings(): array {
         ],
         'ip_whitelist' => [],
         'standalone_redirect_url' => '',
+        'wporg_accounts' => [],
     ];
+}
+
+/**
+ * Gets plugin settings (defaults + sanitized option).
+ */
+function get_peak_publisher_settings(): array {
+    $defaults = get_peak_publisher_settings_defaults();
     $raw = get_option('pblsh_settings');
     $data = is_array($raw) ? $raw : [];
-    $merged = sanitize_peak_publisher_settings(array_merge($defaults, $data));
+    $merged = array_merge($defaults, $data);
+    $out = sanitize_peak_publisher_non_secret_settings($merged);
+
+    $stored_accounts = is_array($data['wporg_accounts'] ?? null) ? $data['wporg_accounts'] : [];
+    $out['wporg_accounts'] = get_wporg_accounts_for_api($stored_accounts);
 
     $key_status = get_encryption_key_status();
-    $merged['wporg_credentials'] = [
+    $out['wporg_credentials'] = [
         'encryption_key_status' => $key_status['status'],
         'encryption_key_message' => $key_status['message'],
         'wp_config_snippet' => generate_encryption_key_snippet(),
     ];
 
-    return $merged;
+    return $out;
 }
 
 /**
  * Updates the plugin settings.
+ *
+ * @return true|\WP_Error
  */
-function update_peak_publisher_settings(array $settings): void {
-    update_option('pblsh_settings', sanitize_peak_publisher_settings($settings), false);
+function update_peak_publisher_settings(array $settings) {
+    unset($settings['wporg_credentials']);
+
+    $current = get_option('pblsh_settings');
+    $current = is_array($current) ? $current : [];
+
+    $resolved = resolve_masked_wporg_passwords($settings, $current);
+    if (is_wp_error($resolved)) {
+        return $resolved;
+    }
+
+    $sanitized = sanitize_peak_publisher_settings($resolved);
+    if (is_wp_error($sanitized)) {
+        return $sanitized;
+    }
+
+    update_option('pblsh_settings', $sanitized, false);
+    return true;
 }
 
 /**
- * Sanitizes the plugin settings.
+ * Sanitizes non-secret settings without touching stored credentials.
  */
-function sanitize_peak_publisher_settings(array $settings): array {
+function sanitize_peak_publisher_non_secret_settings(array $settings): array {
     $out = [];
     $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
     $out['auto_add_top_level_folder'] = (bool) ($settings['auto_add_top_level_folder'] ?? true);
@@ -132,5 +162,23 @@ function sanitize_peak_publisher_settings(array $settings): array {
     }, $ips)));
     $redirect_url = trim((string) ($settings['standalone_redirect_url'] ?? ''));
     $out['standalone_redirect_url'] = $redirect_url !== '' ? esc_url_raw($redirect_url) : '';
+    return $out;
+}
+
+/**
+ * Sanitizes the plugin settings for the save path.
+ *
+ * @return array|\WP_Error
+ */
+function sanitize_peak_publisher_settings(array $settings) {
+    $out = sanitize_peak_publisher_non_secret_settings($settings);
+
+    $accounts = is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
+    $sanitized_accounts = sanitize_wporg_accounts($accounts);
+    if (is_wp_error($sanitized_accounts)) {
+        return $sanitized_accounts;
+    }
+    $out['wporg_accounts'] = $sanitized_accounts;
+
     return $out;
 }

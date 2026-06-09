@@ -653,11 +653,41 @@ class AdminAPI {
         return get_peak_publisher_settings();
     }
 
-    public function save_peak_publisher_settings_rest(\WP_REST_Request $request): array {
+    public function save_peak_publisher_settings_rest(\WP_REST_Request $request) {
         $params = $request->get_json_params();
         if (!is_array($params)) { $params = []; }
-        update_peak_publisher_settings($params);
+        $result = update_peak_publisher_settings($params);
+        if (is_wp_error($result)) {
+            return $this->rest_error_response($result);
+        }
+        if ($result !== true) {
+            return $this->rest_error_response(new \WP_Error(
+                'settings_save_failed',
+                __('Settings could not be saved.', 'peak-publisher'),
+                [ 'status' => 500 ]
+            ));
+        }
         return get_peak_publisher_settings();
+    }
+
+    private function rest_error_response(\WP_Error $error): \WP_REST_Response {
+        $data = $error->get_error_data();
+        $status = is_array($data) && isset($data['status']) ? (int) $data['status'] : 500;
+        if ($status < 400 || $status > 599) {
+            $status = 500;
+        }
+
+        $payload = [
+            'status' => 'error',
+            'code' => $error->get_error_code(),
+            'message' => $error->get_error_message(),
+        ];
+        $field = is_array($data) ? (string) ($data['field'] ?? '') : '';
+        if ($field !== '') {
+            $payload['field'] = $field;
+        }
+
+        return new \WP_REST_Response($payload, $status);
     }
 }
 

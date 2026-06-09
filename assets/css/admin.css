@@ -1381,6 +1381,10 @@
     max-width: 100%;
 }
 
+.pblsh--settings--main__section-content .components-base-control:where(:not(:last-child)) {
+    margin-bottom: 1rem; /* 16px */
+}
+
 .pblsh--settings--main__section-content .components-base-control:last-child {
     margin-bottom: 0;
 }
@@ -1461,6 +1465,27 @@
 
 .pblsh--settings-wporg-encryption-setup__status-check {
     flex: 0 0 auto;
+}
+
+.pblsh--settings-wporg-account {
+    margin-top: 1.25rem;
+}
+
+body.toplevel_page_pblsh-peak-publisher [data-lastpass-icon-root],
+body.toplevel_page_pblsh-peak-publisher [data-lastpass-root],
+body.toplevel_page_pblsh-peak-publisher [data-lastpass-infield],
+body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
+.pblsh--settings [data-lastpass-icon-root],
+.pblsh--settings [data-lastpass-root],
+.pblsh--settings [data-lastpass-infield],
+.pblsh--settings img[id^="__lpform_"] {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
 }
 
 

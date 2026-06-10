@@ -121,6 +121,12 @@ lodash.set(window, 'Pblsh.API', {
             body: { username, password },
         });
     },
+    lookupWporgPlugin: async (username, slug) => {
+        return await window.Pblsh.API.request('admin/wporg/lookup-plugin', {
+            method: 'POST',
+            body: { username, slug },
+        });
+    },
     // Get all assets for a plugin
     getPluginAssets: async (pluginId) => {
         return await window.Pblsh.API.request('plugins/' + pluginId + '/assets');

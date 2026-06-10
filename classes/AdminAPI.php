@@ -134,6 +134,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/admin/wporg/lookup-plugin', [
+            'methods' => 'POST',
+            'callback' => [$this, 'lookup_wporg_plugin'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         // Plugin assets
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
             'methods' => 'GET',
@@ -744,6 +750,65 @@ class AdminAPI {
                 502
             ));
         }
+    }
+
+    public function lookup_wporg_plugin(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+
+        $slug = normalize_wporg_slug($params['slug'] ?? null, 'slug');
+        if (is_wp_error($slug)) {
+            return $this->rest_error_response($slug);
+        }
+
+        $credentials = get_wporg_credentials($username);
+        if (is_wp_error($credentials)) {
+            return $this->rest_error_response($credentials);
+        }
+        if ($credentials === null) {
+            return $this->rest_error_response($this->make_rest_error(
+                'account_not_configured',
+                __('Account not configured.', 'peak-publisher'),
+                400,
+                'username'
+            ));
+        }
+
+        $existing = get_posts([
+            'post_type' => 'pblsh_wporg_plugin',
+            'post_status' => 'any',
+            'name' => $slug,
+            'posts_per_page' => 1,
+        ]);
+        $existing_post = !empty($existing) && $existing[0] instanceof \WP_Post ? $existing[0] : null;
+
+        require_once __DIR__ . '/WporgPluginSvnClient.php';
+        $client = new WporgPluginSvnClient($username, $credentials['password']);
+        $access = $client->can_write($slug);
+        $access_status = (string) ($access['status'] ?? 'error');
+        if (!in_array($access_status, ['ok', 'no_write_access', 'not_found', 'error'], true)) {
+            $access_status = 'error';
+        }
+
+        return [
+            'status' => 'ok',
+            'plugin' => [
+                'slug' => $slug,
+                'name' => null,
+                'already_imported' => $existing_post instanceof \WP_Post,
+                'existing_plugin_id' => $existing_post instanceof \WP_Post ? (int) $existing_post->ID : null,
+                'has_write_access' => $access_status === 'ok' && !empty($access['has_write_access']),
+                'access_status' => $access_status,
+                'message' => isset($access['message']) && is_string($access['message']) ? $access['message'] : null,
+            ],
+        ];
     }
 
     private function make_rest_error(string $code, string $message, int $status, ?string $field = null): \WP_Error {

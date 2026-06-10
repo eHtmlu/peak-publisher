@@ -45,3 +45,26 @@ function get_plugin_hosting_type($post_or_id): string {
 function is_wporg_plugin($post_or_id): bool {
     return get_plugin_hosting_type($post_or_id) === 'wporg';
 }
+
+
+/**
+ * Validates a canonical wordpress.org plugin slug.
+ *
+ * @return string|\WP_Error
+ */
+function normalize_wporg_slug($slug, ?string $field = null) {
+    $slug = is_string($slug) ? trim($slug) : '';
+    if ($slug === '' || !preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $slug)) {
+        $data = [ 'status' => 400 ];
+        if ($field !== null && $field !== '') {
+            $data['field'] = $field;
+        }
+        return new \WP_Error(
+            'invalid_slug',
+            __('Invalid plugin slug.', 'peak-publisher'),
+            $data
+        );
+    }
+
+    return $slug;
+}

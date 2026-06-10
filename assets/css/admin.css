@@ -916,6 +916,37 @@
     white-space: normal;
 }
 
+.pblsh--table__name-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+}
+
+.pblsh--hosting-badge {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 1.375rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.1875rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: normal;
+}
+
+.pblsh--hosting-badge--self-hosted {
+    background: #f1f1f1;
+    color: #50575e;
+}
+
+.pblsh--hosting-badge--wporg {
+    background: #e7f5ff;
+    color: #005f8f;
+}
+
 /* Slug Column */
 .pblsh--table__slug-header {
     min-width: 9.375rem; /* 150px */

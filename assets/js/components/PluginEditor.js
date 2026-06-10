@@ -15,6 +15,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     };
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const showInstallations = !!(serverSettings && serverSettings.count_plugin_installations);
+    const isWporg = pluginData && pluginData.hosting_type === 'wporg';
+    const hostingLabel = isWporg ? __('WordPress.org', 'peak-publisher') : __('Self-hosted', 'peak-publisher');
+    const hostingClass = isWporg
+        ? 'pblsh--hosting-badge pblsh--hosting-badge--wporg'
+        : 'pblsh--hosting-badge pblsh--hosting-badge--self-hosted';
 
     // ---- Asset state ----
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
@@ -22,7 +27,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const [uploadingSlot, setUploadingSlot] = useState(null);   // 'icon_128' | 'screenshot-3' | null
     const [uploadProgress, setUploadProgress] = useState(0);
     const fileInputRefs = useRef({});  // { [slotKey]: HTMLInputElement }
-    const validTabs = ['releases', 'assets'];
+    const validTabs = isWporg ? ['releases'] : ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
     const [draggingN, setDraggingN] = useState(null);     // screenshot_n being dragged
     const [dragOverN, setDragOverN] = useState(null);     // slot N being hovered during drag
@@ -30,8 +35,15 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
 
     // Auto-fetch assets when the tab is pre-selected via deep link
     useEffect(() => {
-        if (activeTab === 'assets' && assets === null) fetchAssets();
+        if (activeTab === 'assets' && !isWporg && assets === null) fetchAssets();
     }, [pluginData && pluginData.id]);
+
+    useEffect(() => {
+        if (isWporg && activeTab === 'assets') {
+            setActiveTab('releases');
+            if (typeof onTabChange === 'function') onTabChange('releases');
+        }
+    }, [isWporg, activeTab]);
 
     const fetchAssets = async () => {
         if (!pluginData || !pluginData.id) return;
@@ -48,9 +60,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     };
 
     const switchToTab = (tab) => {
+        if (!validTabs.includes(tab)) tab = 'releases';
         setActiveTab(tab);
         if (typeof onTabChange === 'function') onTabChange(tab);
-        if (tab === 'assets' && assets === null) fetchAssets();
+        if (tab === 'assets' && !isWporg && assets === null) fetchAssets();
     };
 
     const handleAssetUpload = async (slot, screenshotN, file) => {
@@ -451,6 +464,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     createElement('div', { className: 'pblsh--plugin-meta' },
                                         createElement('strong', null, __('Slug', 'peak-publisher')),
                                         createElement('code', null, safe(pluginData?.slug) || '—'),
+                                        createElement('span', { className: hostingClass }, hostingLabel),
                                     ),
                                 ),
                             ),
@@ -597,7 +611,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             className: 'pblsh--tab-nav__tab' + (activeTab === 'releases' ? ' pblsh--tab-nav__tab--active' : ''),
             onClick: () => switchToTab('releases'),
         }, __('Releases', 'peak-publisher')),
-        createElement('button', {
+        !isWporg && createElement('button', {
             type: 'button',
             className: 'pblsh--tab-nav__tab' + (activeTab === 'assets' ? ' pblsh--tab-nav__tab--active' : ''),
             onClick: () => switchToTab('assets'),
@@ -614,7 +628,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             renderTabNav(),
                             createElement('div', { className: 'pblsh--tab-panel__body' },
                                 activeTab === 'releases' && renderReleasesTable(),
-                                activeTab === 'assets'   && renderAssetsSection(),
+                                activeTab === 'assets' && !isWporg && renderAssetsSection(),
                             ),
                         ),
                     ),

@@ -28,6 +28,12 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
         try { return !!select('pblsh/plugins').hasLoadedList(); } catch (e) { return false; }
     }, []);
     const showInstallations = !!(serverSettings && serverSettings.count_plugin_installations);
+    const getHostingLabel = (plugin) => plugin && plugin.hosting_type === 'wporg'
+        ? __('WordPress.org', 'peak-publisher')
+        : __('Self-hosted', 'peak-publisher');
+    const getHostingClass = (plugin) => plugin && plugin.hosting_type === 'wporg'
+        ? 'pblsh--hosting-badge pblsh--hosting-badge--wporg'
+        : 'pblsh--hosting-badge pblsh--hosting-badge--self-hosted';
 
     return createElement('div', { className: 'pblsh--list' },
         !hasLoadedList
@@ -77,7 +83,10 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                     }),
                                 ),
                                 createElement('td', { className: 'pblsh--table__name-cell' },
-                                    createElement('strong', null, plugin.name)
+                                    createElement('div', { className: 'pblsh--table__name-content' },
+                                        createElement('strong', null, plugin.name),
+                                        createElement('span', { className: getHostingClass(plugin) }, getHostingLabel(plugin))
+                                    )
                                 ),
                                 createElement('td', { className: 'pblsh--table__slug-cell' },
                                     createElement(Tooltip, { text: plugin.slug },

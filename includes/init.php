@@ -159,6 +159,33 @@ function init_custom_post_types(): void {
         'rewrite' => false,
     ]);
 
+    // pblsh_wporg_plugin
+    register_post_type('pblsh_wporg_plugin', [
+        'labels' => [
+            'name' => 'WordPress.org Plugins',
+            'singular_name' => 'WordPress.org Plugin',
+            'menu_name' => 'WordPress.org Plugins',
+            'name_admin_bar' => 'WordPress.org Plugin',
+            'add_new' => 'Add New',
+            'add_new_item' => 'Add New WordPress.org Plugin',
+            'new_item' => 'New WordPress.org Plugin',
+            'edit_item' => 'Edit WordPress.org Plugin',
+            'view_item' => 'View WordPress.org Plugin',
+            'all_items' => 'All WordPress.org Plugins',
+            'search_items' => 'Search WordPress.org Plugins',
+            'not_found' => 'No wordpress.org plugins found',
+            'not_found_in_trash' => 'No wordpress.org plugins found in Trash',
+        ],
+        'public' => false,
+        'show_ui' => true,
+        'show_in_menu' => false,
+        'show_in_rest' => false,
+        'supports' => ['title'/* , 'editor' */],
+        'capability_type' => 'post',
+        'has_archive' => false,
+        'rewrite' => false,
+    ]);
+
     // pblsh_release
     register_post_type('pblsh_release', [
         'labels' => [

@@ -63,6 +63,71 @@ class WporgPluginSvnClient {
         );
     }
 
+    public function list_directory(string $path = '', int $depth = 1): array {
+        $depth = max(0, min(1, $depth));
+        $response = $this->propfind($path, $depth);
+        $status = (int) ($response['status'] ?? 0);
+
+        if ($status === 404) {
+            throw new WporgPluginSvnClientException(
+                'not_found',
+                __('wordpress.org SVN path was not found.', 'peak-publisher'),
+                404
+            );
+        }
+        if (!$this->is_success_status($status) && $status !== 207) {
+            throw new WporgPluginSvnClientException(
+                'svn_read_failed',
+                __('wordpress.org SVN returned an unexpected read response.', 'peak-publisher'),
+                502
+            );
+        }
+
+        $entries = [];
+        foreach ($this->parse_multistatus((string) ($response['body'] ?? '')) as $entry) {
+            $href = (string) ($entry['href'] ?? '');
+            $relative_path = $this->href_to_repo_path($href);
+            if ($relative_path === '') {
+                continue;
+            }
+
+            $props = is_array($entry['props'] ?? null) ? $entry['props'] : [];
+            $is_collection = (($props['resourcetype'] ?? '') === 'collection') || str_ends_with((string) parse_url($href, PHP_URL_PATH), '/');
+            $entries[] = [
+                'path' => $relative_path,
+                'name' => basename(rtrim($relative_path, '/')),
+                'type' => $is_collection ? 'dir' : 'file',
+                'size' => isset($props['getcontentlength']) && ctype_digit((string) $props['getcontentlength']) ? (int) $props['getcontentlength'] : null,
+                'last_modified' => (string) ($props['getlastmodified'] ?? ''),
+                'revision' => $this->revision_int((string) ($props['version-name'] ?? '')),
+            ];
+        }
+
+        return $entries;
+    }
+
+    public function read_file(string $path): string {
+        $response = $this->request('GET', $path);
+        $status = (int) ($response['status'] ?? 0);
+
+        if ($status === 404) {
+            throw new WporgPluginSvnClientException(
+                'not_found',
+                __('wordpress.org SVN file was not found.', 'peak-publisher'),
+                404
+            );
+        }
+        if (!$this->is_success_status($status)) {
+            throw new WporgPluginSvnClientException(
+                'svn_read_failed',
+                __('wordpress.org SVN returned an unexpected file response.', 'peak-publisher'),
+                502
+            );
+        }
+
+        return (string) ($response['body'] ?? '');
+    }
+
     public function can_write(string $path): array {
         $path = trim($path, '/');
         if ($path === '' || $this->username === null || $this->password === null) {
@@ -322,6 +387,79 @@ class WporgPluginSvnClient {
             return trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_XML1));
         }
         return '';
+    }
+
+    private function parse_multistatus(string $xml): array {
+        if (trim($xml) === '') {
+            return [];
+        }
+
+        $sx = @simplexml_load_string($xml);
+        if ($sx === false) {
+            throw new WporgPluginSvnClientException(
+                'svn_read_failed',
+                __('wordpress.org SVN returned an invalid XML response.', 'peak-publisher'),
+                502
+            );
+        }
+
+        $sx->registerXPathNamespace('D', 'DAV:');
+        $responses = $sx->xpath('//D:response') ?: [];
+        if (empty($responses)) {
+            throw new WporgPluginSvnClientException(
+                'svn_read_failed',
+                __('wordpress.org SVN returned an XML response without WebDAV entries.', 'peak-publisher'),
+                502
+            );
+        }
+
+        $out = [];
+        foreach ($responses as $response) {
+            $response->registerXPathNamespace('D', 'DAV:');
+            $href_nodes = $response->xpath('D:href') ?: [];
+            $href = isset($href_nodes[0]) ? (string) $href_nodes[0] : '';
+            $props = [];
+
+            foreach (($response->xpath('D:propstat/D:prop') ?: []) as $prop_node) {
+                $prop_node->registerXPathNamespace('D', 'DAV:');
+                foreach ($prop_node->children('DAV:') as $prop) {
+                    $prop->registerXPathNamespace('D', 'DAV:');
+                    $name = $prop->getName();
+                    if ($name === 'resourcetype') {
+                        $props[$name] = !empty($prop->xpath('D:collection')) ? 'collection' : '';
+                        continue;
+                    }
+
+                    $href_prop_nodes = $prop->xpath('D:href') ?: [];
+                    if (!empty($href_prop_nodes)) {
+                        $props[$name] = (string) $href_prop_nodes[0];
+                        continue;
+                    }
+
+                    $props[$name] = trim((string) $prop);
+                }
+            }
+
+            $out[] = [
+                'href' => $href,
+                'props' => $props,
+            ];
+        }
+
+        return $out;
+    }
+
+    private function href_to_repo_path(string $href): string {
+        $path = parse_url($href, PHP_URL_PATH);
+        $path = is_string($path) ? $path : $href;
+        $path = rawurldecode($path);
+        $path = preg_replace('~/+~', '/', $path) ?? $path;
+        return trim($path, '/');
+    }
+
+    private function revision_int(string $revision): int {
+        $revision = trim($revision);
+        return ctype_digit($revision) ? (int) $revision : 0;
     }
 
     private function is_success_status(int $status): bool {

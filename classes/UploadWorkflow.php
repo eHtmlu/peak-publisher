@@ -363,7 +363,7 @@ class UploadWorkflow {
                 $readme_info['file_name'] = basename($readme_abs);
 
                 // Parse readme.txt and check if it is able to be encoded to JSON, if not, set the content to an empty array to avoid JSON encoding errors later.
-                $readme_content_parsed = $this->parse_readme_txt($readme_content);
+                $readme_content_parsed = parse_readme_txt($readme_content);
                 $readme_cleanup_info['can_be_encoded_to_json'] = json_encode($readme_content_parsed) !== false;
                 $readme_info['content'] = $readme_cleanup_info['can_be_encoded_to_json'] ? $readme_content_parsed : null;
             }
@@ -950,34 +950,17 @@ class UploadWorkflow {
     }
 
     /**
-     * Finds a root-level, case-sensitive 'readme.txt'. Returns absolute path or null.
-     * 
-     * @param string $root Plugin root directory.
-     * @return string|null Absolute path to the readme.txt file or null if not found.
+     * Finds the root-level readme file using wordpress.org's readme precedence.
      */
     private function find_readme_txt(string $root): ?string {
         $root = rtrim($root, '/\\') . '/';
-        try {
-            $files = scandir($root);
+        $files = scandir($root);
+        if (!is_array($files)) {
+            return null;
+        }
 
-            // START - Copy of WordPress.org code ( https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/cli/i18n/class-readme-import.php )
-            $readme_files = preg_grep( '!^readme.(txt|md)$!i', $files );
-            if ( ! $readme_files ) {
-                throw new Exception( 'Plugin has no readme file.' );
-            }
-    
-            $readme_file = reset( $readme_files );
-            foreach ( $readme_files as $f ) {
-                if ( '.txt' == strtolower( substr( $f, - 4 ) ) ) {
-                    $readme_file = $f;
-                    break;
-                }
-            }
-            // END - Copy of WordPress.org code
-
-            return $root . $readme_file;
-        } catch (\Throwable $e) {}
-        return null;
+        $readme_file = find_wporg_readme_file_name($files);
+        return $readme_file !== null ? $root . $readme_file : null;
     }
 
     /**
@@ -1040,24 +1023,6 @@ class UploadWorkflow {
             @file_put_contents($abs, $content);
         }
         return [$content, $modified, $actions];
-    }
-
-    /**
-     * Parses a WordPress.org-style readme.txt into headers/sections and includes raw content.
-     * Returns associative array suitable for storage under data.plugin_readme_txt.
-     *
-     * @param string $content Content of the readme.txt file.
-     * @return array Parsed readme.txt content.
-     */
-    private function parse_readme_txt(string $content): array {
-        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/readme/class-parser.php';
-        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/class-markdown.php';
-
-        // Use the official parser of wordpress.org
-        $parser = new \Pblsh\Vendor\WordPressdotorg\Plugin_Directory\Readme\Parser($content);
-        // Return the full parser data structure
-        $data = get_object_vars($parser);
-        return is_array($data) ? $data : [];
     }
 
     /**

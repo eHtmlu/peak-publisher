@@ -1,0 +1,216 @@
+<?php
+
+namespace Pblsh;
+
+defined('ABSPATH') || exit;
+
+
+class SvnDeployWorkflow {
+    public static function list_tags(string $wporg_slug): array {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $client = self::read_client();
+        $base_path = $wporg_slug . '/tags';
+
+        try {
+            $entries = $client->list_directory($base_path . '/', 1);
+        } catch (WporgPluginSvnClientException $e) {
+            if ($e->get_error_code() === 'not_found') {
+                return [];
+            }
+            throw $e;
+        }
+
+        $tags = [];
+        foreach (self::direct_children($entries, $base_path) as $entry) {
+            if (($entry['type'] ?? '') !== 'dir') {
+                continue;
+            }
+
+            $version = (string) ($entry['name'] ?? '');
+            if ($version === '') {
+                continue;
+            }
+
+            $tags[] = [
+                'version' => $version,
+                'date' => (string) ($entry['last_modified'] ?? ''),
+                'revision' => (int) ($entry['revision'] ?? 0),
+            ];
+        }
+
+        usort($tags, function(array $a, array $b): int {
+            return version_compare((string) $b['version'], (string) $a['version']);
+        });
+
+        return $tags;
+    }
+
+
+    public static function get_plugin_revision(string $wporg_slug): ?int {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $client = self::read_client();
+
+        try {
+            $entries = $client->list_directory($wporg_slug . '/', 0);
+        } catch (WporgPluginSvnClientException $e) {
+            if ($e->get_error_code() === 'not_found') {
+                return null;
+            }
+            throw $e;
+        }
+
+        foreach ($entries as $entry) {
+            if (self::normalize_path((string) ($entry['path'] ?? '')) === $wporg_slug) {
+                $revision = (int) ($entry['revision'] ?? 0);
+                return $revision > 0 ? $revision : null;
+            }
+        }
+
+        $revision = (int) ($entries[0]['revision'] ?? 0);
+        return $revision > 0 ? $revision : null;
+    }
+
+    public static function fetch_tag_data(string $wporg_slug, string $version): array {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $version = self::safe_path_segment($version);
+        $client = self::read_client();
+        $base_path = $wporg_slug . '/tags/' . $version;
+        $entries = $client->list_directory($base_path . '/', 1);
+        $children = self::direct_children($entries, $base_path);
+
+        return [
+            'plugin_data' => self::fetch_plugin_data($client, $children),
+            'plugin_readme_txt' => self::fetch_readme_data($client, $children),
+        ];
+    }
+
+    private static function read_client(): WporgPluginSvnClient {
+        require_once __DIR__ . '/WporgPluginSvnClient.php';
+        return new WporgPluginSvnClient();
+    }
+
+    private static function normalize_slug_or_throw(string $wporg_slug): string {
+        $slug = normalize_wporg_slug($wporg_slug);
+        if (is_wp_error($slug)) {
+            throw new \RuntimeException($slug->get_error_code());
+        }
+        return $slug;
+    }
+
+    private static function safe_path_segment(string $segment): string {
+        $segment = trim($segment);
+        if ($segment === '' || str_contains($segment, '/') || str_contains($segment, '\\') || str_contains($segment, '..')) {
+            throw new \RuntimeException('invalid_svn_path_segment');
+        }
+        return $segment;
+    }
+
+    private static function direct_children(array $entries, string $base_path): array {
+        $base_path = self::normalize_path($base_path);
+        $children = [];
+
+        foreach ($entries as $entry) {
+            $path = self::normalize_path((string) ($entry['path'] ?? ''));
+            if ($path === '' || $path === $base_path) {
+                continue;
+            }
+            if (dirname($path) !== $base_path) {
+                continue;
+            }
+            $children[] = $entry;
+        }
+
+        return $children;
+    }
+
+    private static function normalize_path(string $path): string {
+        $path = rawurldecode($path);
+        $path = preg_replace('~/+~', '/', $path) ?? $path;
+        return trim($path, '/');
+    }
+
+    private static function fetch_plugin_data(WporgPluginSvnClient $client, array $children): ?array {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+
+        foreach ($children as $entry) {
+            $path = (string) ($entry['path'] ?? '');
+            $name = (string) ($entry['name'] ?? '');
+            if (($entry['type'] ?? '') !== 'file' || substr($name, -4) !== '.php') {
+                continue;
+            }
+
+            $tmp = wp_tempnam($name !== '' ? $name : 'pblsh-wporg-plugin.php');
+            if (!is_string($tmp) || $tmp === '') {
+                continue;
+            }
+
+            try {
+                $contents = $client->read_file($path);
+                if (@file_put_contents($tmp, $contents) === false) {
+                    continue;
+                }
+
+                $plugin_data = get_plugin_data($tmp, false, false);
+                if (!empty($plugin_data['Name'])) {
+                    return $plugin_data;
+                }
+            } finally {
+                if (file_exists($tmp)) {
+                    wp_delete_file($tmp);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static function fetch_readme_data(WporgPluginSvnClient $client, array $children): array {
+        $readme_info = [
+            'found' => false,
+            'file_name' => '',
+            'content' => [],
+        ];
+
+        $readme = self::find_readme_entry($children);
+        if ($readme === null) {
+            return $readme_info;
+        }
+
+        try {
+            $content = $client->read_file((string) $readme['path']);
+        } catch (WporgPluginSvnClientException $e) {
+            if ($e->get_error_code() === 'not_found') {
+                return $readme_info;
+            }
+            throw $e;
+        }
+
+        $readme_info['found'] = true;
+        $readme_info['file_name'] = (string) ($readme['name'] ?? 'readme.txt');
+        $parsed = parse_readme_txt(self::normalize_readme_content($content));
+        $readme_info['content'] = json_encode($parsed) !== false ? $parsed : null;
+
+        return $readme_info;
+    }
+
+    private static function find_readme_entry(array $children): ?array {
+        $entries_by_name = [];
+        foreach ($children as $entry) {
+            $name = (string) ($entry['name'] ?? '');
+            if ($name !== '') {
+                $entries_by_name[$name] = $entry;
+            }
+        }
+
+        $readme_file = find_wporg_readme_file_name(array_keys($entries_by_name));
+        return $readme_file !== null ? ($entries_by_name[$readme_file] ?? null) : null;
+    }
+
+    private static function normalize_readme_content(string $content): string {
+        if (!is_utf8($content)) {
+            $content = convert_to_utf8($content, detect_text_encoding($content));
+        }
+        return strip_utf8_bom($content);
+    }
+}

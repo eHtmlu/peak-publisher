@@ -2,6 +2,8 @@
 
 namespace Pblsh;
 
+use Exception;
+
 defined('ABSPATH') || exit;
 
 
@@ -165,6 +167,54 @@ function normalize_version_number(string $version): string {
  */
 function get_release_slug(string $plugin_slug, string $version): string {
     return sanitize_title($plugin_slug . '_' . normalize_version_number($version));
+}
+
+
+/**
+ * Selects the readme file name using wordpress.org's readme import precedence.
+ *
+ * @param string[] $files File names from the plugin root.
+ */
+function find_wporg_readme_file_name(array $files): ?string {
+    try {
+        // START - Copy of WordPress.org code ( https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/cli/i18n/class-readme-import.php )
+        $readme_files = preg_grep( '!^readme.(txt|md)$!i', $files );
+        if ( ! $readme_files ) {
+            throw new Exception( 'Plugin has no readme file.' );
+        }
+
+        $readme_file = reset( $readme_files );
+        foreach ( $readme_files as $f ) {
+            if ( '.txt' == strtolower( substr( $f, - 4 ) ) ) {
+                $readme_file = $f;
+                break;
+            }
+        }
+        // END - Copy of WordPress.org code
+
+        return is_string($readme_file) ? $readme_file : null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
+
+/**
+ * Parses a WordPress.org-style readme.txt into headers/sections and includes raw content.
+ * Returns associative array suitable for storage under data.plugin_readme_txt.
+ *
+ * @param string $content Content of the readme.txt file.
+ * @return array Parsed readme.txt content.
+ */
+function parse_readme_txt(string $content): array {
+    require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/readme/class-parser.php';
+    require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/class-markdown.php';
+
+    // Use the official parser of wordpress.org
+    $parser = new \Pblsh\Vendor\WordPressdotorg\Plugin_Directory\Readme\Parser($content);
+    // Return the full parser data structure
+    $data = get_object_vars($parser);
+    return is_array($data) ? $data : [];
 }
 
 

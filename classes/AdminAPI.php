@@ -192,11 +192,22 @@ class AdminAPI {
     /**
      * Get plugin.
      */
-    public function get_plugin(\WP_REST_Request $request): array {
+    public function get_plugin(\WP_REST_Request $request): array|\WP_Error {
         $id = (int) $request->get_param('id');
         $post = get_post($id);
         if (!is_plugin_post($post)) {
             return [];
+        }
+
+        if (is_wporg_plugin($post)) {
+            $refresh_error = $this->refresh_wporg_plugin_cache($post);
+            if ($refresh_error instanceof \WP_Error) {
+                return $refresh_error;
+            }
+            $post = get_post($id);
+            if (!is_plugin_post($post)) {
+                return [];
+            }
         }
 
         $releases_by_parent = fetch_releases_grouped_by_parent([(int) $post->ID]);
@@ -246,7 +257,7 @@ class AdminAPI {
                 $rel_data = [];
             }
 
-            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
+            $version = (string) (($release->post_title ?? '') !== '' ? $release->post_title : ($rel_data['plugin_data']['Version'] ?? ''));
             $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
             if ($normalized === '' && $version !== '') {
                 $normalized = normalize_version_number($version);
@@ -267,11 +278,21 @@ class AdminAPI {
     /**
      * Get releases list for a plugin.
      */
-    public function get_plugin_releases(\WP_REST_Request $request): array {
+    public function get_plugin_releases(\WP_REST_Request $request): array|\WP_Error {
         $id = (int) $request->get_param('id');
         $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
+        if (!is_plugin_post($post)) {
             return [];
+        }
+        if (is_wporg_plugin($post)) {
+            $refresh_error = $this->refresh_wporg_plugin_cache($post);
+            if ($refresh_error instanceof \WP_Error) {
+                return $refresh_error;
+            }
+            $post = get_post($id);
+            if (!is_plugin_post($post)) {
+                return [];
+            }
         }
 
         $releases_query = new \WP_Query([
@@ -287,7 +308,7 @@ class AdminAPI {
         foreach ($releases_query->posts as $release) {
             $rel_data = json_decode((string) $release->post_content, true) ?? [];
             $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
+            $version = (string) (($release->post_title ?? '') !== '' ? $release->post_title : ($rel_data['plugin_data']['Version'] ?? ''));
             $releases[] = [
                 'id' => $release->ID,
                 'version' => $version,
@@ -304,6 +325,20 @@ class AdminAPI {
         });
 
         return $releases;
+    }
+
+    private function refresh_wporg_plugin_cache(\WP_Post $post): ?\WP_Error {
+        try {
+            get_wporg_plugin_data($post);
+        } catch (\Throwable $e) {
+            return new \WP_Error(
+                'wporg_cache_refresh_failed',
+                $e->getMessage() ?: __('Could not refresh wordpress.org SVN cache.', 'peak-publisher'),
+                [ 'status' => 502 ]
+            );
+        }
+
+        return null;
     }
 
     /**

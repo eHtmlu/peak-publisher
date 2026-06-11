@@ -161,7 +161,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!alreadyLoaded) {
                         await window.Pblsh.Controllers.Releases.fetchForPlugin(id);
                     }
-                } catch (e) {}
+                } catch (e) {
+                    showAlert(e.message, 'error');
+                }
             } catch (error) {
                 showAlert(error.message, 'error');
             }

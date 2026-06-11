@@ -120,6 +120,7 @@
                 dispatch.setList(pluginId, items);
             } catch (e) {
                 dispatch.setError(e && e.message ? e.message : 'Failed to load releases');
+                throw e;
             } finally {
                 dispatch.setLoading(pluginId, false);
             }
@@ -153,4 +154,3 @@
         },
     };
 })();
-

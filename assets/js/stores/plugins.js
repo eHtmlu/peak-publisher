@@ -123,6 +123,7 @@
                 if (item && item.id) dispatch.upsert(item);
             } catch (e) {
                 dispatch.setError(e && e.message ? e.message : 'Failed to load plugin');
+                throw e;
             } finally {
                 dispatch.setPending(id, false);
             }
@@ -155,4 +156,3 @@
         },
     };
 })();
-

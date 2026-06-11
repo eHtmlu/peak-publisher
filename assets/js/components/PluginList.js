@@ -66,8 +66,9 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                         label: plugin.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher'),
                                         icon: Pblsh.Utils.getSvgIcon('circle'),
                                         isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id),
-                                        disabled: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id),
+                                        disabled: plugin.hosting_type === 'wporg' || (Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id)),
                                         onClick: () => {
+                                            if (plugin.hosting_type === 'wporg') return;
                                             const next = plugin.status === 'publish' ? 'draft' : 'publish';
                                             if (typeof onToggleStatus === 'function') onToggleStatus(plugin.id, next);
                                         },

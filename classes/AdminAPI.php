@@ -491,6 +491,14 @@ class AdminAPI {
         if (!$release || $release->post_type !== 'pblsh_release') {
             return [ 'status' => 'error', 'message' => 'Release not found.' ];
         }
+        $parent = get_post((int) $release->post_parent);
+        if (is_wporg_plugin($parent)) {
+            return [
+                'status' => 'error',
+                'code' => 'wporg_release_immutable',
+                'message' => __('wporg releases are SVN tags and cannot be drafted.', 'peak-publisher'),
+            ];
+        }
         $params = $request->get_json_params();
         $status = isset($params['status']) ? (string) $params['status'] : '';
         if ($status !== 'publish' && $status !== 'draft') {

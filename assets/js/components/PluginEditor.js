@@ -475,8 +475,9 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     label: pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher'),
                                     icon: getSvgIcon('circle'),
                                     isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
-                                    disabled: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
+                                    disabled: isWporg || (Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id)),
                                     onClick: () => {
+                                        if (isWporg) return;
                                         if (typeof onTogglePluginStatus === 'function' && pluginData?.id) {
                                             const next = pluginData.status === 'publish' ? 'draft' : 'publish';
                                             onTogglePluginStatus(pluginData.id, next);
@@ -540,11 +541,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             label: rel.status === 'publish' ? (pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Public if plugin is public', 'peak-publisher')) : __('Draft', 'peak-publisher'),
                                             icon: Pblsh.Utils.getSvgIcon('circle'),
                                             isBusy: Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id),
-                                            disabled: Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id),
+                                            disabled: isWporg || (Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id)),
                                             style: {
                                                 opacity: pluginData?.status === 'publish' ? 1 : 0.5,
                                             },
                                             onClick: () => {
+                                                if (isWporg) return;
                                                 const next = rel.status === 'publish' ? 'draft' : 'publish';
                                                 if (typeof onToggleReleaseStatus === 'function') onToggleReleaseStatus(rel.id, next);
                                             },

@@ -294,6 +294,7 @@ class AdminAPI {
                 return [];
             }
         }
+        $is_wporg = is_wporg_plugin($post);
 
         $releases_query = new \WP_Query([
             'post_type' => 'pblsh_release',
@@ -314,8 +315,8 @@ class AdminAPI {
                 'version' => $version,
                 'status' => $release->post_status,
                 'date' => $release->post_date,
-                'download_url' => rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
-                'installations_count' => $normalized !== '' ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0,
+                'download_url' => $is_wporg ? '' : rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
+                'installations_count' => (!$is_wporg && $normalized !== '') ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0,
             ];
         }
 
@@ -350,6 +351,14 @@ class AdminAPI {
         if (!$release || $release->post_type !== 'pblsh_release') {
             return [ 'status' => 'error', 'message' => 'Release not found.' ];
         }
+        $parent = get_post((int) $release->post_parent);
+        if (is_wporg_plugin($parent)) {
+            return [
+                'status' => 'error',
+                'code' => 'wporg_release_delete_unsupported',
+                'message' => __('wporg tag deletion is not available in this slice.', 'peak-publisher'),
+            ];
+        }
 
         $zip_rel = (string) get_post_meta($release->ID, '_pblsh_zip_path', true);
         if ($zip_rel !== '') {
@@ -378,6 +387,10 @@ class AdminAPI {
         $release = get_post($id);
         if (!$release || $release->post_type !== 'pblsh_release') {
             return new \WP_Error('not_found', 'Release not found', ['status' => 404]);
+        }
+        $parent = get_post((int) $release->post_parent);
+        if (is_wporg_plugin($parent)) {
+            return new \WP_Error('unsupported_hosting_type', 'Release downloads for wordpress.org plugins are not available here.', ['status' => 404]);
         }
 
         $zip_rel = (string) get_post_meta($release->ID, '_pblsh_zip_path', true);

@@ -557,7 +557,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
                                     createElement('td', { className: 'pblsh--table__actions-cell' },
                                         createElement('div', { className: 'pblsh--table__actions' },
-                                            (() => {
+                                            !isWporg && (() => {
                                                 const base = rel.download_url || '';
                                                 const href = base ? base + (base.indexOf('?') >= 0 ? '&' : '?') + '_wpnonce=' + encodeURIComponent(window.wpApiSettings.nonce) : '';
                                                 return createElement(Tooltip, { text: __('Download', 'peak-publisher') },
@@ -572,7 +572,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                     ),
                                                 );
                                             })(),
-                                            createElement(wp.components.DropdownMenu, {
+                                            !isWporg && createElement(wp.components.DropdownMenu, {
                                                 icon: Pblsh.Utils.getSvgIcon('dots_horizontal', { size: 24 }),
                                                 label: __('More options', 'peak-publisher'),
                                                 children: ({ onClose }) => [

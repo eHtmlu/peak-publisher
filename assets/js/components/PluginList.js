@@ -120,7 +120,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                                     getSvgIcon('download', { size: 24 }),
                                                     __('Download Installable', 'peak-publisher')
                                                 ), */
-                                                plugin.slug !== PblshData.currentPlugin && createElement(MenuItem, {
+                                                plugin.hosting_type !== 'wporg' && plugin.slug !== PblshData.currentPlugin && createElement(MenuItem, {
                                                     key: 'delete',
                                                     isDestructive: true,
                                                     onClick: () => { handleDelete(plugin); onClose(); }

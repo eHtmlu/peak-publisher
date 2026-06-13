@@ -1,29 +1,50 @@
 // PluginAdditionProcess Component
-lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated } = {}) => {
-    const { __ } = wp.i18n;
+lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpenSettings } = {}) => {
+    const { __, sprintf } = wp.i18n;
     const { useState, useEffect, useRef, createElement } = wp.element;
-    const { Button } = wp.components;
-    const { getSvgIcon } = Pblsh.Utils;
+    const { useSelect } = wp.data;
+    const { Button, TextControl, Spinner } = wp.components;
+    const { getSvgIcon, showAlert } = Pblsh.Utils;
     const hljs = window.hljs;
 
     const [bootstrapCode, setBootstrapCode] = useState('');
-    const [step, setStep] = useState(1);
+    const [hostingType, setHostingType] = useState(null);
+    const [selfHostedStep, setSelfHostedStep] = useState(1);
+    const [wporgStep, setWporgStep] = useState(1);
+    const [wporgAction, setWporgAction] = useState('import');
+    const [discoverStatus, setDiscoverStatus] = useState('idle');
+    const [discoverError, setDiscoverError] = useState('');
+    const [importRows, setImportRows] = useState([]);
+    const [manualSlug, setManualSlug] = useState('');
+    const [manualSlugError, setManualSlugError] = useState('');
+    const lookupBatchRef = useRef(0);
+    const settingsFetchRequestedRef = useRef(false);
 
-    const steps = [
+    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
+    const settingsLoading = useSelect((select) => select('pblsh/settings').isLoading(), []);
+
+    const selfHostedSteps = [
         { id: 1, label: __('Header', 'peak-publisher'), description: __('Add required plugin headers', 'peak-publisher') },
         { id: 2, label: __('Code', 'peak-publisher'), description: __('Add the required bootstrap code', 'peak-publisher') },
         { id: 3, label: __('Upload', 'peak-publisher'), description: __('Upload to Peak Publisher', 'peak-publisher') },
     ];
 
-    useEffect(() => {
-        loadBootstrapCode();
-    }, []);
+    const wporgSteps = [
+        { id: 1, label: __('Account', 'peak-publisher'), description: __('Check wordpress.org access', 'peak-publisher') },
+        { id: 2, label: __('Action', 'peak-publisher'), description: __('Choose the wordpress.org workflow', 'peak-publisher') },
+        { id: 3, label: __('Import', 'peak-publisher'), description: __('Select existing plugins', 'peak-publisher') },
+    ];
 
-    useEffect(() => {
-        if (step < 3) {
-            highlightCode();
-        }
-    }, [step]);
+    const wporgAccounts = serverSettings && Array.isArray(serverSettings.wporg_accounts)
+        ? serverSettings.wporg_accounts
+        : [];
+    const wporgAccount = wporgAccounts.find((account) => account && account.username && account.has_password) || null;
+    const wporgUsername = wporgAccount ? String(wporgAccount.username || '') : '';
+    const encryptionKeyStatus = serverSettings && serverSettings.wporg_credentials
+        ? (serverSettings.wporg_credentials.encryption_key_status || 'missing')
+        : 'missing';
+    const wporgAccountReady = !!wporgUsername && encryptionKeyStatus === 'valid';
+    const selectedRows = importRows.filter((row) => row && row.selected);
 
     const loadBootstrapCode = async () => {
         const response = await Pblsh.API.getBootstrapCode();
@@ -36,44 +57,16 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated } = {}
                 document.querySelectorAll('pre code[data-highlighted="yes"]').forEach(code => {
                     delete code.dataset.highlighted;
                 });
-            hljs.highlightAll();
-                if (step === 1) {
+                hljs.highlightAll();
+                if (selfHostedStep === 1) {
                     const markColor = 'rgba(255, 0, 0, 0.3)';
                     hljs.highlightLinesAll([
-                        [], // Highlight some lines in the first code block.
-                        [{start: 2, end: 3, color: markColor},{start: 10, end: 10, color: markColor},], // Highlight some lines in the second code block.
+                        [],
+                        [{ start: 2, end: 3, color: markColor }, { start: 10, end: 10, color: markColor }],
                     ]);
                 }
             }
         }, 0);
-    };
-
-    const renderStepper = () => {
-        return createElement('div', { className: 'pblsh--stepper', role: 'navigation', 'aria-label': __('Setup steps', 'peak-publisher'), style: { '--steps': steps.length, '--step': step } },
-            createElement('div', { className: 'pblsh--stepper__bar', 'aria-hidden': 'true' },
-                createElement('div', { className: 'pblsh--stepper__bar-fill' }),
-            ),
-            createElement('ol', { className: 'pblsh--stepper__list' },
-                steps.map((s, index) => {
-                    const statusClass = s.id < step ? 'is-complete' : (s.id === step ? 'is-active' : 'is-upcoming');
-                    const isActive = s.id === step;
-                    return createElement('li', { key: s.id, className: 'pblsh--stepper__item ' + statusClass },
-                        createElement('button', {
-                            type: 'button',
-                            className: 'pblsh--stepper__link',
-                            'aria-current': isActive ? 'step' : undefined,
-                            onClick: () => setStep(s.id),
-                        },
-                            createElement('span', { className: 'pblsh--stepper__index', 'aria-hidden': 'true' }, String(index + 1)),
-                            createElement('span', { className: 'pblsh--stepper__text' },
-                                createElement('span', { className: 'pblsh--stepper__label' }, s.label),
-                                createElement('span', { className: 'pblsh--stepper__desc' }, s.description),
-                            ),
-                        ),
-                    );
-                }),
-            ),
-        );
     };
 
     const copyText = async (text) => {
@@ -95,6 +88,274 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated } = {}
         return ok;
     };
 
+    const rowIsSelectable = (row) => {
+        return !!(
+            row &&
+            row.access_status === 'ok' &&
+            row.has_write_access === true &&
+            row.already_imported !== true
+        );
+    };
+
+    const updateImportRow = (slug, updater) => {
+        setImportRows((prev) => prev.map((row) => {
+            if (!row || row.slug !== slug) {
+                return row;
+            }
+            const next = typeof updater === 'function' ? updater(row) : { ...row, ...updater };
+            return rowIsSelectable(next) ? next : { ...next, selected: false };
+        }));
+    };
+
+    const setRowsFromDiscover = (plugins) => {
+        const rows = (Array.isArray(plugins) ? plugins : []).map((plugin) => ({
+            slug: String(plugin.slug || ''),
+            name: String(plugin.name || plugin.slug || ''),
+            already_imported: !!plugin.already_imported,
+            existing_plugin_id: plugin.existing_plugin_id || null,
+            has_write_access: null,
+            access_status: plugin.already_imported ? 'pending' : 'pending',
+            message: null,
+            source: 'discover',
+            selected: false,
+        })).filter((row) => row.slug);
+
+        setImportRows((prev) => {
+            const previousBySlug = new Map((Array.isArray(prev) ? prev : []).map((row) => [row.slug, row]));
+            const discoveredSlugs = new Set(rows.map((row) => row.slug));
+            const mergedDiscoverRows = rows.map((row) => {
+                const previous = previousBySlug.get(row.slug);
+                if (!previous) {
+                    return row;
+                }
+                const next = {
+                    ...previous,
+                    ...row,
+                    name: row.name || previous.name || row.slug,
+                    selected: previous.selected,
+                };
+                return rowIsSelectable(next) ? next : { ...next, selected: false };
+            });
+            const manualOnlyRows = (Array.isArray(prev) ? prev : []).filter((row) => {
+                return row && row.source === 'manual' && !discoveredSlugs.has(row.slug);
+            });
+            return mergedDiscoverRows.concat(manualOnlyRows);
+        });
+        return rows;
+    };
+
+    const lookupPluginAccess = async (username, slug, batchId) => {
+        updateImportRow(slug, {
+            access_status: 'pending',
+            has_write_access: null,
+            message: null,
+        });
+
+        try {
+            const response = await window.Pblsh.API.lookupWporgPlugin(username, slug);
+            if (batchId !== lookupBatchRef.current && batchId !== null) {
+                return;
+            }
+
+            const plugin = response && response.plugin ? response.plugin : {};
+            updateImportRow(slug, (row) => {
+                const next = {
+                    ...row,
+                    name: plugin.name || row.name || plugin.slug || slug,
+                    already_imported: !!plugin.already_imported,
+                    existing_plugin_id: plugin.existing_plugin_id || row.existing_plugin_id || null,
+                    has_write_access: plugin.has_write_access === true,
+                    access_status: plugin.access_status || (plugin.has_write_access ? 'ok' : 'error'),
+                    message: plugin.message || null,
+                };
+                return next;
+            });
+        } catch (error) {
+            if (batchId !== lookupBatchRef.current && batchId !== null) {
+                return;
+            }
+            updateImportRow(slug, {
+                has_write_access: false,
+                access_status: 'error',
+                message: error && error.message ? error.message : __('Error checking access.', 'peak-publisher'),
+            });
+        }
+    };
+
+    const runLookupChecks = async (slugs, batchId) => {
+        const queue = Array.isArray(slugs) ? slugs.slice() : [];
+        let index = 0;
+        const concurrency = Math.min(5, queue.length);
+        const workers = Array.from({ length: concurrency }, async () => {
+            while (index < queue.length) {
+                const slug = queue[index];
+                index += 1;
+                await lookupPluginAccess(wporgUsername, slug, batchId);
+            }
+        });
+        await Promise.all(workers);
+    };
+
+    const loadDiscoverPlugins = async () => {
+        if (!wporgAccountReady || !wporgUsername) {
+            return;
+        }
+
+        const batchId = lookupBatchRef.current + 1;
+        lookupBatchRef.current = batchId;
+        setDiscoverStatus('loading');
+        setDiscoverError('');
+        setImportRows([]);
+
+        try {
+            const response = await window.Pblsh.API.discoverWporgPlugins(wporgUsername);
+            if (batchId !== lookupBatchRef.current) {
+                return;
+            }
+            const rows = setRowsFromDiscover(response && Array.isArray(response.plugins) ? response.plugins : []);
+            setDiscoverStatus('loaded');
+            if (rows.length > 0) {
+                runLookupChecks(rows.map((row) => row.slug), batchId);
+            }
+        } catch (error) {
+            if (batchId !== lookupBatchRef.current) {
+                return;
+            }
+            setDiscoverStatus('error');
+            setDiscoverError(error && error.message ? error.message : __('wordpress.org API unavailable, try again later.', 'peak-publisher'));
+        }
+    };
+
+    const validateManualSlug = (value) => {
+        const slug = String(value || '').trim();
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+            return {
+                slug,
+                error: __('Invalid plugin slug.', 'peak-publisher'),
+            };
+        }
+        return { slug, error: '' };
+    };
+
+    const addManualSlug = () => {
+        if (!wporgAccountReady) {
+            return;
+        }
+
+        const result = validateManualSlug(manualSlug);
+        if (result.error) {
+            setManualSlugError(result.error);
+            return;
+        }
+
+        if (importRows.some((row) => row && row.slug === result.slug)) {
+            setManualSlugError(__('This slug is already in the import list.', 'peak-publisher'));
+            return;
+        }
+
+        setManualSlug('');
+        setManualSlugError('');
+        setImportRows((prev) => prev.concat([{
+            slug: result.slug,
+            name: result.slug,
+            already_imported: false,
+            existing_plugin_id: null,
+            has_write_access: null,
+            access_status: 'pending',
+            message: null,
+            source: 'manual',
+            selected: false,
+        }]));
+        lookupPluginAccess(wporgUsername, result.slug, null);
+    };
+
+    const toggleRowSelection = (slug, selected) => {
+        setImportRows((prev) => prev.map((row) => {
+            if (!row || row.slug !== slug || !rowIsSelectable(row)) {
+                return row;
+            }
+            return { ...row, selected: !!selected };
+        }));
+    };
+
+    const resetToHostingChoice = () => {
+        setHostingType(null);
+        setSelfHostedStep(1);
+        setWporgStep(1);
+        setWporgAction('import');
+    };
+
+    useEffect(() => {
+        loadBootstrapCode();
+    }, []);
+
+    useEffect(() => {
+        if (hostingType === 'self_hosted' && selfHostedStep < 3) {
+            highlightCode();
+        }
+    }, [hostingType, selfHostedStep, bootstrapCode]);
+
+    useEffect(() => {
+        if (hostingType === 'wporg' && !serverSettings && !settingsLoading && !settingsFetchRequestedRef.current) {
+            settingsFetchRequestedRef.current = true;
+            window.Pblsh.Controllers.Settings.fetch();
+        }
+    }, [hostingType, serverSettings, settingsLoading]);
+
+    useEffect(() => {
+        lookupBatchRef.current += 1;
+        setDiscoverStatus('idle');
+        setDiscoverError('');
+        setImportRows([]);
+        setManualSlug('');
+        setManualSlugError('');
+    }, [wporgUsername]);
+
+    useEffect(() => {
+        if (
+            hostingType === 'wporg' &&
+            wporgStep === 3 &&
+            wporgAction === 'import' &&
+            wporgAccountReady &&
+            discoverStatus === 'idle'
+        ) {
+            loadDiscoverPlugins();
+        }
+    }, [hostingType, wporgStep, wporgAction, wporgAccountReady, discoverStatus]);
+
+    const renderStepper = (steps, currentStep, onStepClick) => {
+        return createElement('div', {
+            className: 'pblsh--stepper',
+            role: 'navigation',
+            'aria-label': __('Setup steps', 'peak-publisher'),
+            style: { '--steps': steps.length, '--step': currentStep },
+        },
+            createElement('div', { className: 'pblsh--stepper__bar', 'aria-hidden': 'true' },
+                createElement('div', { className: 'pblsh--stepper__bar-fill' }),
+            ),
+            createElement('ol', { className: 'pblsh--stepper__list' },
+                steps.map((stepItem, index) => {
+                    const statusClass = stepItem.id < currentStep ? 'is-complete' : (stepItem.id === currentStep ? 'is-active' : 'is-upcoming');
+                    const isActive = stepItem.id === currentStep;
+                    return createElement('li', { key: stepItem.id, className: 'pblsh--stepper__item ' + statusClass },
+                        createElement('button', {
+                            type: 'button',
+                            className: 'pblsh--stepper__link',
+                            'aria-current': isActive ? 'step' : undefined,
+                            onClick: () => onStepClick(stepItem.id),
+                        },
+                            createElement('span', { className: 'pblsh--stepper__index', 'aria-hidden': 'true' }, String(index + 1)),
+                            createElement('span', { className: 'pblsh--stepper__text' },
+                                createElement('span', { className: 'pblsh--stepper__label' }, stepItem.label),
+                                createElement('span', { className: 'pblsh--stepper__desc' }, stepItem.description),
+                            ),
+                        ),
+                    );
+                }),
+            ),
+        );
+    };
+
     const renderHeaderTips = () => {
         const example = [
             '/**',
@@ -111,15 +372,15 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated } = {}
         ].join('\n');
 
         return [
-            createElement('h3', { className: 'pblsh--card__title' }, __('Required and recommended headers', 'peak-publisher')),
+            createElement('h3', { key: 'headers-title', className: 'pblsh--card__title' }, __('Required and recommended headers', 'peak-publisher')),
             createElement('p',
-                null,
-                __('The "Plugin Name," "Version," and "Update URI" headers are required. However, all other headers below are also highly recommended. Adjust the values ​​according to your individual needs.', 'peak-publisher'),
+                { key: 'headers-copy' },
+                __('The "Plugin Name," "Version," and "Update URI" headers are required. However, all other headers below are also highly recommended. Adjust the values according to your individual needs.', 'peak-publisher'),
                 ' ',
                 __('A full list of headers can be found in the WordPress Documentation: ', 'peak-publisher'),
                 createElement('a', { href: 'https://developer.wordpress.org/plugins/plugin-basics/header-requirements/', target: '_blank' }, 'https://developer.wordpress.org/plugins/plugin-basics/header-requirements/')
             ),
-            createElement('div', { className: 'pblsh--snippet-wrapper' },
+            createElement('div', { key: 'headers-snippet', className: 'pblsh--snippet-wrapper' },
                 createElement('div', { className: 'pblsh--snippet-toolbar' },
                     createElement('button', {
                         type: 'button',
@@ -132,22 +393,47 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated } = {}
                     createElement('code', { className: 'language-plaintext' }, example),
                 ),
             ),
-            createElement('h3', null, __('3 facts about version numbers', 'peak-publisher')),
-            createElement('ul', { className: 'pblsh--ul' },
-                createElement('li', null, __('A plugin is never finished, so dare to name the first version of your plugin what it is → 1.0.0', 'peak-publisher')),
+            createElement('h3', { key: 'version-title' }, __('3 facts about version numbers', 'peak-publisher')),
+            createElement('ul', { key: 'version-list', className: 'pblsh--ul' },
+                createElement('li', null, __('A plugin is never finished, so dare to name the first version of your plugin what it is: 1.0.0', 'peak-publisher')),
                 createElement('li', null, __('A good and very common version number convention is the format "X.X.X" (major.minor.patch). Read more about it here: ', 'peak-publisher'), createElement('a', { href: 'https://semver.org/', target: '_blank' }, 'https://semver.org/')),
                 createElement('li', null, __('Each integer part of the version number increments independently and can have more than one digit. So feel free to increment 1.9.0 to 1.10.0.', 'peak-publisher')),
             ),
         ];
     };
 
-    const renderStepContent = () => {
-        if (step === 1) {
+    const renderHostingChoice = () => {
+        return createElement('div', { className: 'pblsh--step pblsh--hosting-choice' },
+            createElement('div', { className: 'pblsh--choice-grid' },
+                createElement('button', {
+                    type: 'button',
+                    className: 'pblsh--choice-card',
+                    onClick: () => setHostingType('self_hosted'),
+                },
+                    createElement('span', { className: 'pblsh--choice-card__icon' }, getSvgIcon('store', { size: 32 })),
+                    createElement('span', { className: 'pblsh--choice-card__title' }, __('Self-hosted', 'peak-publisher')),
+                    createElement('span', { className: 'pblsh--choice-card__text' }, __('Publish updates from this WordPress site.', 'peak-publisher')),
+                ),
+                createElement('button', {
+                    type: 'button',
+                    className: 'pblsh--choice-card',
+                    onClick: () => setHostingType('wporg'),
+                },
+                    createElement('span', { className: 'pblsh--choice-card__icon' }, getSvgIcon('wordpress', { size: 32 })),
+                    createElement('span', { className: 'pblsh--choice-card__title' }, __('wordpress.org', 'peak-publisher')),
+                    createElement('span', { className: 'pblsh--choice-card__text' }, __('Import plugins from the wordpress.org SVN repository.', 'peak-publisher')),
+                ),
+            ),
+        );
+    };
+
+    const renderSelfHostedStepContent = () => {
+        if (selfHostedStep === 1) {
             return createElement('div', { className: 'pblsh--step' },
                 createElement('div', { className: 'pblsh--card' },
                     createElement('h3', { className: 'pblsh--card__title' }, __('Add this line to your plugin header', 'peak-publisher')),
                     createElement('p', null, __('This is the API endpoint that your plugin will use to check for updates.', 'peak-publisher')),
-                    PblshData.bootstrapUpdateURI.match(/^http\:\/\//) && createElement('div', { className: 'pblsh--addition-process--protocol-warning' }, createElement('strong', null, __('WARNING: Your WordPress site is using an insecure connection. We strongly recommend switching to HTTPS before copying and using this update URI.', 'peak-publisher'))),
+                    PblshData.bootstrapUpdateURI.match(/^http:\/\//) && createElement('div', { className: 'pblsh--addition-process--protocol-warning' }, createElement('strong', null, __('WARNING: Your WordPress site is using an insecure connection. We strongly recommend switching to HTTPS before copying and using this update URI.', 'peak-publisher'))),
                     createElement('div', { className: 'pblsh--snippet-wrapper' },
                         createElement('div', { className: 'pblsh--snippet-toolbar' },
                             createElement('button', {
@@ -166,7 +452,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated } = {}
             );
         }
 
-        if (step === 2) {
+        if (selfHostedStep === 2) {
             return createElement('div', { className: 'pblsh--step' },
                 createElement('div', { className: 'pblsh--card pblsh--card--bootstrap-code' },
                     createElement('div', null,
@@ -190,61 +476,366 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated } = {}
             );
         }
 
-        if (step === 3) {
-            return createElement('div', { className: 'pblsh--step' },
-                createElement('div', { className: 'pblsh--card pblsh--card--upload-zip' },
-                    createElement('div', null,
-                        createElement('h3', { className: 'pblsh--card__title' }, __('Upload your plugin', 'peak-publisher')),
-                    ),
-                    createElement('div', {
-                        className: 'pblsh--dropzone',
-                        onClick: () => {
-                            // Delegate opening to global overlay
-                            window.dispatchEvent(new CustomEvent('pblsh:open-overlay-file-picker'));
-                        },
-                        role: 'button',
-                        tabIndex: 0,
-                        onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.dispatchEvent(new CustomEvent('pblsh:open-overlay-file-picker')); } },
-                        'aria-label': __('Drop plugin or click to select', 'peak-publisher'),
+        return createElement('div', { className: 'pblsh--step' },
+            createElement('div', { className: 'pblsh--card pblsh--card--upload-zip' },
+                createElement('div', null,
+                    createElement('h3', { className: 'pblsh--card__title' }, __('Upload your plugin', 'peak-publisher')),
+                ),
+                createElement('div', {
+                    className: 'pblsh--dropzone',
+                    onClick: () => {
+                        window.dispatchEvent(new CustomEvent('pblsh:open-overlay-file-picker'));
                     },
-                        createElement('div', { className: 'pblsh--dropzone__inner' },
-                            createElement('div', { className: 'pblsh--dropzone__icon' }, getSvgIcon('cloud_upload', { size: 32 })),
-                            createElement('div', { className: 'pblsh--dropzone__text' }, __('Drop plugin or click to select', 'peak-publisher')),
-                            createElement('div', { className: 'pblsh--dropzone__desc' },
-                                createElement('p', null, __('You can drop:', 'peak-publisher')),
-                                createElement('ul', { className: 'pblsh--ul' },
-                                    createElement('li', null, __('a zip file', 'peak-publisher')),
-                                    createElement('li', null, __('a plugin folder', 'peak-publisher')),
-                                    createElement('li', null, __('files of a plugin folder', 'peak-publisher')),
-                                ),
+                    role: 'button',
+                    tabIndex: 0,
+                    onKeyDown: (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            window.dispatchEvent(new CustomEvent('pblsh:open-overlay-file-picker'));
+                        }
+                    },
+                    'aria-label': __('Drop plugin or click to select', 'peak-publisher'),
+                },
+                    createElement('div', { className: 'pblsh--dropzone__inner' },
+                        createElement('div', { className: 'pblsh--dropzone__icon' }, getSvgIcon('cloud_upload', { size: 32 })),
+                        createElement('div', { className: 'pblsh--dropzone__text' }, __('Drop plugin or click to select', 'peak-publisher')),
+                        createElement('div', { className: 'pblsh--dropzone__desc' },
+                            createElement('p', null, __('You can drop:', 'peak-publisher')),
+                            createElement('ul', { className: 'pblsh--ul' },
+                                createElement('li', null, __('a zip file', 'peak-publisher')),
+                                createElement('li', null, __('a plugin folder', 'peak-publisher')),
+                                createElement('li', null, __('files of a plugin folder', 'peak-publisher')),
                             ),
                         ),
                     ),
+                ),
             ),
+        );
+    };
+
+    const renderWporgAccountStep = () => {
+        if (settingsLoading && !serverSettings) {
+            return createElement('div', { className: 'pblsh--step' },
+                createElement('div', { className: 'pblsh--card pblsh--wporg-account-step' },
+                    createElement(Spinner),
+                ),
             );
         }
 
-        return null;
+        return createElement('div', { className: 'pblsh--step' },
+            createElement('div', { className: 'pblsh--card pblsh--wporg-account-step' },
+                createElement('h3', { className: 'pblsh--card__title' }, __('wordpress.org account', 'peak-publisher')),
+                createElement('p', null, __('Your plugin must be approved on wordpress.org before you can import or deploy it through Peak Publisher.', 'peak-publisher')),
+                wporgAccountReady
+                    ? createElement('div', { className: 'pblsh--wporg-account-step__ready' },
+                        createElement('span', { className: 'pblsh--wporg-account-step__icon' }, getSvgIcon('check_circle', { size: 22 })),
+                        createElement('span', null, sprintf(__('Connected as %s', 'peak-publisher'), wporgUsername)),
+                    )
+                    : createElement('div', { className: 'pblsh--wporg-account-step__missing' },
+                        createElement('p', null, __('Add a wordpress.org account in Settings before importing plugins.', 'peak-publisher')),
+                        createElement(Button, {
+                            isSecondary: true,
+                            onClick: () => {
+                                if (typeof onOpenSettings === 'function') {
+                                    onOpenSettings();
+                                }
+                            },
+                        }, __('Open Settings', 'peak-publisher')),
+                    ),
+            ),
+        );
+    };
+
+    const renderWporgActionStep = () => {
+        return createElement('div', { className: 'pblsh--step pblsh--wporg-action-step' },
+            createElement('div', { className: 'pblsh--choice-grid' },
+                createElement('button', {
+                    type: 'button',
+                    className: 'pblsh--choice-card is-selected',
+                    onClick: () => {
+                        setWporgAction('import');
+                        setWporgStep(3);
+                    },
+                },
+                    createElement('span', { className: 'pblsh--choice-card__icon' }, getSvgIcon('download', { size: 32 })),
+                    createElement('span', { className: 'pblsh--choice-card__title' }, __('Import existing plugin', 'peak-publisher')),
+                    createElement('span', { className: 'pblsh--choice-card__text' }, __('Add existing wordpress.org plugins to this dashboard.', 'peak-publisher')),
+                ),
+                createElement('button', {
+                    type: 'button',
+                    className: 'pblsh--choice-card is-disabled',
+                    disabled: true,
+                },
+                    createElement('span', { className: 'pblsh--choice-card__icon' }, getSvgIcon('cloud_upload', { size: 32 })),
+                    createElement('span', { className: 'pblsh--choice-card__title' }, __('Deploy ZIP release', 'peak-publisher')),
+                    createElement('span', { className: 'pblsh--choice-card__text' }, __('Upload a release ZIP to wordpress.org SVN.', 'peak-publisher')),
+                ),
+            ),
+        );
+    };
+
+    const getRowStatusText = (row) => {
+        if (row.already_imported) {
+            return __('Already imported', 'peak-publisher');
+        }
+        if (row.access_status === 'pending') {
+            return __('Checking access...', 'peak-publisher');
+        }
+        if (row.access_status === 'ok' && row.has_write_access) {
+            return __('Ready', 'peak-publisher');
+        }
+        if (row.access_status === 'no_write_access') {
+            return __('No write access', 'peak-publisher');
+        }
+        if (row.access_status === 'not_found') {
+            return __('Not found', 'peak-publisher');
+        }
+        return __('Error checking access', 'peak-publisher');
+    };
+
+    const getRowStatusClass = (row) => {
+        if (row.already_imported) {
+            return 'is-imported';
+        }
+        if (row.access_status === 'pending') {
+            return 'is-pending';
+        }
+        if (row.access_status === 'ok' && row.has_write_access) {
+            return 'is-ready';
+        }
+        return 'is-blocked';
+    };
+
+    const renderImportRows = () => {
+        if (discoverStatus === 'loading' && importRows.length === 0) {
+            return createElement('div', { className: 'pblsh--wporg-import__loading' },
+                createElement(Spinner),
+                createElement('span', null, __('Loading wordpress.org plugins...', 'peak-publisher')),
+            );
+        }
+
+        if (discoverStatus === 'error') {
+            return createElement('div', { className: 'pblsh--wporg-import__error' },
+                createElement('p', null, discoverError || __('wordpress.org API unavailable, try again later.', 'peak-publisher')),
+                createElement(Button, {
+                    isSecondary: true,
+                    onClick: loadDiscoverPlugins,
+                    disabled: !wporgAccountReady,
+                }, __('Retry', 'peak-publisher')),
+            );
+        }
+
+        if (discoverStatus === 'loaded' && importRows.length === 0) {
+            return createElement('div', { className: 'pblsh--wporg-import__empty' },
+                createElement('p', null, __('No wordpress.org plugins found for this account.', 'peak-publisher')),
+                createElement('p', null, __('If your plugin was just approved or does not appear yet, add it by slug.', 'peak-publisher')),
+            );
+        }
+
+        if (importRows.length === 0) {
+            return null;
+        }
+
+        return createElement('div', { className: 'pblsh--wporg-import__results' },
+            discoverStatus === 'loading' ? createElement('div', { className: 'pblsh--wporg-import__loading pblsh--wporg-import__loading--compact' },
+                createElement(Spinner),
+                createElement('span', null, __('Loading wordpress.org plugins...', 'peak-publisher')),
+            ) : null,
+            createElement('div', { className: 'pblsh--wporg-import__table-wrap' },
+                createElement('table', { className: 'pblsh--wporg-import__table' },
+                    createElement('thead', null,
+                        createElement('tr', null,
+                            createElement('th', { className: 'pblsh--wporg-import__select-header' }),
+                            createElement('th', null, __('Plugin', 'peak-publisher')),
+                            createElement('th', null, __('Slug', 'peak-publisher')),
+                            createElement('th', null, __('Status', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--wporg-import__action-header' }),
+                        ),
+                    ),
+                    createElement('tbody', null,
+                        importRows.map((row) => {
+                            const selectable = rowIsSelectable(row);
+                            return createElement('tr', { key: row.slug, className: 'pblsh--wporg-import__row ' + getRowStatusClass(row) },
+                                createElement('td', { className: 'pblsh--wporg-import__select-cell' },
+                                    createElement('input', {
+                                        type: 'checkbox',
+                                        checked: !!row.selected,
+                                        disabled: !selectable,
+                                        'aria-label': sprintf(__('Select %s', 'peak-publisher'), row.name || row.slug),
+                                        onChange: (event) => toggleRowSelection(row.slug, event.target.checked),
+                                    }),
+                                ),
+                                createElement('td', null,
+                                    createElement('strong', null, row.name || row.slug),
+                                ),
+                                createElement('td', null,
+                                    createElement('code', null, row.slug),
+                                ),
+                                createElement('td', null,
+                                    createElement('span', { className: 'pblsh--wporg-import__status' }, getRowStatusText(row)),
+                                    row.message ? createElement('span', { className: 'pblsh--wporg-import__message' }, row.message) : null,
+                                ),
+                                createElement('td', { className: 'pblsh--wporg-import__action-cell' },
+                                    row.already_imported && row.existing_plugin_id
+                                        ? createElement(Button, {
+                                            isTertiary: true,
+                                            onClick: () => {
+                                                if (typeof onCreated === 'function') {
+                                                    onCreated(row.existing_plugin_id);
+                                                }
+                                            },
+                                        }, __('Open plugin', 'peak-publisher'))
+                                        : null,
+                                ),
+                            );
+                        }),
+                    ),
+                ),
+            ),
+        );
+    };
+
+    const renderManualSlugLookup = () => {
+        return createElement('div', { className: 'pblsh--wporg-import__manual' },
+            createElement('h4', { className: 'pblsh--wporg-import__manual-title' }, __('Import by slug', 'peak-publisher')),
+            createElement('div', { className: 'pblsh--wporg-import__manual-row' },
+                createElement(TextControl, {
+                    label: __('Plugin slug', 'peak-publisher'),
+                    value: manualSlug,
+                    onChange: (value) => {
+                        setManualSlug(value);
+                        setManualSlugError('');
+                    },
+                    onKeyDown: (event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            addManualSlug();
+                        }
+                    },
+                    __nextHasNoMarginBottom: true,
+                }),
+                createElement(Button, {
+                    isSecondary: true,
+                    onClick: addManualSlug,
+                    disabled: !wporgAccountReady || manualSlug.trim() === '',
+                }, __('Add to list', 'peak-publisher')),
+            ),
+            manualSlugError ? createElement('p', { className: 'pblsh--wporg-import__manual-error' }, manualSlugError) : null,
+        );
+    };
+
+    const renderWporgImportStep = () => {
+        return createElement('div', { className: 'pblsh--step pblsh--wporg-import-step' },
+            createElement('div', { className: 'pblsh--card pblsh--wporg-import' },
+                createElement('div', { className: 'pblsh--wporg-import__header' },
+                    createElement('div', null,
+                        createElement('h3', { className: 'pblsh--card__title' }, __('Import existing wordpress.org plugins', 'peak-publisher')),
+                        createElement('p', null, sprintf(__('Account: %s', 'peak-publisher'), wporgUsername)),
+                    ),
+                    createElement(Button, {
+                        isSecondary: true,
+                        onClick: loadDiscoverPlugins,
+                        disabled: discoverStatus === 'loading' || !wporgAccountReady,
+                    }, __('Refresh', 'peak-publisher')),
+                ),
+                renderImportRows(),
+                renderManualSlugLookup(),
+                createElement('div', { className: 'pblsh--wporg-import__footer' },
+                    createElement('span', null, sprintf(__('%d selected', 'peak-publisher'), selectedRows.length)),
+                    createElement(Button, {
+                        isPrimary: true,
+                        disabled: true,
+                        title: __('Import execution is not available in this slice.', 'peak-publisher'),
+                    }, selectedRows.length > 0 ? sprintf(__('Import selected (%d)', 'peak-publisher'), selectedRows.length) : __('Import selected', 'peak-publisher')),
+                ),
+            ),
+        );
+    };
+
+    const renderWporgStepContent = () => {
+        if (wporgStep === 1) {
+            return renderWporgAccountStep();
+        }
+        if (wporgStep === 2) {
+            return renderWporgActionStep();
+        }
+        return renderWporgImportStep();
+    };
+
+    const renderContent = () => {
+        if (hostingType === null) {
+            return renderHostingChoice();
+        }
+        if (hostingType === 'self_hosted') {
+            return renderSelfHostedStepContent();
+        }
+        return renderWporgStepContent();
+    };
+
+    const renderControls = () => {
+        if (hostingType === null) {
+            return null;
+        }
+
+        const isSelfHosted = hostingType === 'self_hosted';
+        const currentStep = isSelfHosted ? selfHostedStep : wporgStep;
+        const maxStep = isSelfHosted ? selfHostedSteps.length : wporgSteps.length;
+        const canGoNext = isSelfHosted
+            ? currentStep < maxStep
+            : (currentStep === 1 ? wporgAccountReady : currentStep < maxStep);
+
+        const previous = () => {
+            if (currentStep === 1) {
+                resetToHostingChoice();
+                return;
+            }
+            if (isSelfHosted) {
+                setSelfHostedStep(Math.max(1, currentStep - 1));
+            } else {
+                setWporgStep(Math.max(1, currentStep - 1));
+            }
+        };
+
+        const next = () => {
+            if (!canGoNext) {
+                if (!isSelfHosted && currentStep === 1) {
+                    showAlert(__('Add a valid wordpress.org account in Settings first.', 'peak-publisher'), 'warning');
+                }
+                return;
+            }
+            if (isSelfHosted) {
+                setSelfHostedStep(Math.min(maxStep, currentStep + 1));
+            } else {
+                setWporgStep(Math.min(maxStep, currentStep + 1));
+            }
+        };
+
+        return createElement('div', { className: 'pblsh--controls' },
+            createElement('div', null,
+                createElement(Button, {
+                    isSecondary: true,
+                    onClick: previous,
+                }, currentStep === 1 ? __('Back', 'peak-publisher') : __('Previous', 'peak-publisher')),
+            ),
+            createElement('div', null,
+                currentStep < maxStep && createElement(Button, {
+                    isPrimary: true,
+                    onClick: next,
+                    disabled: !canGoNext,
+                }, __('Next', 'peak-publisher')),
+            ),
+        );
     };
 
     return createElement('div', { className: 'pblsh--addition-process' },
-        renderStepper(),
-        renderStepContent(),
-        createElement('div', { className: 'pblsh--controls' },
-            createElement('div', null,
-                step > 1 && createElement(Button, {
-                isSecondary: true,
-                    onClick: () => setStep(Math.max(1, step - 1)),
-                    disabled: step === 1,
-            }, __('Previous', 'peak-publisher')),
-            ),
-            createElement('div', null,
-                step < steps.length && createElement(Button, {
-                isPrimary: true,
-                    onClick: () => setStep(Math.min(steps.length, step + 1)),
-                    disabled: step === steps.length,
-                }, __('Next', 'peak-publisher')),
-            ),
-        ),
+        hostingType === 'self_hosted' ? renderStepper(selfHostedSteps, selfHostedStep, setSelfHostedStep) : null,
+        hostingType === 'wporg' ? renderStepper(wporgSteps, wporgStep, (nextStep) => {
+            if (nextStep > 1 && !wporgAccountReady) {
+                return;
+            }
+            setWporgStep(nextStep);
+        }) : null,
+        renderContent(),
+        renderControls(),
     );
 });

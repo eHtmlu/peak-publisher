@@ -336,7 +336,223 @@
 }
 
 .pblsh--addition-process .pblsh--step > .pblsh--card {
+    flex: 1 0 auto;
+}
+
+.pblsh--choice-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-content: start;
+}
+
+.pblsh--choice-card {
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+    background: #fff;
+    color: #1d2327;
+    padding: 1rem;
+    min-height: 10rem;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    cursor: pointer;
+    box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
+}
+
+.pblsh--choice-card:hover,
+.pblsh--choice-card:focus-visible {
+    border-color: #2271b1;
+    box-shadow: 0 0 0 1px #2271b1;
+    outline: none;
+}
+
+.pblsh--choice-card.is-selected {
+    border-color: #2271b1;
+}
+
+.pblsh--choice-card.is-disabled {
+    cursor: default;
+    opacity: 0.58;
+}
+
+.pblsh--choice-card.is-disabled:hover,
+.pblsh--choice-card.is-disabled:focus-visible {
+    border-color: var(--border-color-light);
+    box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
+}
+
+.pblsh--choice-card__icon {
+    color: #2271b1;
+    line-height: 1;
+}
+
+.pblsh--choice-card__title {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.pblsh--choice-card__text {
+    color: #646970;
+}
+
+.pblsh--wporg-account-step__ready,
+.pblsh--wporg-account-step__missing {
+    margin-top: 1rem;
+}
+
+.pblsh--wporg-account-step__ready {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #008a20;
+    font-weight: 600;
+}
+
+.pblsh--wporg-account-step__icon {
+    line-height: 1;
+}
+
+.pblsh--wporg-import {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: 0;
+}
+
+.pblsh--wporg-import__header,
+.pblsh--wporg-import__manual-row,
+.pblsh--wporg-import__footer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.pblsh--wporg-import__header p {
+    margin: 0;
+    color: #646970;
+}
+
+.pblsh--wporg-import__loading,
+.pblsh--wporg-import__error,
+.pblsh--wporg-import__empty {
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: #f6f7f7;
+}
+
+.pblsh--wporg-import__loading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pblsh--wporg-import__loading--compact {
+    margin-bottom: 0.75rem;
+}
+
+.pblsh--wporg-import__empty p:last-child,
+.pblsh--wporg-import__error p:last-child {
+    margin-bottom: 0;
+}
+
+.pblsh--wporg-import__table-wrap {
+    overflow: auto;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+}
+
+.pblsh--wporg-import__table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+}
+
+.pblsh--wporg-import__table th,
+.pblsh--wporg-import__table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color-light);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.pblsh--wporg-import__table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.pblsh--wporg-import__select-header,
+.pblsh--wporg-import__select-cell,
+.pblsh--wporg-import__action-header,
+.pblsh--wporg-import__action-cell {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.pblsh--wporg-import__status {
+    display: block;
+    font-weight: 600;
+}
+
+.pblsh--wporg-import__row.is-ready .pblsh--wporg-import__status {
+    color: #008a20;
+}
+
+.pblsh--wporg-import__row.is-pending .pblsh--wporg-import__status {
+    color: #646970;
+}
+
+.pblsh--wporg-import__row.is-blocked .pblsh--wporg-import__status,
+.pblsh--wporg-import__manual-error {
+    color: #b32d2e;
+}
+
+.pblsh--wporg-import__row.is-imported .pblsh--wporg-import__status {
+    color: #50575e;
+}
+
+.pblsh--wporg-import__message {
+    display: block;
+    color: #646970;
+    margin-top: 0.25rem;
+}
+
+.pblsh--wporg-import__manual {
+    border-top: 1px solid var(--border-color-light);
+    padding-top: 1rem;
+}
+
+.pblsh--wporg-import__manual-title {
+    margin: 0 0 0.75rem;
+}
+
+.pblsh--wporg-import__manual-row .components-base-control {
     flex: 1;
+}
+
+.pblsh--wporg-import__manual-error {
+    margin: 0.5rem 0 0;
+}
+
+.pblsh--wporg-import__footer {
+    padding-top: 0.5rem;
+}
+
+@media (max-width: 48rem) {
+    .pblsh--choice-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pblsh--wporg-import__header,
+    .pblsh--wporg-import__manual-row,
+    .pblsh--wporg-import__footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
 }
 
 .pblsh--ul {

@@ -84,6 +84,82 @@ class SvnDeployWorkflow {
         ];
     }
 
+    public static function discover_plugins_by_author(string $username): array {
+        $normalized_username = normalize_wporg_username($username);
+        if (is_wp_error($normalized_username)) {
+            throw new \RuntimeException($normalized_username->get_error_code());
+        }
+
+        $per_page = 250;
+        $page = 1;
+        $pages = 1;
+        $seen = [];
+        $plugins = [];
+
+        do {
+            $url = add_query_arg([
+                'action' => 'query_plugins',
+                'request' => [
+                    'author' => $normalized_username,
+                    'per_page' => $per_page,
+                    'page' => $page,
+                ],
+            ], 'https://api.wordpress.org/plugins/info/1.2/');
+
+            $response = wp_remote_get($url, [
+                'timeout' => 20,
+                'redirection' => 3,
+                'user-agent' => 'Peak Publisher wordpress.org Discovery',
+            ]);
+            if (is_wp_error($response)) {
+                throw new \RuntimeException('wporg_api_unavailable');
+            }
+
+            $status = (int) wp_remote_retrieve_response_code($response);
+            if ($status < 200 || $status >= 300) {
+                throw new \RuntimeException('wporg_api_unavailable');
+            }
+
+            $data = json_decode((string) wp_remote_retrieve_body($response), true);
+            if (!is_array($data) || !is_array($data['plugins'] ?? null)) {
+                throw new \RuntimeException('wporg_api_unavailable');
+            }
+
+            $response_plugins = $data['plugins'];
+            foreach ($response_plugins as $plugin) {
+                if (!is_array($plugin)) {
+                    continue;
+                }
+
+                $slug = normalize_wporg_slug($plugin['slug'] ?? null);
+                if (is_wp_error($slug) || isset($seen[$slug])) {
+                    continue;
+                }
+
+                $seen[$slug] = true;
+                $name = html_entity_decode(wp_strip_all_tags((string) ($plugin['name'] ?? $slug)), ENT_QUOTES | ENT_HTML5);
+                $plugins[] = [
+                    'slug' => $slug,
+                    'name' => $name !== '' ? $name : $slug,
+                ];
+            }
+
+            $info = is_array($data['info'] ?? null) ? $data['info'] : [];
+            $pages_from_response = isset($info['pages']) ? (int) $info['pages'] : 0;
+            if ($pages_from_response > 0) {
+                $pages = $pages_from_response;
+            } elseif (count($response_plugins) >= $per_page) {
+                $pages = $page + 1;
+            } else {
+                $pages = $page;
+            }
+
+            $page++;
+        } while ($page <= $pages);
+
+        return $plugins;
+    }
+
     private static function read_client(): WporgPluginSvnClient {
         require_once __DIR__ . '/WporgPluginSvnClient.php';
         return new WporgPluginSvnClient();

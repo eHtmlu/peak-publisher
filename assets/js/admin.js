@@ -293,6 +293,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (view === 'addition-process') {
                 return createElement(PluginAdditionProcess, {
                     onCreated: handleCreated,
+                    onOpenSettings: openSettings,
                 });
             }
             else if (view === 'editor') {

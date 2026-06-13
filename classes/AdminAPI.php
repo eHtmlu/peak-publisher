@@ -140,6 +140,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/admin/wporg/discover-plugins', [
+            'methods' => 'POST',
+            'callback' => [$this, 'discover_wporg_plugins'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         // Plugin assets
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
             'methods' => 'GET',
@@ -808,6 +814,82 @@ class AdminAPI {
         }
     }
 
+    public function discover_wporg_plugins(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+
+        if (!$this->wporg_account_is_configured($username)) {
+            return $this->rest_error_response($this->make_rest_error(
+                'account_not_configured',
+                __('Account not configured.', 'peak-publisher'),
+                400,
+                'username'
+            ));
+        }
+
+        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        try {
+            $plugins = SvnDeployWorkflow::discover_plugins_by_author($username);
+        } catch (\Throwable $e) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_api_unavailable',
+                __('wordpress.org API unavailable, try again later.', 'peak-publisher'),
+                503
+            ));
+        }
+
+        $slugs = array_values(array_unique(array_filter(array_map(
+            static fn($plugin) => is_array($plugin) ? (string) ($plugin['slug'] ?? '') : '',
+            $plugins
+        ))));
+        $already_imported_by_slug = [];
+        if (!empty($slugs)) {
+            $existing_posts = get_posts([
+                'post_type' => 'pblsh_wporg_plugin',
+                'post_status' => 'any',
+                'posts_per_page' => -1,
+                'post_name__in' => $slugs,
+            ]);
+            foreach ($existing_posts as $existing_post) {
+                if ($existing_post instanceof \WP_Post) {
+                    $already_imported_by_slug[(string) $existing_post->post_name] = (int) $existing_post->ID;
+                }
+            }
+        }
+
+        $out = [];
+        foreach ($plugins as $plugin) {
+            if (!is_array($plugin)) {
+                continue;
+            }
+            $slug = (string) ($plugin['slug'] ?? '');
+            if ($slug === '') {
+                continue;
+            }
+            $out[] = [
+                'slug' => $slug,
+                'name' => (string) ($plugin['name'] ?? $slug),
+                'already_imported' => isset($already_imported_by_slug[$slug]),
+                'existing_plugin_id' => $already_imported_by_slug[$slug] ?? null,
+                'has_write_access' => null,
+                'access_status' => 'pending',
+            ];
+        }
+
+        return [
+            'status' => 'ok',
+            'username' => $username,
+            'plugins' => $out,
+        ];
+    }
+
     public function lookup_wporg_plugin(\WP_REST_Request $request) {
         $params = $request->get_json_params();
         if (!is_array($params)) {
@@ -865,6 +947,28 @@ class AdminAPI {
                 'message' => isset($access['message']) && is_string($access['message']) ? $access['message'] : null,
             ],
         ];
+    }
+
+    private function wporg_account_is_configured(string $username): bool {
+        $settings = get_option('pblsh_settings');
+        $accounts = is_array($settings) && is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
+
+        foreach ($accounts as $account) {
+            if (!is_array($account)) {
+                continue;
+            }
+
+            $stored_username = normalize_wporg_username($account['username'] ?? null);
+            if (is_wp_error($stored_username) || $stored_username !== $username) {
+                continue;
+            }
+
+            if (wporg_is_encrypted_password(wporg_string_from_value($account['password'] ?? ''))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function make_rest_error(string $code, string $message, int $status, ?string $field = null): \WP_Error {

@@ -5,6 +5,9 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+const PBLSH_WPORG_IMPORT_CHUNK_SIZE = 5;
+
+
 function get_wporg_plugin_data($plugin_post_or_id): array {
     $plugin_post = $plugin_post_or_id instanceof \WP_Post ? $plugin_post_or_id : get_post((int) $plugin_post_or_id);
     if (!$plugin_post instanceof \WP_Post || !is_wporg_plugin($plugin_post)) {
@@ -168,6 +171,247 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
         'root_revision' => $root_revision,
         'release_count' => count($tags_by_version),
     ];
+}
+
+
+function fetch_wporg_import_cache_bundle(string $wporg_slug) {
+    $wporg_slug = normalize_wporg_slug($wporg_slug);
+    if (is_wp_error($wporg_slug)) {
+        return $wporg_slug;
+    }
+
+    require_once PBLSH_PLUGIN_DIR . 'classes/SvnDeployWorkflow.php';
+
+    try {
+        $root_revision = SvnDeployWorkflow::get_plugin_revision($wporg_slug);
+        if ($root_revision === null) {
+            return new \WP_Error(
+                'not_found',
+                __('Plugin not found on wordpress.org SVN.', 'peak-publisher'),
+                [ 'status' => 404 ]
+            );
+        }
+
+        $tags = SvnDeployWorkflow::list_tags($wporg_slug);
+        $versions = [];
+        foreach ($tags as $tag) {
+            if (!is_array($tag)) {
+                continue;
+            }
+            $version = (string) ($tag['version'] ?? '');
+            if ($version !== '') {
+                $versions[] = $version;
+            }
+        }
+        $tag_data_by_version = SvnDeployWorkflow::fetch_tags_data_batch($wporg_slug, $versions);
+    } catch (\Throwable $e) {
+        return new \WP_Error(
+            'access_check_failed',
+            __('Could not read wordpress.org SVN data for this plugin.', 'peak-publisher'),
+            [ 'status' => 502 ]
+        );
+    }
+
+    $releases = [];
+    foreach ($tags as $tag) {
+        if (!is_array($tag)) {
+            continue;
+        }
+
+        $version = (string) ($tag['version'] ?? '');
+        if ($version === '') {
+            continue;
+        }
+
+        $tag_data = $tag_data_by_version[$version] ?? [];
+        $releases[] = [
+            'version' => $version,
+            'tag_revision' => (int) ($tag['revision'] ?? 0),
+            'date' => (string) ($tag['date'] ?? ''),
+            'plugin_data' => $tag_data['plugin_data'] ?? null,
+            'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? [
+                'found' => false,
+                'file_name' => '',
+                'content' => [],
+            ],
+        ];
+    }
+
+    usort($releases, static function(array $a, array $b): int {
+        return version_compare((string) ($b['version'] ?? ''), (string) ($a['version'] ?? ''));
+    });
+
+    $reference_version = '';
+    $reference_name = null;
+    if (!empty($releases)) {
+        $reference = $releases[0];
+        $reference_version = (string) ($reference['version'] ?? '');
+        $name = (string) ($reference['plugin_data']['Name'] ?? '');
+        $reference_name = $name !== '' ? $name : null;
+    }
+
+    return [
+        'root_revision' => (int) $root_revision,
+        'release_count' => count($releases),
+        'reference_version' => $reference_version,
+        'reference_name' => $reference_name,
+        'releases' => $releases,
+    ];
+}
+
+
+function persist_wporg_import_cache_bundle(string $wporg_slug, string $username, array $bundle) {
+    $wporg_slug = normalize_wporg_slug($wporg_slug);
+    if (is_wp_error($wporg_slug)) {
+        return $wporg_slug;
+    }
+
+    $username = normalize_wporg_username($username, 'username');
+    if (is_wp_error($username)) {
+        return $username;
+    }
+
+    $existing = wporg_get_plugin_marker_by_slug($wporg_slug);
+    if ($existing instanceof \WP_Post) {
+        return new \WP_Error(
+            'already_imported',
+            __('Plugin already imported.', 'peak-publisher'),
+            [
+                'status' => 409,
+                'existing_plugin_id' => (int) $existing->ID,
+            ]
+        );
+    }
+
+    $created_marker_id = 0;
+    $created_release_ids = [];
+
+    try {
+        $post_content = wp_json_encode([
+            'revision' => (int) ($bundle['root_revision'] ?? 0),
+            'release_count' => (int) ($bundle['release_count'] ?? 0),
+            'fetched_at' => time(),
+        ]);
+        if (!is_string($post_content)) {
+            throw new \RuntimeException('wporg_import_cache_encode_failed');
+        }
+
+        $marker_id = wp_insert_post([
+            'post_type' => 'pblsh_wporg_plugin',
+            'post_status' => 'publish',
+            'post_name' => $wporg_slug,
+            'post_title' => (string) (($bundle['reference_name'] ?? '') ?: $wporg_slug),
+            'post_content' => wp_slash($post_content),
+        ], true);
+        if (is_wp_error($marker_id)) {
+            throw new \RuntimeException($marker_id->get_error_message());
+        }
+        $created_marker_id = (int) $marker_id;
+
+        $marker = get_post($created_marker_id);
+        if (!$marker instanceof \WP_Post || $marker->post_name !== $wporg_slug) {
+            if ($created_marker_id > 0) {
+                wp_delete_post($created_marker_id, true);
+                $created_marker_id = 0;
+            }
+
+            $existing_after_race = wporg_get_plugin_marker_by_slug($wporg_slug);
+            if ($existing_after_race instanceof \WP_Post) {
+                return new \WP_Error(
+                    'already_imported',
+                    __('Plugin already imported.', 'peak-publisher'),
+                    [
+                        'status' => 409,
+                        'existing_plugin_id' => (int) $existing_after_race->ID,
+                    ]
+                );
+            }
+
+            throw new \RuntimeException('wporg_import_slug_race');
+        }
+
+        update_post_meta($created_marker_id, '_pblsh_wporg_account_username', $username);
+
+        foreach (($bundle['releases'] ?? []) as $release) {
+            if (!is_array($release)) {
+                continue;
+            }
+
+            $version = (string) ($release['version'] ?? '');
+            if ($version === '') {
+                continue;
+            }
+
+            $content = wp_json_encode([
+                'tag_revision' => (int) ($release['tag_revision'] ?? 0),
+                'plugin_data' => $release['plugin_data'] ?? null,
+                'plugin_readme_txt' => $release['plugin_readme_txt'] ?? [
+                    'found' => false,
+                    'file_name' => '',
+                    'content' => [],
+                ],
+            ]);
+            if (!is_string($content)) {
+                throw new \RuntimeException('wporg_import_release_encode_failed');
+            }
+
+            [$post_date, $post_date_gmt] = wporg_svn_date_to_post_dates((string) ($release['date'] ?? ''));
+            $release_id = wp_insert_post([
+                'post_type' => 'pblsh_release',
+                'post_status' => 'publish',
+                'post_parent' => $created_marker_id,
+                'post_title' => $version,
+                'post_name' => get_release_slug($wporg_slug, $version),
+                'post_content' => wp_slash($content),
+                'post_date' => $post_date,
+                'post_date_gmt' => $post_date_gmt,
+            ], true);
+            if (is_wp_error($release_id)) {
+                throw new \RuntimeException($release_id->get_error_message());
+            }
+
+            $created_release_ids[] = (int) $release_id;
+        }
+
+        return $created_marker_id;
+    } catch (\Throwable $e) {
+        foreach (array_reverse($created_release_ids) as $release_id) {
+            wp_delete_post((int) $release_id, true);
+        }
+        if ($created_marker_id > 0) {
+            wp_delete_post($created_marker_id, true);
+        }
+        wporg_log_import_error($wporg_slug, $e);
+
+        return new \WP_Error(
+            'access_check_failed',
+            __('Could not persist wordpress.org import data.', 'peak-publisher'),
+            [ 'status' => 500 ]
+        );
+    }
+}
+
+
+function wporg_get_plugin_marker_by_slug(string $wporg_slug): ?\WP_Post {
+    $posts = get_posts([
+        'post_type' => 'pblsh_wporg_plugin',
+        'post_status' => 'any',
+        'name' => $wporg_slug,
+        'posts_per_page' => 1,
+    ]);
+
+    return !empty($posts) && $posts[0] instanceof \WP_Post ? $posts[0] : null;
+}
+
+
+function wporg_log_import_error(string $wporg_slug, \Throwable $error): void {
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log(sprintf(
+            'Peak Publisher wporg import failed for %s: %s',
+            $wporg_slug,
+            $error->getMessage()
+        ));
+    }
 }
 
 

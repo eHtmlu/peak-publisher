@@ -146,6 +146,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/admin/wporg/import-plugins', [
+            'methods' => 'POST',
+            'callback' => [$this, 'import_wporg_plugins'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         // Plugin assets
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
             'methods' => 'GET',
@@ -946,6 +952,200 @@ class AdminAPI {
                 'access_status' => $access_status,
                 'message' => isset($access['message']) && is_string($access['message']) ? $access['message'] : null,
             ],
+        ];
+    }
+
+    public function import_wporg_plugins(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        $decoded_body = json_decode((string) $request->get_body());
+        if (!$decoded_body instanceof \stdClass || !is_array($params)) {
+            return $this->rest_error_response($this->make_rest_error(
+                'invalid_request',
+                __('Expected a JSON object request body.', 'peak-publisher'),
+                400
+            ));
+        }
+
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+
+        $credentials = get_wporg_credentials($username);
+        if (is_wp_error($credentials)) {
+            return $this->rest_error_response($credentials);
+        }
+        if ($credentials === null) {
+            return $this->rest_error_response($this->make_rest_error(
+                'account_not_configured',
+                __('Account not configured.', 'peak-publisher'),
+                400,
+                'username'
+            ));
+        }
+
+        $slugs = $this->validate_wporg_import_slugs($params);
+        if (is_wp_error($slugs)) {
+            return $this->rest_error_response($slugs);
+        }
+
+        require_once __DIR__ . '/WporgPluginSvnClient.php';
+        if (!WporgPluginSvnClient::is_batch_transport_available()) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_import_transport_unavailable',
+                __('wordpress.org import needs curl_multi_exec support.', 'peak-publisher'),
+                500
+            ));
+        }
+
+        $client = new WporgPluginSvnClient($username, $credentials['password']);
+        $imported = [];
+        $skipped = [];
+
+        foreach ($slugs as $slug) {
+            $existing = wporg_get_plugin_marker_by_slug($slug);
+            if ($existing instanceof \WP_Post) {
+                $skipped[] = $this->wporg_import_skip(
+                    $slug,
+                    'already_imported',
+                    __('Plugin already imported.', 'peak-publisher'),
+                    (int) $existing->ID
+                );
+                continue;
+            }
+
+            try {
+                $access = $client->can_write($slug);
+            } catch (\Throwable $e) {
+                $skipped[] = $this->wporg_import_skip($slug, 'access_check_failed');
+                continue;
+            }
+
+            $access_status = (string) ($access['status'] ?? 'error');
+            $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
+            if ($access_status === 'no_write_access') {
+                $skipped[] = $this->wporg_import_skip($slug, 'no_write_access', $access_message);
+                continue;
+            }
+            if ($access_status === 'not_found') {
+                $skipped[] = $this->wporg_import_skip($slug, 'not_found', $access_message);
+                continue;
+            }
+            if ($access_status !== 'ok' || empty($access['has_write_access'])) {
+                $skipped[] = $this->wporg_import_skip($slug, 'access_check_failed', $access_message);
+                continue;
+            }
+
+            $bundle = fetch_wporg_import_cache_bundle($slug);
+            if (is_wp_error($bundle)) {
+                $skipped[] = $this->wporg_import_skip_from_error($slug, $bundle);
+                continue;
+            }
+
+            $plugin_id = persist_wporg_import_cache_bundle($slug, $username, $bundle);
+            if (is_wp_error($plugin_id)) {
+                $skipped[] = $this->wporg_import_skip_from_error($slug, $plugin_id);
+                continue;
+            }
+
+            $imported[] = $this->serialize_imported_wporg_plugin((int) $plugin_id, $slug);
+        }
+
+        return [
+            'status' => 'ok',
+            'imported' => $imported,
+            'skipped' => $skipped,
+        ];
+    }
+
+    private function validate_wporg_import_slugs(array $params) {
+        if (!array_key_exists('slugs', $params) || !is_array($params['slugs']) || empty($params['slugs']) || !array_is_list($params['slugs'])) {
+            return $this->make_rest_error(
+                'invalid_slugs',
+                __('Select at least one wordpress.org plugin slug.', 'peak-publisher'),
+                400,
+                'slugs'
+            );
+        }
+
+        if (count($params['slugs']) > PBLSH_WPORG_IMPORT_CHUNK_SIZE) {
+            return $this->make_rest_error(
+                'too_many_slugs',
+                sprintf(
+                    __('Import at most %d plugins per request.', 'peak-publisher'),
+                    PBLSH_WPORG_IMPORT_CHUNK_SIZE
+                ),
+                400,
+                'slugs'
+            );
+        }
+
+        $slugs = [];
+        foreach ($params['slugs'] as $index => $raw_slug) {
+            $slug = normalize_wporg_slug($raw_slug, 'slugs.' . $index);
+            if (is_wp_error($slug)) {
+                return $slug;
+            }
+            $slugs[] = $slug;
+        }
+
+        return array_values(array_unique($slugs));
+    }
+
+    private function wporg_import_skip(string $slug, string $reason, ?string $message = null, ?int $existing_plugin_id = null): array {
+        $default_messages = [
+            'already_imported' => __('Plugin already imported.', 'peak-publisher'),
+            'no_write_access' => __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher'),
+            'not_found' => __('Plugin not found on wordpress.org SVN.', 'peak-publisher'),
+            'access_check_failed' => __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
+        ];
+
+        return [
+            'slug' => $slug,
+            'reason' => $reason,
+            'message' => $message ?: ($default_messages[$reason] ?? __('Plugin could not be imported.', 'peak-publisher')),
+            'existing_plugin_id' => $existing_plugin_id !== null && $existing_plugin_id > 0 ? $existing_plugin_id : null,
+        ];
+    }
+
+    private function wporg_import_skip_from_error(string $slug, \WP_Error $error): array {
+        $reason = $error->get_error_code();
+        if (!in_array($reason, ['already_imported', 'not_found'], true)) {
+            $reason = 'access_check_failed';
+        }
+
+        $data = $error->get_error_data();
+        $existing_plugin_id = is_array($data) ? (int) ($data['existing_plugin_id'] ?? 0) : 0;
+
+        return $this->wporg_import_skip(
+            $slug,
+            $reason,
+            $error->get_error_message(),
+            $existing_plugin_id > 0 ? $existing_plugin_id : null
+        );
+    }
+
+    private function serialize_imported_wporg_plugin(int $plugin_id, string $fallback_slug): array {
+        $post = get_post($plugin_id);
+        if (!$post instanceof \WP_Post) {
+            return [
+                'slug' => $fallback_slug,
+                'id' => $plugin_id,
+                'name' => $fallback_slug,
+                'version' => '',
+                'count_of_releases' => 0,
+            ];
+        }
+
+        $releases_by_parent = fetch_releases_grouped_by_parent([$plugin_id]);
+        $plugin = $this->serialize_plugin_post($post, false, $releases_by_parent[$plugin_id] ?? []);
+
+        return [
+            'slug' => (string) ($plugin['slug'] ?? $fallback_slug),
+            'id' => (int) ($plugin['id'] ?? $plugin_id),
+            'name' => (string) ($plugin['name'] ?? $fallback_slug),
+            'version' => (string) ($plugin['version'] ?? ''),
+            'count_of_releases' => (int) ($plugin['count_of_releases'] ?? 0),
         ];
     }
 

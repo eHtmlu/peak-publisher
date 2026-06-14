@@ -83,27 +83,7 @@ class WporgPluginSvnClient {
             );
         }
 
-        $entries = [];
-        foreach ($this->parse_multistatus((string) ($response['body'] ?? '')) as $entry) {
-            $href = (string) ($entry['href'] ?? '');
-            $relative_path = $this->href_to_repo_path($href);
-            if ($relative_path === '') {
-                continue;
-            }
-
-            $props = is_array($entry['props'] ?? null) ? $entry['props'] : [];
-            $is_collection = (($props['resourcetype'] ?? '') === 'collection') || str_ends_with((string) parse_url($href, PHP_URL_PATH), '/');
-            $entries[] = [
-                'path' => $relative_path,
-                'name' => basename(rtrim($relative_path, '/')),
-                'type' => $is_collection ? 'dir' : 'file',
-                'size' => isset($props['getcontentlength']) && ctype_digit((string) $props['getcontentlength']) ? (int) $props['getcontentlength'] : null,
-                'last_modified' => (string) ($props['getlastmodified'] ?? ''),
-                'revision' => $this->revision_int((string) ($props['version-name'] ?? '')),
-            ];
-        }
-
-        return $entries;
+        return $this->entries_from_multistatus_body((string) ($response['body'] ?? ''));
     }
 
     public function read_file(string $path): string {
@@ -126,6 +106,72 @@ class WporgPluginSvnClient {
         }
 
         return (string) ($response['body'] ?? '');
+    }
+
+    public static function is_batch_transport_available(): bool {
+        return function_exists('curl_multi_exec') && function_exists('curl_init');
+    }
+
+    public function list_directories_multi(array $paths, int $depth = 1, int $concurrency = 5): array {
+        $depth = max(0, min(1, $depth));
+        $body = '<?xml version="1.0" encoding="utf-8"?>' .
+            '<D:propfind xmlns:D="DAV:"><D:prop>' .
+            '<D:resourcetype/><D:getlastmodified/><D:getcontentlength/>' .
+            '<D:version-name/><D:checked-in/><D:version-controlled-configuration/>' .
+            '</D:prop></D:propfind>';
+
+        $responses = $this->request_paths_multi('PROPFIND', $paths, [
+            'Depth' => (string) $depth,
+            'Content-Type' => 'text/xml; charset=utf-8',
+        ], $body, $concurrency);
+
+        $out = [];
+        foreach ($responses as $path => $response) {
+            $status = (int) ($response['status'] ?? 0);
+            if ($status === 404) {
+                throw new WporgPluginSvnClientException(
+                    'not_found',
+                    __('wordpress.org SVN path was not found.', 'peak-publisher'),
+                    404
+                );
+            }
+            if (!$this->is_success_status($status) && $status !== 207) {
+                throw new WporgPluginSvnClientException(
+                    'svn_read_failed',
+                    __('wordpress.org SVN returned an unexpected read response.', 'peak-publisher'),
+                    502
+                );
+            }
+            $out[$path] = $this->entries_from_multistatus_body((string) ($response['body'] ?? ''));
+        }
+
+        return $out;
+    }
+
+    public function read_files_multi(array $paths, int $concurrency = 10): array {
+        $responses = $this->request_paths_multi('GET', $paths, [], null, $concurrency);
+        $out = [];
+
+        foreach ($responses as $path => $response) {
+            $status = (int) ($response['status'] ?? 0);
+            if ($status === 404) {
+                throw new WporgPluginSvnClientException(
+                    'not_found',
+                    __('wordpress.org SVN file was not found.', 'peak-publisher'),
+                    404
+                );
+            }
+            if (!$this->is_success_status($status)) {
+                throw new WporgPluginSvnClientException(
+                    'svn_read_failed',
+                    __('wordpress.org SVN returned an unexpected file response.', 'peak-publisher'),
+                    502
+                );
+            }
+            $out[$path] = (string) ($response['body'] ?? '');
+        }
+
+        return $out;
     }
 
     public function can_write(string $path): array {
@@ -348,6 +394,167 @@ class WporgPluginSvnClient {
             'body' => (string) wp_remote_retrieve_body($response),
             'headers' => wp_remote_retrieve_headers($response),
         ];
+    }
+
+    private function request_paths_multi(string $method, array $paths, array $headers = [], ?string $body = null, int $concurrency = 5): array {
+        if (!self::is_batch_transport_available()) {
+            throw new WporgPluginSvnClientException(
+                'wporg_import_transport_unavailable',
+                __('wordpress.org import needs curl_multi_exec support.', 'peak-publisher'),
+                500
+            );
+        }
+
+        $paths = array_values(array_unique(array_filter(array_map('strval', $paths), static fn($path) => $path !== '')));
+        if (empty($paths)) {
+            return [];
+        }
+
+        $method = strtoupper($method);
+        $concurrency = max(1, min(10, $concurrency));
+        $queue = $paths;
+        $responses = [];
+        $multi = curl_multi_init();
+        if ($multi === false) {
+            throw new WporgPluginSvnClientException(
+                'wporg_import_transport_unavailable',
+                __('wordpress.org import could not initialize curl_multi_exec support.', 'peak-publisher'),
+                500
+            );
+        }
+        $handles = [];
+        $error = null;
+
+        $add_handle = function(string $path) use ($multi, $method, $headers, $body, &$handles): void {
+            $request_headers = array_merge([
+                'User-Agent' => 'Peak Publisher SVN Client',
+            ], $headers);
+
+            if ($this->username !== null && $this->password !== null) {
+                $request_headers['Authorization'] = 'Basic ' . base64_encode($this->username . ':' . $this->password);
+            }
+
+            $header_lines = [];
+            foreach ($request_headers as $name => $value) {
+                $header_lines[] = $name . ': ' . $value;
+            }
+
+            $ch = curl_init($this->build_url($path));
+            if ($ch === false) {
+                throw new WporgPluginSvnClientException(
+                    'wporg_import_transport_unavailable',
+                    __('wordpress.org import could not initialize a cURL request.', 'peak-publisher'),
+                    500
+                );
+            }
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => $method,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_HTTPHEADER => $header_lines,
+            ]);
+            if ($body !== null) {
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+            }
+
+            curl_multi_add_handle($multi, $ch);
+            $key = is_object($ch) ? spl_object_id($ch) : (int) $ch;
+            $handles[$key] = [
+                'handle' => $ch,
+                'path' => $path,
+            ];
+        };
+
+        while (!empty($queue) && count($handles) < $concurrency) {
+            $add_handle(array_shift($queue));
+        }
+
+        do {
+            do {
+                $status = curl_multi_exec($multi, $running);
+            } while ($status === CURLM_CALL_MULTI_PERFORM);
+
+            if ($status !== CURLM_OK) {
+                $error = __('wordpress.org SVN batch request failed.', 'peak-publisher');
+                break;
+            }
+
+            while ($info = curl_multi_info_read($multi)) {
+                $ch = $info['handle'];
+                $key = is_object($ch) ? spl_object_id($ch) : (int) $ch;
+                $path = (string) ($handles[$key]['path'] ?? '');
+
+                if (($info['result'] ?? CURLE_OK) !== CURLE_OK) {
+                    $error = curl_error($ch) ?: __('wordpress.org SVN is not reachable.', 'peak-publisher');
+                } else {
+                    $responses[$path] = [
+                        'status' => (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE),
+                        'body' => (string) curl_multi_getcontent($ch),
+                        'headers' => [],
+                    ];
+                }
+
+                curl_multi_remove_handle($multi, $ch);
+                curl_close($ch);
+                unset($handles[$key]);
+
+                if ($error === null && !empty($queue)) {
+                    $add_handle(array_shift($queue));
+                }
+            }
+
+            if ($running > 0 && $error === null) {
+                $selected = curl_multi_select($multi, 1.0);
+                if ($selected === -1) {
+                    usleep(10000);
+                }
+            }
+        } while (($running > 0 || !empty($handles)) && $error === null);
+
+        foreach ($handles as $entry) {
+            $ch = $entry['handle'];
+            curl_multi_remove_handle($multi, $ch);
+            curl_close($ch);
+        }
+        curl_multi_close($multi);
+
+        if ($error !== null) {
+            throw new WporgPluginSvnClientException(
+                'svn_unavailable',
+                $error,
+                503
+            );
+        }
+
+        return $responses;
+    }
+
+    private function entries_from_multistatus_body(string $body): array {
+        $entries = [];
+        foreach ($this->parse_multistatus($body) as $entry) {
+            $href = (string) ($entry['href'] ?? '');
+            $relative_path = $this->href_to_repo_path($href);
+            if ($relative_path === '') {
+                continue;
+            }
+
+            $props = is_array($entry['props'] ?? null) ? $entry['props'] : [];
+            $is_collection = (($props['resourcetype'] ?? '') === 'collection') || str_ends_with((string) parse_url($href, PHP_URL_PATH), '/');
+            $entries[] = [
+                'path' => $relative_path,
+                'name' => basename(rtrim($relative_path, '/')),
+                'type' => $is_collection ? 'dir' : 'file',
+                'size' => isset($props['getcontentlength']) && ctype_digit((string) $props['getcontentlength']) ? (int) $props['getcontentlength'] : null,
+                'last_modified' => (string) ($props['getlastmodified'] ?? ''),
+                'revision' => $this->revision_int((string) ($props['version-name'] ?? '')),
+            ];
+        }
+
+        return $entries;
     }
 
     private function build_url(string $path): string {

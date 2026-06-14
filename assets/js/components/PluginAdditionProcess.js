@@ -6,6 +6,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
     const { Button, TextControl, Spinner } = wp.components;
     const { getSvgIcon, showAlert } = Pblsh.Utils;
     const hljs = window.hljs;
+    const WPORG_IMPORT_CHUNK_SIZE = Math.max(1, parseInt(PblshData?.wporgImportChunkSize, 10) || 5);
 
     const [bootstrapCode, setBootstrapCode] = useState('');
     const [hostingType, setHostingType] = useState(null);
@@ -15,6 +16,11 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
     const [discoverStatus, setDiscoverStatus] = useState('idle');
     const [discoverError, setDiscoverError] = useState('');
     const [importRows, setImportRows] = useState([]);
+    const [importStatus, setImportStatus] = useState('idle');
+    const [importProgress, setImportProgress] = useState({ total: 0, processed: 0 });
+    const [importedPlugins, setImportedPlugins] = useState([]);
+    const [skippedImports, setSkippedImports] = useState([]);
+    const [importError, setImportError] = useState('');
     const [manualSlug, setManualSlug] = useState('');
     const [manualSlugError, setManualSlugError] = useState('');
     const lookupBatchRef = useRef(0);
@@ -45,6 +51,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
         : 'missing';
     const wporgAccountReady = !!wporgUsername && encryptionKeyStatus === 'valid';
     const selectedRows = importRows.filter((row) => row && row.selected);
+    const importInProgress = importStatus === 'importing';
 
     const loadBootstrapCode = async () => {
         const response = await Pblsh.API.getBootstrapCode();
@@ -112,6 +119,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
             slug: String(plugin.slug || ''),
             name: String(plugin.name || plugin.slug || ''),
             already_imported: !!plugin.already_imported,
+            imported: false,
             existing_plugin_id: plugin.existing_plugin_id || null,
             has_write_access: null,
             access_status: plugin.already_imported ? 'pending' : 'pending',
@@ -196,6 +204,14 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
         await Promise.all(workers);
     };
 
+    const resetImportExecution = () => {
+        setImportStatus('idle');
+        setImportProgress({ total: 0, processed: 0 });
+        setImportedPlugins([]);
+        setSkippedImports([]);
+        setImportError('');
+    };
+
     const loadDiscoverPlugins = async () => {
         if (!wporgAccountReady || !wporgUsername) {
             return;
@@ -206,6 +222,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
         setDiscoverStatus('loading');
         setDiscoverError('');
         setImportRows([]);
+        resetImportExecution();
 
         try {
             const response = await window.Pblsh.API.discoverWporgPlugins(wporgUsername);
@@ -226,6 +243,120 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
         }
     };
 
+    const refreshPluginList = async () => {
+        if (window.Pblsh?.Controllers?.Plugins?.fetchList) {
+            await window.Pblsh.Controllers.Plugins.fetchList();
+        }
+    };
+
+    const applyImportResultsToRows = (imported, skipped) => {
+        const importedBySlug = new Map((Array.isArray(imported) ? imported : []).map((plugin) => {
+            return [String(plugin.slug || ''), plugin];
+        }).filter(([slug]) => slug));
+        const skippedBySlug = new Map((Array.isArray(skipped) ? skipped : []).map((entry) => {
+            return [String(entry.slug || ''), entry];
+        }).filter(([slug]) => slug));
+
+        setImportRows((prev) => prev.map((row) => {
+            if (!row || !row.slug) {
+                return row;
+            }
+
+            const importedPlugin = importedBySlug.get(row.slug);
+            if (importedPlugin) {
+                return {
+                    ...row,
+                    name: importedPlugin.name || row.name || row.slug,
+                    imported: true,
+                    already_imported: true,
+                    existing_plugin_id: importedPlugin.id || row.existing_plugin_id || null,
+                    has_write_access: true,
+                    access_status: 'ok',
+                    message: null,
+                    selected: false,
+                };
+            }
+
+            const skippedImport = skippedBySlug.get(row.slug);
+            if (!skippedImport) {
+                return row;
+            }
+
+            const reason = skippedImport.reason || 'access_check_failed';
+            const alreadyImported = reason === 'already_imported';
+            const accessStatus = reason === 'no_write_access'
+                ? 'no_write_access'
+                : (reason === 'not_found' ? 'not_found' : (alreadyImported ? 'ok' : 'error'));
+
+            return {
+                ...row,
+                imported: false,
+                already_imported: alreadyImported || row.already_imported === true,
+                existing_plugin_id: skippedImport.existing_plugin_id || row.existing_plugin_id || null,
+                has_write_access: alreadyImported ? null : false,
+                access_status: accessStatus,
+                message: skippedImport.message || null,
+                selected: false,
+            };
+        }));
+    };
+
+    const importSelectedPlugins = async () => {
+        if (!wporgAccountReady || importInProgress) {
+            return;
+        }
+
+        const slugs = selectedRows.map((row) => row.slug).filter(Boolean);
+        if (slugs.length === 0) {
+            return;
+        }
+
+        setImportStatus('importing');
+        setImportProgress({ total: slugs.length, processed: 0 });
+        setImportedPlugins([]);
+        setSkippedImports([]);
+        setImportError('');
+
+        const allImported = [];
+        const allSkipped = [];
+        let processed = 0;
+
+        try {
+            for (let offset = 0; offset < slugs.length; offset += WPORG_IMPORT_CHUNK_SIZE) {
+                const chunk = slugs.slice(offset, offset + WPORG_IMPORT_CHUNK_SIZE);
+                const response = await window.Pblsh.API.importWporgPlugins(wporgUsername, chunk);
+                const imported = response && Array.isArray(response.imported) ? response.imported : [];
+                const skipped = response && Array.isArray(response.skipped) ? response.skipped : [];
+
+                allImported.push(...imported);
+                allSkipped.push(...skipped);
+                applyImportResultsToRows(imported, skipped);
+
+                processed += imported.length + skipped.length;
+                setImportedPlugins(allImported.slice());
+                setSkippedImports(allSkipped.slice());
+                setImportProgress({
+                    total: slugs.length,
+                    processed: Math.min(slugs.length, processed),
+                });
+            }
+
+            setImportStatus('done');
+            setImportProgress({ total: slugs.length, processed: slugs.length });
+            try {
+                await refreshPluginList();
+            } catch (error) {}
+        } catch (error) {
+            setImportStatus('error');
+            setImportError(error && error.message ? error.message : __('wordpress.org import failed.', 'peak-publisher'));
+            if (allImported.length > 0) {
+                try {
+                    await refreshPluginList();
+                } catch (refreshError) {}
+            }
+        }
+    };
+
     const validateManualSlug = (value) => {
         const slug = String(value || '').trim();
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
@@ -238,7 +369,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
     };
 
     const addManualSlug = () => {
-        if (!wporgAccountReady) {
+        if (!wporgAccountReady || importInProgress) {
             return;
         }
 
@@ -259,6 +390,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
             slug: result.slug,
             name: result.slug,
             already_imported: false,
+            imported: false,
             existing_plugin_id: null,
             has_write_access: null,
             access_status: 'pending',
@@ -307,6 +439,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
         setDiscoverStatus('idle');
         setDiscoverError('');
         setImportRows([]);
+        resetImportExecution();
         setManualSlug('');
         setManualSlugError('');
     }, [wporgUsername]);
@@ -575,6 +708,9 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
     };
 
     const getRowStatusText = (row) => {
+        if (row.imported) {
+            return __('Imported', 'peak-publisher');
+        }
         if (row.already_imported) {
             return __('Already imported', 'peak-publisher');
         }
@@ -594,7 +730,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
     };
 
     const getRowStatusClass = (row) => {
-        if (row.already_imported) {
+        if (row.imported || row.already_imported) {
             return 'is-imported';
         }
         if (row.access_status === 'pending') {
@@ -604,6 +740,41 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
             return 'is-ready';
         }
         return 'is-blocked';
+    };
+
+    const renderImportExecutionState = () => {
+        if (importStatus === 'idle') {
+            return null;
+        }
+
+        const total = Math.max(0, importProgress.total || 0);
+        const processed = Math.max(0, Math.min(total, importProgress.processed || 0));
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+        const importedCount = importedPlugins.length;
+        const skippedCount = skippedImports.length;
+        const statusText = importStatus === 'importing'
+            ? sprintf(__('Importing %1$d of %2$d plugins...', 'peak-publisher'), processed, total)
+            : (importStatus === 'done'
+                ? sprintf(__('Import finished: %1$d imported, %2$d skipped.', 'peak-publisher'), importedCount, skippedCount)
+                : (importError || __('wordpress.org import failed.', 'peak-publisher')));
+
+        return createElement('div', { className: 'pblsh--wporg-import__execution is-' + importStatus },
+            createElement('div', { className: 'pblsh--wporg-import__execution-head' },
+                importStatus === 'importing' ? createElement(Spinner) : null,
+                createElement('strong', null, statusText),
+            ),
+            total > 0 ? createElement('div', { className: 'pblsh--progress pblsh--wporg-import__progress' },
+                createElement('div', { className: 'pblsh--progress__bar', style: { '--percentage': percentage + '%' } }),
+                createElement('div', { className: 'pblsh--progress__label' }, percentage + '%'),
+            ) : null,
+            skippedCount > 0 ? createElement('ul', { className: 'pblsh--wporg-import__skipped-list' },
+                skippedImports.map((entry) => createElement('li', { key: String(entry.slug || '') + ':' + String(entry.reason || '') },
+                    createElement('code', null, entry.slug || ''),
+                    ' ',
+                    entry.message || entry.reason || __('Skipped', 'peak-publisher'),
+                )),
+            ) : null,
+        );
     };
 
     const renderImportRows = () => {
@@ -660,7 +831,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
                                     createElement('input', {
                                         type: 'checkbox',
                                         checked: !!row.selected,
-                                        disabled: !selectable,
+                                        disabled: importInProgress || !selectable,
                                         'aria-label': sprintf(__('Select %s', 'peak-publisher'), row.name || row.slug),
                                         onChange: (event) => toggleRowSelection(row.slug, event.target.checked),
                                     }),
@@ -702,6 +873,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
                 createElement(TextControl, {
                     label: __('Plugin slug', 'peak-publisher'),
                     value: manualSlug,
+                    disabled: importInProgress,
                     onChange: (value) => {
                         setManualSlug(value);
                         setManualSlugError('');
@@ -717,7 +889,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
                 createElement(Button, {
                     isSecondary: true,
                     onClick: addManualSlug,
-                    disabled: !wporgAccountReady || manualSlug.trim() === '',
+                    disabled: importInProgress || !wporgAccountReady || manualSlug.trim() === '',
                 }, __('Add to list', 'peak-publisher')),
             ),
             manualSlugError ? createElement('p', { className: 'pblsh--wporg-import__manual-error' }, manualSlugError) : null,
@@ -735,18 +907,21 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
                     createElement(Button, {
                         isSecondary: true,
                         onClick: loadDiscoverPlugins,
-                        disabled: discoverStatus === 'loading' || !wporgAccountReady,
+                        disabled: importInProgress || discoverStatus === 'loading' || !wporgAccountReady,
                     }, __('Refresh', 'peak-publisher')),
                 ),
+                renderImportExecutionState(),
                 renderImportRows(),
                 renderManualSlugLookup(),
                 createElement('div', { className: 'pblsh--wporg-import__footer' },
                     createElement('span', null, sprintf(__('%d selected', 'peak-publisher'), selectedRows.length)),
                     createElement(Button, {
                         isPrimary: true,
-                        disabled: true,
-                        title: __('Import execution is not available in this slice.', 'peak-publisher'),
-                    }, selectedRows.length > 0 ? sprintf(__('Import selected (%d)', 'peak-publisher'), selectedRows.length) : __('Import selected', 'peak-publisher')),
+                        onClick: importSelectedPlugins,
+                        disabled: importInProgress || !wporgAccountReady || selectedRows.length === 0,
+                    }, importInProgress
+                        ? __('Importing...', 'peak-publisher')
+                        : (selectedRows.length > 0 ? sprintf(__('Import selected (%d)', 'peak-publisher'), selectedRows.length) : __('Import selected', 'peak-publisher'))),
                 ),
             ),
         );

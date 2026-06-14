@@ -163,6 +163,7 @@ class AdminUI {
                 'phpVersion' => PHP_VERSION,
                 'hasPlainPermalinks' => get_option('permalink_structure') === '',
                 'permalinkSettingsUrl' => admin_url('options-permalink.php'),
+                'wporgImportChunkSize' => PBLSH_WPORG_IMPORT_CHUNK_SIZE,
                 'assetSlots' => AssetManager::get_slots(),
                 'i18n' => [
                     'permalinkPlain'      => __('Plain'),

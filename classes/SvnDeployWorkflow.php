@@ -84,6 +84,60 @@ class SvnDeployWorkflow {
         ];
     }
 
+    public static function fetch_tags_data_batch(string $wporg_slug, array $versions): array {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $normalized_versions = [];
+        foreach ($versions as $version) {
+            $normalized_versions[] = self::safe_path_segment((string) $version);
+        }
+        $versions = array_values(array_unique($normalized_versions));
+        if (empty($versions)) {
+            return [];
+        }
+
+        $client = self::read_client();
+        $base_paths_by_version = [];
+        foreach ($versions as $version) {
+            $base_paths_by_version[$version] = $wporg_slug . '/tags/' . $version;
+        }
+
+        $directory_paths = array_map(static fn($base_path) => $base_path . '/', array_values($base_paths_by_version));
+        $directories_by_path = $client->list_directories_multi($directory_paths, 1, 5);
+
+        $children_by_version = [];
+        $readme_by_version = [];
+        $file_paths = [];
+        foreach ($base_paths_by_version as $version => $base_path) {
+            $children = self::direct_children($directories_by_path[$base_path . '/'] ?? [], $base_path);
+            $children_by_version[$version] = $children;
+
+            foreach ($children as $entry) {
+                $path = (string) ($entry['path'] ?? '');
+                $name = (string) ($entry['name'] ?? '');
+                if (($entry['type'] ?? '') === 'file' && substr($name, -4) === '.php' && $path !== '') {
+                    $file_paths[] = $path;
+                }
+            }
+
+            $readme = self::find_readme_entry($children);
+            if ($readme !== null && (string) ($readme['path'] ?? '') !== '') {
+                $readme_by_version[$version] = $readme;
+                $file_paths[] = (string) $readme['path'];
+            }
+        }
+
+        $file_contents = $client->read_files_multi($file_paths, 10);
+        $out = [];
+        foreach ($versions as $version) {
+            $out[$version] = [
+                'plugin_data' => self::plugin_data_from_prefetched_files($children_by_version[$version] ?? [], $file_contents),
+                'plugin_readme_txt' => self::readme_data_from_prefetched_file($readme_by_version[$version] ?? null, $file_contents),
+            ];
+        }
+
+        return $out;
+    }
+
     public static function discover_plugins_by_author(string $username): array {
         $normalized_username = normalize_wporg_username($username);
         if (is_wp_error($normalized_username)) {
@@ -206,9 +260,6 @@ class SvnDeployWorkflow {
     }
 
     private static function fetch_plugin_data(WporgPluginSvnClient $client, array $children): ?array {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-
         foreach ($children as $entry) {
             $path = (string) ($entry['path'] ?? '');
             $name = (string) ($entry['name'] ?? '');
@@ -216,25 +267,9 @@ class SvnDeployWorkflow {
                 continue;
             }
 
-            $tmp = wp_tempnam($name !== '' ? $name : 'pblsh-wporg-plugin.php');
-            if (!is_string($tmp) || $tmp === '') {
-                continue;
-            }
-
-            try {
-                $contents = $client->read_file($path);
-                if (@file_put_contents($tmp, $contents) === false) {
-                    continue;
-                }
-
-                $plugin_data = get_plugin_data($tmp, false, false);
-                if (!empty($plugin_data['Name'])) {
-                    return $plugin_data;
-                }
-            } finally {
-                if (file_exists($tmp)) {
-                    wp_delete_file($tmp);
-                }
+            $plugin_data = self::parse_plugin_data_from_contents($name, $client->read_file($path));
+            if ($plugin_data !== null) {
+                return $plugin_data;
             }
         }
 
@@ -262,12 +297,7 @@ class SvnDeployWorkflow {
             throw $e;
         }
 
-        $readme_info['found'] = true;
-        $readme_info['file_name'] = (string) ($readme['name'] ?? 'readme.txt');
-        $parsed = parse_readme_txt(self::normalize_readme_content($content));
-        $readme_info['content'] = json_encode($parsed) !== false ? $parsed : null;
-
-        return $readme_info;
+        return self::readme_info_from_content($readme, $content);
     }
 
     private static function find_readme_entry(array $children): ?array {
@@ -281,6 +311,77 @@ class SvnDeployWorkflow {
 
         $readme_file = find_wporg_readme_file_name(array_keys($entries_by_name));
         return $readme_file !== null ? ($entries_by_name[$readme_file] ?? null) : null;
+    }
+
+    private static function plugin_data_from_prefetched_files(array $children, array $file_contents): ?array {
+        foreach ($children as $entry) {
+            $path = (string) ($entry['path'] ?? '');
+            $name = (string) ($entry['name'] ?? '');
+            if (($entry['type'] ?? '') !== 'file' || substr($name, -4) !== '.php' || !array_key_exists($path, $file_contents)) {
+                continue;
+            }
+
+            $plugin_data = self::parse_plugin_data_from_contents($name, (string) $file_contents[$path]);
+            if ($plugin_data !== null) {
+                return $plugin_data;
+            }
+        }
+
+        return null;
+    }
+
+    private static function parse_plugin_data_from_contents(string $name, string $contents): ?array {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+
+        $tmp = wp_tempnam($name !== '' ? $name : 'pblsh-wporg-plugin.php');
+        if (!is_string($tmp) || $tmp === '') {
+            return null;
+        }
+
+        try {
+            if (@file_put_contents($tmp, $contents) === false) {
+                return null;
+            }
+
+            $plugin_data = get_plugin_data($tmp, false, false);
+            return !empty($plugin_data['Name']) ? $plugin_data : null;
+        } finally {
+            if (file_exists($tmp)) {
+                wp_delete_file($tmp);
+            }
+        }
+    }
+
+    private static function readme_data_from_prefetched_file(?array $readme, array $file_contents): array {
+        if ($readme === null) {
+            return self::empty_readme_info();
+        }
+
+        $path = (string) ($readme['path'] ?? '');
+        if ($path === '' || !array_key_exists($path, $file_contents)) {
+            return self::empty_readme_info();
+        }
+
+        return self::readme_info_from_content($readme, (string) $file_contents[$path]);
+    }
+
+    private static function readme_info_from_content(array $readme, string $content): array {
+        $parsed = parse_readme_txt(self::normalize_readme_content($content));
+
+        return [
+            'found' => true,
+            'file_name' => (string) ($readme['name'] ?? 'readme.txt'),
+            'content' => json_encode($parsed) !== false ? $parsed : null,
+        ];
+    }
+
+    private static function empty_readme_info(): array {
+        return [
+            'found' => false,
+            'file_name' => '',
+            'content' => [],
+        ];
     }
 
     private static function normalize_readme_content(string $content): string {

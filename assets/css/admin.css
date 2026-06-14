@@ -521,6 +521,53 @@
     margin-top: 0.25rem;
 }
 
+.pblsh--wporg-import__execution {
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+    padding: 0.875rem 1rem;
+    background: #f6f7f7;
+}
+
+.pblsh--wporg-import__execution.is-done {
+    border-color: #72aee6;
+    background: #f0f6fc;
+}
+
+.pblsh--wporg-import__execution.is-error {
+    border-color: #d63638;
+    background: #fcf0f1;
+}
+
+.pblsh--wporg-import__execution-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pblsh--wporg-import__progress {
+    align-items: stretch;
+    gap: 0.25rem;
+    margin-top: 0.75rem;
+}
+
+.pblsh--wporg-import__progress .pblsh--progress__bar {
+    width: 100%;
+}
+
+.pblsh--wporg-import__progress .pblsh--progress__label {
+    margin-top: 0;
+    text-align: right;
+}
+
+.pblsh--wporg-import__skipped-list {
+    margin: 0.75rem 0 0;
+    padding-left: 1.25rem;
+}
+
+.pblsh--wporg-import__skipped-list li {
+    margin-bottom: 0.25rem;
+}
+
 .pblsh--wporg-import__manual {
     border-top: 1px solid var(--border-color-light);
     padding-top: 1rem;

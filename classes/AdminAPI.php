@@ -466,8 +466,12 @@ class AdminAPI {
     public function delete_plugin(\WP_REST_Request $request): array {
         $id = (int) $request->get_param('id');
         $plugin = get_post($id);
-        if (!$plugin || $plugin->post_type !== 'pblsh_plugin') {
+        if (!is_plugin_post($plugin)) {
             return [ 'status' => 'error', 'message' => 'Plugin not found.' ];
+        }
+
+        if (is_wporg_plugin($plugin)) {
+            return $this->delete_wporg_plugin_mirror($plugin);
         }
 
         // Delete all releases including their ZIP files
@@ -507,6 +511,29 @@ class AdminAPI {
         wp_delete_post($plugin->ID, true);
         return [ 'status' => 'ok' ];
     }
+
+    private function delete_wporg_plugin_mirror(\WP_Post $plugin): array {
+        $release_ids = get_posts([
+            'post_type' => 'pblsh_release',
+            'post_status' => 'any',
+            'posts_per_page' => -1,
+            'post_parent' => (int) $plugin->ID,
+            'fields' => 'ids',
+        ]);
+
+        foreach ($release_ids as $release_id) {
+            wp_delete_post((int) $release_id, true);
+        }
+
+        wp_delete_post((int) $plugin->ID, true);
+
+        return [
+            'status' => 'ok',
+            'removed_local_mirror' => true,
+            'deleted_releases' => count($release_ids),
+        ];
+    }
+
     /**
      * Update a release.
      */

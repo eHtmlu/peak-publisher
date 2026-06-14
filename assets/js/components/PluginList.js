@@ -8,7 +8,11 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
-        if (!confirm(__('Are you sure you want to permanently delete this plugin?', 'peak-publisher'))) {
+        const message = plugin && plugin.hosting_type === 'wporg'
+            ? __('Remove this wordpress.org plugin from Peak Publisher? The plugin on wordpress.org and its SVN repository will remain untouched.', 'peak-publisher')
+            : __('Are you sure you want to permanently delete this plugin?', 'peak-publisher');
+
+        if (!confirm(message)) {
             return;
         }
 
@@ -120,13 +124,15 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                                     getSvgIcon('download', { size: 24 }),
                                                     __('Download Installable', 'peak-publisher')
                                                 ), */
-                                                plugin.hosting_type !== 'wporg' && plugin.slug !== PblshData.currentPlugin && createElement(MenuItem, {
+                                                plugin.slug !== PblshData.currentPlugin && createElement(MenuItem, {
                                                     key: 'delete',
                                                     isDestructive: true,
                                                     onClick: () => { handleDelete(plugin); onClose(); }
                                                 },
                                                     getSvgIcon('delete_forever', { size: 24 }),
-                                                    __('Delete permanently', 'peak-publisher')
+                                                    plugin.hosting_type === 'wporg'
+                                                        ? __('Remove from Peak Publisher', 'peak-publisher')
+                                                        : __('Delete permanently', 'peak-publisher')
                                                 )
                                             ].filter(Boolean)
                                         })

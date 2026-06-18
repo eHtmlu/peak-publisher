@@ -311,7 +311,8 @@ class AdminAPI {
         $releases_query = new \WP_Query([
             'post_type' => 'pblsh_release',
             'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
-            'posts_per_page' => 50,
+            'posts_per_page' => -1,
+            'no_found_rows' => true,
             'orderby' => 'date',
             'order' => 'DESC',
             'post_parent' => $post->ID,

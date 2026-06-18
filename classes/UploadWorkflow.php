@@ -561,44 +561,31 @@ class UploadWorkflow {
             $plugin_release_version = $plugin_release_content['plugin_data']['Version'] ?? '';
             $plugin_release_normalized_version = normalize_version_number($plugin_release_version);
 
+            $release_info = [
+                'id' => $plugin_release->ID,
+                'version' => $plugin_release_version,
+                'normalized_version' => $plugin_release_normalized_version,
+                'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
+            ];
+
             // Find the existing release
             if ($plugin_release_normalized_version === $version) {
-                $existing_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $existing_release = $release_info;
             }
             
             // Find the previous release
             if (version_compare($plugin_release_normalized_version, $version, '<') && ($previous_release === false || version_compare($previous_release['normalized_version'], $plugin_release_normalized_version, '<'))) {
-                $previous_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $previous_release = $release_info;
             }
 
             // Find the next release
             if (version_compare($plugin_release_normalized_version, $version, '>') && ($next_release === false || version_compare($next_release['normalized_version'], $plugin_release_normalized_version, '>'))) {
-                $next_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $next_release = $release_info;
             }
             
             // Find the latest release
             if ($latest_release === false || version_compare($latest_release['normalized_version'], $plugin_release_normalized_version, '<')) {
-                $latest_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $latest_release = $release_info;
             }
         }
         return [

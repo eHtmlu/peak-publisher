@@ -557,9 +557,16 @@ class UploadWorkflow {
         $next_release = false;
         $latest_release = false;
         foreach ($plugin_releases as $plugin_release) {
-            $plugin_release_content = json_decode($plugin_release->post_content, true);
-            $plugin_release_version = $plugin_release_content['plugin_data']['Version'] ?? '';
+            $plugin_release_content = json_decode((string) $plugin_release->post_content, true);
+            if (!is_array($plugin_release_content)) {
+                $plugin_release_content = [];
+            }
+
+            $plugin_release_version = (string) (($plugin_release->post_title ?? '') !== '' ? $plugin_release->post_title : ($plugin_release_content['plugin_data']['Version'] ?? ''));
             $plugin_release_normalized_version = normalize_version_number($plugin_release_version);
+            if ($plugin_release_normalized_version === '') {
+                continue;
+            }
 
             $release_info = [
                 'id' => $plugin_release->ID,

@@ -339,9 +339,10 @@ class WporgPluginSvnClient {
     }
 
     private function checkout(string $url, string $activity_url): array {
+        $activity_href = $this->dav_href($activity_url);
         $body = '<?xml version="1.0" encoding="utf-8"?>' .
             '<D:checkout xmlns:D="DAV:"><D:activity-set><D:href>' .
-            htmlspecialchars($activity_url, ENT_QUOTES | ENT_XML1) .
+            htmlspecialchars($activity_href, ENT_QUOTES | ENT_XML1) .
             '</D:href></D:activity-set></D:checkout>';
 
         return $this->request_url('CHECKOUT', $url, [
@@ -578,6 +579,21 @@ class WporgPluginSvnClient {
         $scheme = (string) ($parts['scheme'] ?? 'https');
         $host = (string) ($parts['host'] ?? 'plugins.svn.wordpress.org');
         return $scheme . '://' . $host . '/' . ltrim($href, '/');
+    }
+
+    private function dav_href(string $url): string {
+        $path = parse_url($url, PHP_URL_PATH);
+        $path = is_string($path) && $path !== '' ? $path : '/';
+        if (!str_starts_with($path, '/')) {
+            $path = '/' . ltrim($path, '/');
+        }
+
+        $query = parse_url($url, PHP_URL_QUERY);
+        if (is_string($query) && $query !== '') {
+            $path .= '?' . $query;
+        }
+
+        return $path;
     }
 
     private function first_prop(string $xml, string $property): string {

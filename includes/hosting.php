@@ -17,6 +17,19 @@ function is_plugin_post(?\WP_Post $post): bool {
 
 
 /**
+ * Mints a plugin slug from a user-chosen name, mirroring wordpress.org's slug generation
+ * (plugin-directory class-upload-handler.php): transform instead of reject.
+ * Returns '' when nothing usable remains.
+ */
+function generate_plugin_slug(string $name): string {
+    $slug = remove_accents($name);
+    $slug = preg_replace('/[^a-z0-9 _.-]/i', '', $slug);
+    $slug = str_replace('_', '-', $slug);
+    return sanitize_title_with_dashes($slug);
+}
+
+
+/**
  * Finds the plugin post of the given post type by its slug.
  */
 function get_plugin_post_by_slug(string $post_type, string $slug): ?\WP_Post {
@@ -68,11 +81,11 @@ function is_wporg_plugin($post_or_id): bool {
 
 
 /**
- * Validates a canonical wordpress.org plugin slug.
+ * Validates a canonical plugin slug. Both channels share the wordpress.org slug format.
  *
  * @return string|\WP_Error
  */
-function normalize_wporg_slug($slug, ?string $field = null) {
+function normalize_plugin_slug($slug, ?string $field = null) {
     $slug = is_string($slug) ? trim($slug) : '';
     if ($slug === '' || !preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $slug)) {
         $data = [ 'status' => 400 ];

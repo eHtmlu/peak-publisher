@@ -1006,29 +1006,42 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         ];
     }
 
-    function checkTopLevelFolder(context) {
-        const { meta, isWporg, blockers } = context;
-        const pluginBasename = meta.plugin_info?.plugin_basename || '';
-        const pluginFolder = pluginBasename ? pluginBasename.split('/')[0] : (meta?.slug || '');
-        const installPath = pluginFolder ? '/wp-content/plugins/' + pluginFolder + '/' : '';
+    function checkSlug(context) {
+        const { meta } = context;
+        const slugBase = meta.plugin_info?.plugin_slug_base || '';
+        const installPath = meta?.slug ? '/wp-content/plugins/' + meta.slug + '/' : '';
 
-        if (isWporg && blockers.some((blocker) => blocker?.code === 'invalid_slug')) {
+        if (!meta?.slug) {
+            const errorTexts = {
+                top_level_folder: {
+                    problem: sprintf(__('The folder name %s cannot be turned into a plugin slug.', 'peak-publisher'), slugBase),
+                    remedy: __('Rename the plugin folder and upload again.', 'peak-publisher'),
+                },
+                zip_filename: {
+                    problem: sprintf(__('The ZIP filename %s cannot be turned into a plugin slug.', 'peak-publisher'), slugBase + '.zip'),
+                    remedy: __('Rename the ZIP file and upload again.', 'peak-publisher'),
+                },
+                main_file_basename: {
+                    problem: sprintf(__('The name of the main plugin file %s cannot be turned into a plugin slug.', 'peak-publisher'), slugBase + '.php'),
+                    remedy: __('Rename the main plugin file and upload again.', 'peak-publisher'),
+                },
+            };
+            const { problem, remedy } = errorTexts[meta?.slug_source];
             return {
-                title: __('Top-level folder is not a valid slug', 'peak-publisher'),
+                title: __('No valid plugin slug', 'peak-publisher'),
                 type: 'error',
                 desc: [
-                    __('wordpress.org deploys require the top-level folder to match the slug of the plugin on wordpress.org.', 'peak-publisher'),
+                    problem,
                     createElement('br'),
-                    sprintf(__('The folder %s cannot be a wordpress.org slug (slugs consist of lowercase letters, numbers, and hyphens).', 'peak-publisher'), pluginFolder),
+                    remedy,
                 ],
             };
         }
         return {
-            title: __('Top-level folder exists', 'peak-publisher'),
+            title: __('Valid plugin slug', 'peak-publisher'),
             type: 'ok',
             desc: [
-                meta?.cleanup_info?.fixed_top_level_folder && __('It was added to your upload automatically.', 'peak-publisher'),
-                !meta?.cleanup_info?.fixed_top_level_folder && __('Your upload has a top-level folder.', 'peak-publisher'),
+                sprintf(__('The plugin slug is %s.', 'peak-publisher'), getSlugSummary(meta)),
                 installPath && createElement('br'),
                 installPath && sprintf(__('The install folder will be %s.', 'peak-publisher'), installPath),
             ],
@@ -1227,7 +1240,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                 checkVersion(context),
                 checkUpdateUri(context),
                 checkBootstrapCode(context),
-                checkTopLevelFolder(context),
+                checkSlug(context),
                 checkWorkspaceArtifacts(context),
                 checkReadmeTxt(context),
             ],

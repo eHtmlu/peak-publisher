@@ -93,16 +93,15 @@ class UploadWorkflow {
         }
 
         // Check if the plugin slug is valid
-        $plugin_slug = $data['plugin_info']['plugin_slug'];
-        $plugin_slug_sanitized = sanitize_title($plugin_slug);
-        if ($plugin_slug !== $plugin_slug_sanitized) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'plugin_slug_mismatch', 'message' => 'Plugin slug mismatch.' ] ] ];
+        $plugin_slug = normalize_plugin_slug($data['slug'] ?? null, 'slug');
+        if (is_wp_error($plugin_slug)) {
+            return [ 'status' => 'error', 'errors' => [ [ 'code' => $plugin_slug->get_error_code(), 'message' => $plugin_slug->get_error_message() ] ] ];
         }
 
         // Check if the plugin slug is unique if it's a new plugin
         if (empty($data['existing_plugin'])) {
-            $plugin_slug_unique = wp_unique_post_slug($plugin_slug_sanitized, 0, 'publish', 'pblsh_plugin', 0);
-            if ($plugin_slug_sanitized !== $plugin_slug_unique) {
+            $plugin_slug_unique = wp_unique_post_slug($plugin_slug, 0, 'publish', 'pblsh_plugin', 0);
+            if ($plugin_slug !== $plugin_slug_unique) {
                 return [ 'status' => 'error', 'errors' => [ [ 'code' => 'plugin_slug_mismatch', 'message' => 'Plugin slug mismatch.' ] ] ];
             }
         }
@@ -331,13 +330,45 @@ class UploadWorkflow {
             $size_before_cleanup = $this->get_path_size($root);
             $entry_count_before_cleanup = $this->get_path_entry_count($root);
 
-            // Add top-level folder if needed
             $has_top_level_folder = $this->has_top_level_folder($working_dir);
-            $fixed_top_level_folder = !$has_top_level_folder && $main_file ? $this->add_top_level_folder($working_dir, $main_file) : false;
+
+            // Slug base cascade: only names the user chose themselves count as identity signals —
+            // a user-provided top-level folder, else the user's own ZIP filename, else the name of
+            // the main plugin file (raw file drops — the browser-built ZIP name is a pipeline artifact).
+            $built_in_browser = (string) ($cache['data']['original_zip']['built_in_browser'] ?? '');
+            if ($has_top_level_folder) {
+                $plugin_slug_base = basename($root);
+                $plugin_slug_source = 'top_level_folder';
+            } elseif (!$built_in_browser) {
+                $plugin_slug_base = preg_replace('/\.zip$/i', '', (string) ($cache['data']['original_zip']['name'] ?? ''));
+                $plugin_slug_source = 'zip_filename';
+            } else {
+                $plugin_slug_base = $main_file ? preg_replace('/\.php$/i', '', basename($main_file)) : '';
+                $plugin_slug_source = 'main_file_basename';
+            }
+            // Mint the slug the way wordpress.org mints it from the plugin name: transform, don't reject.
+            $plugin_slug = generate_plugin_slug($plugin_slug_base);
+
+            // Add top-level folder if needed, named after the minted slug
+            $fixed_top_level_folder = !$has_top_level_folder && $main_file ? $this->add_top_level_folder($working_dir, $main_file, $plugin_slug) : false;
             if ($fixed_top_level_folder) {
                 // The top-level folder was added, so we need to re-detect the root and main file
                 $root = $this->detect_root_dir($working_dir);
                 $main_file = $this->find_main_plugin_file($root);
+            }
+
+            // Normalize a user-provided folder to the minted slug: like the wordpress.org builder,
+            // every stored ZIP has {slug}/ as its only root folder — this also keeps the
+            // plugin_basename stable across releases.
+            $normalized_top_level_folder = false;
+            if ($has_top_level_folder && $plugin_slug !== '' && basename($root) !== $plugin_slug) {
+                $normalized_root = trailingslashit(dirname(untrailingslashit($root))) . $plugin_slug;
+                if (!get_wp_filesystem()->move(untrailingslashit($root), $normalized_root)) {
+                    return $this->upload_error('artifact_normalization_failed', __('Could not rename the plugin folder to the plugin slug.', 'peak-publisher'), $upload_id);
+                }
+                $root = trailingslashit($normalized_root);
+                $main_file = $this->find_main_plugin_file($root);
+                $normalized_top_level_folder = true;
             }
 
             // Find workspace artifacts
@@ -351,21 +382,18 @@ class UploadWorkflow {
             $size_after_cleanup = $this->get_path_size($root);
             $entry_count_after_cleanup = $this->get_path_entry_count($root);
 
-            // If Peak Publisher created the zip file in the browser itself, rename the zip file to the main file name of the plugin so that it has a meaningful name.
-            $built_in_browser = (string) ($cache['data']['original_zip']['built_in_browser'] ?? '');
+            // If Peak Publisher created the zip file in the browser itself, rename the zip file to the plugin slug so that it has a meaningful name.
             if ($built_in_browser && $main_file && !$has_top_level_folder) {
-                $new_zip_path = dirname($zip_path) . '/' . preg_replace('/\.php$/i', '', basename($main_file)) . '.zip';
+                $new_zip_path = dirname($zip_path) . '/' . ($plugin_slug !== '' ? $plugin_slug : preg_replace('/\.php$/i', '', basename($main_file))) . '.zip';
                 if ($new_zip_path !== $zip_path) {
                     get_wp_filesystem()->move($zip_path, $new_zip_path);
                     $zip_path = $new_zip_path;
                 }
             }
 
-            // Determine plugin folder name and basename
+            // Determine the artifact folder name and basename
             $plugin_folder_name = $has_top_level_folder || $fixed_top_level_folder ? basename($root) : basename($zip_path, '.zip');
-            $plugin_folder_source = $has_top_level_folder ? 'top_level_folder' : ($fixed_top_level_folder ? 'main_file_basename' : 'zip_filename');
             $plugin_basename = $plugin_folder_name . '/' . basename($main_file);
-            $plugin_slug = sanitize_title($plugin_folder_name);
 
             // Process readme.txt (root-level, case-sensitive), normalize encoding/BOM if configured, and parse
             $readme_modified = false;
@@ -438,13 +466,15 @@ class UploadWorkflow {
                     'bootstrap_is_latest' => $bootstrap['is_latest'] ?? false,
                     'plugin_basename' => $plugin_basename,
                     'plugin_slug' => $plugin_slug,
+                    'plugin_slug_base' => $plugin_slug_base,
+                    'plugin_slug_source' => $plugin_slug_source,
                     'plugin_folder_name' => $plugin_folder_name,
-                    'plugin_folder_source' => $plugin_folder_source,
                     'content_hash' => $this->get_directory_content_hash($root),
                 ],
                 'cleanup_info' => [
                     'has_top_level_folder' => $has_top_level_folder,
                     'fixed_top_level_folder' => $fixed_top_level_folder,
+                    'normalized_top_level_folder' => $normalized_top_level_folder,
                     'found_workspace_artifacts' => $found_workspace_artifacts,
                     'size_before_cleanup' => (int) $size_before_cleanup,
                     'size_after_cleanup' => (int) $size_after_cleanup,
@@ -477,7 +507,7 @@ class UploadWorkflow {
             // Determine if the ZIP needs to be rebuilt
             $any_deleted = false;
             foreach ($found_workspace_artifacts as $entry) { if (!empty($entry['deleted'])) { $any_deleted = true; break; } }
-            $rebuild_zip_needed = (bool) ($fixed_top_level_folder || $any_deleted || $readme_modified);
+            $rebuild_zip_needed = (bool) ($fixed_top_level_folder || $normalized_top_level_folder || $any_deleted || $readme_modified);
 
             // Update cache
             $cache['zip_path'] = $zip_path;
@@ -581,27 +611,16 @@ class UploadWorkflow {
         return $context;
     }
 
-    /**
-     * Derives the wordpress.org slug from the upload's top-level folder name.
-     * Transitional: dissolves into the general analysis once slug resolution becomes
-     * channel-agnostic (planned slug-sources step).
-     */
-    private function wporg_slug_from_upload_data(array $data) {
-        return normalize_wporg_slug($data['plugin_info']['plugin_folder_name'] ?? '', 'slug');
-    }
-
     private function build_hosting_type_analysis_state(array $data, array $request_context = []) {
         $intent = (string) ($request_context['hosting_type_intended'] ?? '');
         $request_username = (string) ($request_context['username'] ?? '');
 
         $slug = (string) ($data['plugin_info']['plugin_slug'] ?? '');
-        $wporg_slug = $this->wporg_slug_from_upload_data($data);
-        if (is_wp_error($wporg_slug)) {
-            // Keep wp.org in the target matrix; the slug error is rendered as a target blocker.
-            $wporg_slug = '';
-        }
+        // Set early: the target builders below read the resolved slug from $data.
+        $data['slug'] = $slug;
+        $data['slug_source'] = (string) ($data['plugin_info']['plugin_slug_source'] ?? '');
         $self_post = get_plugin_post_by_slug('pblsh_plugin', $slug);
-        $wporg_marker = get_plugin_post_by_slug('pblsh_wporg_plugin', $wporg_slug);
+        $wporg_marker = get_plugin_post_by_slug('pblsh_wporg_plugin', $slug);
         $has_self_hosted_signal = !empty($data['plugin_data']['UpdateURI']) || !empty($data['plugin_info']['bootstrap_file']);
 
         $include_self_hosted = false;
@@ -686,8 +705,6 @@ class UploadWorkflow {
         $data['hosting_type_resolved'] = $resolved;
         $data['hosting_type_choice'] = $choice;
         $data['hosting_type_targets'] = $targets;
-        $data['slug'] = $resolved === 'wporg' && $wporg_slug !== '' ? $wporg_slug : $slug;
-        $data['slug_source'] = (string) ($data['plugin_info']['plugin_folder_source'] ?? '');
 
         if (is_array($active_target)) {
             $data = $this->apply_target_release_context($data, $active_target);
@@ -698,7 +715,7 @@ class UploadWorkflow {
 
     private function refresh_wporg_target_context(array $data) {
         // Resolve the slug and account from persisted upload state
-        $slug = normalize_wporg_slug($data['slug'] ?? null, 'slug');
+        $slug = normalize_plugin_slug($data['slug'] ?? null, 'slug');
         if (is_wp_error($slug)) {
             return $slug;
         }
@@ -774,8 +791,8 @@ class UploadWorkflow {
         }
 
         $blockers = $this->wporg_marker_independent_blockers($data);
-        // Without a derivable slug there is nothing to import — the checklist then shows the slug blocker instead of the import gate.
-        $slug_available = !is_wp_error($this->wporg_slug_from_upload_data($data));
+        // Without a valid slug there is nothing to import — the checklist then shows the slug error instead of the import gate.
+        $slug_available = (string) ($data['slug'] ?? '') !== '';
 
         return [
             ...$this->wporg_target_labels(),
@@ -876,13 +893,6 @@ class UploadWorkflow {
      */
     private function wporg_marker_independent_blockers(array $data): array {
         $blockers = [];
-        $slug = $this->wporg_slug_from_upload_data($data);
-        if (is_wp_error($slug)) {
-            $blockers[] = [
-                'code' => $slug->get_error_code(),
-                'message' => $slug->get_error_message(),
-            ];
-        }
         if (!empty($data['plugin_data']['UpdateURI'])) {
             $blockers[] = [
                 'code' => 'wporg_update_uri_not_allowed',
@@ -982,12 +992,9 @@ class UploadWorkflow {
         }
 
         // Validate the target slug, account, and version
-        $slug = $this->wporg_slug_from_upload_data($data);
+        $slug = normalize_plugin_slug($data['slug'] ?? null, 'slug');
         if (is_wp_error($slug)) {
             return $this->upload_error($slug->get_error_code(), $slug->get_error_message());
-        }
-        if ((string) ($data['slug'] ?? '') !== $slug) {
-            return $this->upload_error('wporg_deploy_state_invalid', __('Invalid wordpress.org deploy state.', 'peak-publisher'));
         }
 
         $username = normalize_wporg_username($target['wporg_access_username'] ?? null, 'username');
@@ -1403,24 +1410,28 @@ class UploadWorkflow {
     }
 
     /**
-     * Fixes the top-level folder by renaming the working directory to a temporary location and creating a new one with the main file name.
+     * Fixes the top-level folder by renaming the working directory to a temporary location and creating a new one named after the minted plugin slug (falls back to the main file name).
      * Single-file uploads are always wrapped — folderless distribution (like core's bundled hello.php) is deliberately unsupported.
      *
      * @param string $working_dir Absolute path to the working directory.
      * @param string $main_file Absolute path to the main plugin file.
+     * @param string $folder_name Name for the new top-level folder (the minted slug); empty falls back to the main file name.
      * @return bool True if the top-level folder was fixed, false otherwise.
      */
-    private function add_top_level_folder(string $working_dir, string $main_file): bool {
+    private function add_top_level_folder(string $working_dir, string $main_file, string $folder_name): bool {
         if (!$main_file) {
             return false;
         }
         if ($this->has_top_level_folder($working_dir)) {
             return false;
         }
+        if ($folder_name === '') {
+            $folder_name = preg_replace('/\.php$/i', '', basename($main_file));
+        }
         $tmp_root = $this->tmp_root . 'data_old/';
         get_wp_filesystem()->move($working_dir, $tmp_root);
         wp_mkdir_p($working_dir);
-        $new_root = trailingslashit($working_dir . preg_replace('/\.php$/i', '', basename($main_file)));
+        $new_root = trailingslashit($working_dir . $folder_name);
         get_wp_filesystem()->move($tmp_root, $new_root);
         return true;
     }

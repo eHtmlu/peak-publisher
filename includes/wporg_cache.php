@@ -154,7 +154,7 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
 function fetch_wporg_import_cache_bundle(string $wporg_slug) {
     raise_wporg_time_limit();
 
-    $wporg_slug = normalize_wporg_slug($wporg_slug);
+    $wporg_slug = normalize_plugin_slug($wporg_slug);
     if (is_wp_error($wporg_slug)) {
         return $wporg_slug;
     }
@@ -237,7 +237,7 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
 
 
 function persist_wporg_import_cache_bundle(string $wporg_slug, string $username, array $bundle) {
-    $wporg_slug = normalize_wporg_slug($wporg_slug);
+    $wporg_slug = normalize_plugin_slug($wporg_slug);
     if (is_wp_error($wporg_slug)) {
         return $wporg_slug;
     }

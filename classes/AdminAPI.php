@@ -1109,7 +1109,7 @@ class AdminAPI {
             return $this->rest_error_response($username);
         }
 
-        $slug = normalize_wporg_slug($params['slug'] ?? null, 'slug');
+        $slug = normalize_plugin_slug($params['slug'] ?? null, 'slug');
         if (is_wp_error($slug)) {
             return $this->rest_error_response($slug);
         }
@@ -1284,7 +1284,7 @@ class AdminAPI {
 
         $slugs = [];
         foreach ($params['slugs'] as $index => $raw_slug) {
-            $slug = normalize_wporg_slug($raw_slug, 'slugs.' . $index);
+            $slug = normalize_plugin_slug($raw_slug, 'slugs.' . $index);
             if (is_wp_error($slug)) {
                 return $slug;
             }

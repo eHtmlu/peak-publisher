@@ -442,7 +442,7 @@ class SvnDeployWorkflow {
                     continue;
                 }
 
-                $slug = normalize_wporg_slug($plugin['slug'] ?? null);
+                $slug = normalize_plugin_slug($plugin['slug'] ?? null);
                 if (is_wp_error($slug) || isset($seen[$slug])) {
                     continue;
                 }
@@ -834,7 +834,7 @@ class SvnDeployWorkflow {
     }
 
     private static function normalize_slug_or_throw(string $wporg_slug): string {
-        $slug = normalize_wporg_slug($wporg_slug);
+        $slug = normalize_plugin_slug($wporg_slug);
         if (is_wp_error($slug)) {
             throw WporgSvnException::from_wp_error($slug);
         }

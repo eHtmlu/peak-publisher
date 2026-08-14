@@ -23,7 +23,6 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const [usePeakPublisherForNewUpdateServer, setUsePeakPublisherForNewUpdateServer] = useState(false);
     const [useWordPressOrgUpdateServer, setUseWordPressOrgUpdateServer] = useState(false);
     const [replaceRelease, setReplaceRelease] = useState(false);
-    const [addWithoutTopLevelFolder, setAddWithoutTopLevelFolder] = useState(false);
     const [changePluginFileName, setChangePluginFileName] = useState(false);
     const [useUnexpectedPluginVersion, setUseUnexpectedPluginVersion] = useState(false);
     const [useOlderPluginVersion, setUseOlderPluginVersion] = useState(false);
@@ -77,7 +76,6 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         setUsePeakPublisherForNewUpdateServer(false);
         setUseWordPressOrgUpdateServer(false);
         setReplaceRelease(false);
-        setAddWithoutTopLevelFolder(false);
         setChangePluginFileName(false);
         setUseUnexpectedPluginVersion(false);
         setUseOlderPluginVersion(false);
@@ -1010,60 +1008,29 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     function checkTopLevelFolder(context) {
         const { meta, isWporg, blockers } = context;
-        const hasTopLevelFolder = !!(meta?.cleanup_info?.has_top_level_folder || meta?.cleanup_info?.fixed_top_level_folder);
         const pluginBasename = meta.plugin_info?.plugin_basename || '';
         const pluginFolder = pluginBasename ? pluginBasename.split('/')[0] : (meta?.slug || '');
         const installPath = pluginFolder ? '/wp-content/plugins/' + pluginFolder + '/' : '';
 
-        if (hasTopLevelFolder) {
-            if (isWporg && blockers.some((blocker) => blocker?.code === 'invalid_slug')) {
-                return {
-                    title: __('Top-level folder is not a valid slug', 'peak-publisher'),
-                    type: 'error',
-                    desc: [
-                        __('wordpress.org deploys require the top-level folder to match the slug of the plugin on wordpress.org.', 'peak-publisher'),
-                        createElement('br'),
-                        sprintf(__('The folder %s cannot be a wordpress.org slug (slugs consist of lowercase letters, numbers, and hyphens).', 'peak-publisher'), pluginFolder),
-                    ],
-                };
-            }
+        if (isWporg && blockers.some((blocker) => blocker?.code === 'invalid_slug')) {
             return {
-                title: __('Top-level folder exists', 'peak-publisher'),
-                type: 'ok',
-                desc: [
-                    meta?.cleanup_info?.fixed_top_level_folder && __('It was added to your upload automatically as specified in the settings.', 'peak-publisher'),
-                    !meta?.cleanup_info?.fixed_top_level_folder && __('Your upload has a top-level folder.', 'peak-publisher'),
-                    installPath && createElement('br'),
-                    installPath && sprintf(__('The install folder will be %s.', 'peak-publisher'), installPath),
-                ],
-            };
-        }
-
-        if (isWporg) {
-            return {
-                title: __('Top-level folder required', 'peak-publisher'),
+                title: __('Top-level folder is not a valid slug', 'peak-publisher'),
                 type: 'error',
                 desc: [
-                    __('wordpress.org deploys require a top-level plugin folder matching the plugin slug.', 'peak-publisher'),
-                    installPath && createElement('br'),
-                    installPath && sprintf(__('The install folder would be %s.', 'peak-publisher'), installPath),
+                    __('wordpress.org deploys require the top-level folder to match the slug of the plugin on wordpress.org.', 'peak-publisher'),
+                    createElement('br'),
+                    sprintf(__('The folder %s cannot be a wordpress.org slug (slugs consist of lowercase letters, numbers, and hyphens).', 'peak-publisher'), pluginFolder),
                 ],
             };
         }
-
         return {
-            title: __('Top-level folder missing', 'peak-publisher'),
-            type: addWithoutTopLevelFolder ? 'ok' : 'error',
+            title: __('Top-level folder exists', 'peak-publisher'),
+            type: 'ok',
             desc: [
-                __('Your upload does not have a top-level folder.', 'peak-publisher'),
+                meta?.cleanup_info?.fixed_top_level_folder && __('It was added to your upload automatically.', 'peak-publisher'),
+                !meta?.cleanup_info?.fixed_top_level_folder && __('Your upload has a top-level folder.', 'peak-publisher'),
                 installPath && createElement('br'),
                 installPath && sprintf(__('The install folder will be %s.', 'peak-publisher'), installPath),
-                createElement(CheckboxControl, {
-                    __nextHasNoMarginBottom: true,
-                    label: __('That\'s fine, I want to add the release without a top-level folder.', 'peak-publisher'),
-                    checked: addWithoutTopLevelFolder,
-                    onChange: (value) => setAddWithoutTopLevelFolder(value),
-                }),
             ],
         };
     }

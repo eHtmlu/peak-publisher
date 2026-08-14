@@ -21,7 +21,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
     const saving = useSelect((select) => select('pblsh/settings').isSaving(), []);
     const [settings, setSettings] = useState({
         standalone_mode: false,
-        auto_add_top_level_folder: false,
         auto_remove_workspace_artifacts: false,
         wordspace_artifacts_to_remove: [],
         readme_txt_convert_to_utf8_without_bom: false,
@@ -51,7 +50,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
             const firstHasPassword = !!firstAccount.has_password;
             setSettings({
                 standalone_mode: !!serverSettings.standalone_mode,
-                auto_add_top_level_folder: !!serverSettings.auto_add_top_level_folder,
                 auto_remove_workspace_artifacts: !!serverSettings.auto_remove_workspace_artifacts,
                 readme_txt_convert_to_utf8_without_bom: !!serverSettings.readme_txt_convert_to_utf8_without_bom,
                 wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.wordspace_artifacts_to_remove) ? serverSettings.wordspace_artifacts_to_remove : []),
@@ -116,7 +114,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         delete payload.wporg_credentials;
 
         payload.standalone_mode = !!settings.standalone_mode;
-        payload.auto_add_top_level_folder = !!settings.auto_add_top_level_folder;
         payload.auto_remove_workspace_artifacts = !!settings.auto_remove_workspace_artifacts;
         payload.readme_txt_convert_to_utf8_without_bom = !!settings.readme_txt_convert_to_utf8_without_bom;
         payload.wordspace_artifacts_to_remove = normalizeListFromTextarea(settings.wordspace_artifacts_to_remove);
@@ -274,22 +271,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
             return createElement(wp.element.Fragment, null,
                 createElement('section', { className: 'pblsh--settings--main__section' },
                     createElement('h2', null, __('Automatic cleanup of your uploads', 'peak-publisher')),
-                    //createElement('h3', null, __('Fix top-level folder', 'peak-publisher')),
-                    //createElement('p', null, __('If the top-level folder is missing in the ZIP file, it will be generated automatically. When the plugin is installed, WordPress adds this top-level folder unchanged to the /wp-content/plugins/ directory.', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(ToggleControl, {
-                            label: __('Add top-level folder if missing', 'peak-publisher'),
-                            help: [
-                                __('Highly recommended if you usually give the plugin folder and the main file the same name, which is recommended by WordPress anyway. If enabled and the top-level folder in the ZIP file is missing, it will be added automatically and named based on the plugin\'s main file.', 'peak-publisher'),
-                                createElement('br', null),
-                                createElement('br', null),
-                                __('If this option is disabled and the top-level folder is missing in a plugin ZIP file, WordPress will install the plugin in the /wp-content/plugins/[zip file name]/... folder, which is often not intended.', 'peak-publisher'),
-                            ],
-                            checked: settings.auto_add_top_level_folder,
-                            onChange: (val) => setField('auto_add_top_level_folder', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                        createElement('hr'),
                         createElement(ToggleControl, {
                             label: __('Remove workspace artifacts', 'peak-publisher'),
                             help: [

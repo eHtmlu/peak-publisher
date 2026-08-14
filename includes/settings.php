@@ -50,7 +50,6 @@ function is_standalone(): bool {
 function get_peak_publisher_settings_defaults(): array {
     return [
         'standalone_mode' => false,
-        'auto_add_top_level_folder' => true,
         'auto_remove_workspace_artifacts' => true,
         'readme_txt_convert_to_utf8_without_bom' => true,
         'count_plugin_installations' => true,
@@ -140,7 +139,6 @@ function update_peak_publisher_settings(array $settings) {
 function sanitize_peak_publisher_non_secret_settings(array $settings): array {
     $out = [];
     $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
-    $out['auto_add_top_level_folder'] = (bool) ($settings['auto_add_top_level_folder'] ?? true);
     $out['auto_remove_workspace_artifacts'] = (bool) ($settings['auto_remove_workspace_artifacts'] ?? true);
     $out['readme_txt_convert_to_utf8_without_bom'] = (bool) ($settings['readme_txt_convert_to_utf8_without_bom'] ?? true);
     $out['count_plugin_installations'] = (bool) ($settings['count_plugin_installations'] ?? true);

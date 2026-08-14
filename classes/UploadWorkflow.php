@@ -459,7 +459,6 @@ class UploadWorkflow {
                         'removed_utf8_bom' => (bool) ($readme_cleanup_info['removed_utf8_bom'] ?? false),
                     ],
                     'settings_on_upload' => array_intersect_key($settings, array_flip([
-                        'auto_add_top_level_folder',
                         'auto_remove_workspace_artifacts',
                         'wordspace_artifacts_to_remove',
                         'readme_txt_convert_to_utf8_without_bom',
@@ -584,19 +583,10 @@ class UploadWorkflow {
 
     /**
      * Derives the wordpress.org slug from the upload's top-level folder name.
-     * Transitional: the folder guard becomes obsolete once the auto_add_top_level_folder setting is removed
-     * (the folder then always exists), and the slug-format validation is planned to become channel-agnostic —
-     * at that point this function dissolves into the general analysis.
+     * Transitional: dissolves into the general analysis once slug resolution becomes
+     * channel-agnostic (planned slug-sources step).
      */
     private function wporg_slug_from_upload_data(array $data) {
-        if (empty($data['cleanup_info']['has_top_level_folder']) && empty($data['cleanup_info']['fixed_top_level_folder'])) {
-            return new \WP_Error(
-                'wporg_top_level_folder_required',
-                __('wordpress.org deploys require a top-level plugin folder matching the plugin slug.', 'peak-publisher'),
-                [ 'status' => 400 ]
-            );
-        }
-
         return normalize_wporg_slug($data['plugin_info']['plugin_folder_name'] ?? '', 'slug');
     }
 
@@ -1414,16 +1404,13 @@ class UploadWorkflow {
 
     /**
      * Fixes the top-level folder by renaming the working directory to a temporary location and creating a new one with the main file name.
+     * Single-file uploads are always wrapped — folderless distribution (like core's bundled hello.php) is deliberately unsupported.
      *
      * @param string $working_dir Absolute path to the working directory.
      * @param string $main_file Absolute path to the main plugin file.
      * @return bool True if the top-level folder was fixed, false otherwise.
      */
     private function add_top_level_folder(string $working_dir, string $main_file): bool {
-        $settings = get_peak_publisher_settings();
-        if (empty($settings['auto_add_top_level_folder'])) {
-            return false;
-        }
         if (!$main_file) {
             return false;
         }

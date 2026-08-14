@@ -71,6 +71,7 @@ class AdminUI {
             //'components/SuccessMessage.js',
             'components/PluginEditor.js',
             'components/Settings.js',
+            'components/WporgAccessGate.js',
             'components/PluginAdditionProcess.js',
             'components/GlobalDropOverlay.js',
             //'components/ThemeEditorContent/SettingsGeneral.js',
@@ -164,6 +165,7 @@ class AdminUI {
                 'hasPlainPermalinks' => get_option('permalink_structure') === '',
                 'permalinkSettingsUrl' => admin_url('options-permalink.php'),
                 'wporgImportChunkSize' => PBLSH_WPORG_IMPORT_CHUNK_SIZE,
+                'faqUrls' => get_peak_publisher_faq_urls(),
                 'assetSlots' => AssetManager::get_slots(),
                 'i18n' => [
                     'permalinkPlain'      => __('Plain'),

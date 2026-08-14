@@ -64,6 +64,8 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
 
 
 function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null): array {
+    raise_wporg_time_limit();
+
     $plugin_post = $plugin_post_or_id instanceof \WP_Post ? $plugin_post_or_id : get_post((int) $plugin_post_or_id);
     if (!$plugin_post instanceof \WP_Post || !is_wporg_plugin($plugin_post)) {
         return [
@@ -120,40 +122,15 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
         }
 
         $tag_data = SvnDeployWorkflow::fetch_tag_data($plugin_post->post_name, $version);
-        $content = [
-            'tag_revision' => $current_tag_revision,
-            'plugin_data' => $tag_data['plugin_data'] ?? null,
-            'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? [
-                'found' => false,
-                'file_name' => '',
-                'content' => [],
-            ],
-        ];
-        [$post_date, $post_date_gmt] = wporg_svn_date_to_post_dates((string) ($tag['date'] ?? ''));
-
-        $post_data = [
-            'post_type' => 'pblsh_release',
-            'post_status' => 'publish',
-            'post_parent' => (int) $plugin_post->ID,
-            'post_title' => $version,
-            'post_name' => get_release_slug($plugin_post->post_name, $version),
-            'post_content' => wp_slash(wp_json_encode($content)),
-            'post_date' => $post_date,
-            'post_date_gmt' => $post_date_gmt,
-        ];
-
-        if ($existing instanceof \WP_Post) {
-            $post_data['ID'] = (int) $existing->ID;
-            $post_data['edit_date'] = true;
-            $result = wp_update_post($post_data, true);
-            $summary['updated']++;
-        } else {
-            $result = wp_insert_post($post_data, true);
-            $summary['created']++;
-        }
-
+        $result = wporg_upsert_release_post_from_wporg_tag($plugin_post, $version, $tag, $tag_data, $existing);
         if (is_wp_error($result)) {
             throw new \RuntimeException($result->get_error_message());
+        }
+
+        if ($existing instanceof \WP_Post) {
+            $summary['updated']++;
+        } else {
+            $summary['created']++;
         }
     }
 
@@ -175,6 +152,8 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
 
 
 function fetch_wporg_import_cache_bundle(string $wporg_slug) {
+    raise_wporg_time_limit();
+
     $wporg_slug = normalize_wporg_slug($wporg_slug);
     if (is_wp_error($wporg_slug)) {
         return $wporg_slug;
@@ -229,11 +208,8 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
             'tag_revision' => (int) ($tag['revision'] ?? 0),
             'date' => (string) ($tag['date'] ?? ''),
             'plugin_data' => $tag_data['plugin_data'] ?? null,
-            'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? [
-                'found' => false,
-                'file_name' => '',
-                'content' => [],
-            ],
+            'plugin_info' => $tag_data['plugin_info'] ?? null,
+            'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? default_plugin_readme_txt_data(),
         ];
     }
 
@@ -271,7 +247,7 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
         return $username;
     }
 
-    $existing = wporg_get_plugin_marker_by_slug($wporg_slug);
+    $existing = get_plugin_post_by_slug('pblsh_wporg_plugin', $wporg_slug);
     if ($existing instanceof \WP_Post) {
         return new \WP_Error(
             'already_imported',
@@ -315,7 +291,7 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
                 $created_marker_id = 0;
             }
 
-            $existing_after_race = wporg_get_plugin_marker_by_slug($wporg_slug);
+            $existing_after_race = get_plugin_post_by_slug('pblsh_wporg_plugin', $wporg_slug);
             if ($existing_after_race instanceof \WP_Post) {
                 return new \WP_Error(
                     'already_imported',
@@ -345,11 +321,8 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
             $content = wp_json_encode([
                 'tag_revision' => (int) ($release['tag_revision'] ?? 0),
                 'plugin_data' => $release['plugin_data'] ?? null,
-                'plugin_readme_txt' => $release['plugin_readme_txt'] ?? [
-                    'found' => false,
-                    'file_name' => '',
-                    'content' => [],
-                ],
+                'plugin_info' => $release['plugin_info'] ?? null,
+                'plugin_readme_txt' => $release['plugin_readme_txt'] ?? default_plugin_readme_txt_data(),
             ]);
             if (!is_string($content)) {
                 throw new \RuntimeException('wporg_import_release_encode_failed');
@@ -392,15 +365,147 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
 }
 
 
-function wporg_get_plugin_marker_by_slug(string $wporg_slug): ?\WP_Post {
-    $posts = get_posts([
-        'post_type' => 'pblsh_wporg_plugin',
+function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version) {
+    if (!is_wporg_plugin($plugin_post)) {
+        return new \WP_Error(
+            'invalid_plugin',
+            __('Expected a wordpress.org plugin marker.', 'peak-publisher'),
+            [ 'status' => 400 ]
+        );
+    }
+
+    $version = trim($version);
+    if ($version === '') {
+        return new \WP_Error(
+            'invalid_version',
+            __('Missing plugin version.', 'peak-publisher'),
+            [ 'status' => 400 ]
+        );
+    }
+
+    require_once PBLSH_PLUGIN_DIR . 'classes/SvnDeployWorkflow.php';
+
+    try {
+        // Read the committed tag from SVN
+        $tags = SvnDeployWorkflow::list_tags($plugin_post->post_name);
+        $tag = null;
+        foreach ($tags as $candidate) {
+            if ((string) ($candidate['version'] ?? '') === $version) {
+                $tag = $candidate;
+                break;
+            }
+        }
+
+        if (!is_array($tag)) {
+            return new \WP_Error(
+                'wporg_deployed_tag_not_found',
+                __('The deployed wordpress.org tag could not be read after commit.', 'peak-publisher'),
+                [ 'status' => 502 ]
+            );
+        }
+
+        // Upsert the local release mirror for that tag
+        $tag_data = SvnDeployWorkflow::fetch_tag_data($plugin_post->post_name, $version);
+        $existing = wporg_find_release_post_by_version((int) $plugin_post->ID, $version);
+        $release_id = wporg_upsert_release_post_from_wporg_tag($plugin_post, $version, $tag, $tag_data, $existing);
+
+        if (is_wp_error($release_id)) {
+            return $release_id;
+        }
+
+        // Refresh the marker title from the reference release
+        wporg_refresh_plugin_title_from_reference_release((int) $plugin_post->ID);
+
+        return (int) $release_id;
+    } catch (\Throwable $e) {
+        wporg_log_cache_error($plugin_post, 'sync_deployed_release', $e);
+        return new \WP_Error(
+            'wporg_local_sync_failed_after_commit',
+            __('The wordpress.org commit succeeded, but the local release cache could not be updated.', 'peak-publisher'),
+            [ 'status' => 500 ]
+        );
+    }
+}
+
+
+function invalidate_wporg_plugin_cache(int $plugin_id): void {
+    $post = get_post($plugin_id);
+    if (!$post instanceof \WP_Post || !is_wporg_plugin($post)) {
+        return;
+    }
+
+    wp_update_post([
+        'ID' => $plugin_id,
+        'post_content' => wp_slash('{}'),
+    ]);
+}
+
+
+function wporg_find_release_post_by_version(int $plugin_id, string $version): ?\WP_Post {
+    $releases = get_posts([
+        'post_type' => 'pblsh_release',
         'post_status' => 'any',
-        'name' => $wporg_slug,
+        'post_parent' => $plugin_id,
+        'title' => $version,
         'posts_per_page' => 1,
     ]);
 
-    return !empty($posts) && $posts[0] instanceof \WP_Post ? $posts[0] : null;
+    return !empty($releases) && $releases[0] instanceof \WP_Post ? $releases[0] : null;
+}
+
+
+function wporg_upsert_release_post_from_wporg_tag(
+    \WP_Post $plugin_post,
+    string $version,
+    array $tag,
+    array $tag_data,
+    ?\WP_Post $existing = null
+) {
+    // Encode the wporg release snapshot stored in post_content
+    $content = wp_json_encode([
+        'tag_revision' => (int) ($tag['revision'] ?? 0),
+        'plugin_data' => $tag_data['plugin_data'] ?? null,
+        'plugin_info' => $tag_data['plugin_info'] ?? null,
+        'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? default_plugin_readme_txt_data(),
+    ]);
+    if (!is_string($content)) {
+        throw new \RuntimeException('wporg_release_encode_failed');
+    }
+
+    // Use the SVN tag date as the release post date
+    [$post_date, $post_date_gmt] = wporg_svn_date_to_post_dates((string) ($tag['date'] ?? ''));
+    $post_data = [
+        'post_type' => 'pblsh_release',
+        'post_status' => 'publish',
+        'post_parent' => (int) $plugin_post->ID,
+        'post_title' => $version,
+        'post_name' => get_release_slug($plugin_post->post_name, $version),
+        'post_content' => wp_slash($content),
+        'post_date' => $post_date,
+        'post_date_gmt' => $post_date_gmt,
+    ];
+
+    // Insert or update the release post
+    if ($existing instanceof \WP_Post) {
+        $post_data['ID'] = (int) $existing->ID;
+        $post_data['edit_date'] = true;
+        $release_id = wp_update_post($post_data, true);
+    } else {
+        $release_id = wp_insert_post($post_data, true);
+    }
+
+    if (is_wp_error($release_id)) {
+        return $release_id;
+    }
+    if (!$release_id) {
+        return new \WP_Error(
+            'wporg_release_persist_failed',
+            __('Could not persist the wordpress.org release locally.', 'peak-publisher'),
+            [ 'status' => 500 ]
+        );
+    }
+
+    return (int) $release_id;
 }
 
 

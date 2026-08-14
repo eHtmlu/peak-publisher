@@ -16,6 +16,22 @@ function get_update_uri(): string {
 
 
 /**
+ * Gets deep links to the plugin's FAQ entries on wordpress.org, keyed by topic.
+ * The questions must match the readme.txt FAQ questions verbatim — wordpress.org builds its anchors from them.
+ */
+function get_peak_publisher_faq_urls(): array {
+    $questions = [
+        'bothChannels' => 'Can I use both distribution channels for one plugin?',
+        'switchLater' => 'Can I switch the distribution channel later?',
+    ];
+    return array_map(
+        fn($question) => 'https://wordpress.org/plugins/peak-publisher/#' . rawurlencode(strtolower(trim($question))),
+        $questions
+    );
+}
+
+
+/**
  * Gets the embed code.
  */
 function get_bootstrap_code(string $version = 'basicV2'): string {
@@ -149,6 +165,17 @@ function set_plugin_installations_list(int $plugin_post_id, array $list): void {
     update_post_meta($plugin_post_id, '_pblsh_installations', $list);
 }
 /**
+ * Raises the PHP execution time limit for request cycles that perform many
+ * sequential wordpress.org SVN requests (deploys, tag syncs, imports).
+ */
+function raise_wporg_time_limit(): void {
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(300);
+    }
+}
+
+
+/**
  * Normalizes a version number.
  */
 function normalize_version_number(string $version): string {
@@ -196,6 +223,18 @@ function find_wporg_readme_file_name(array $files): ?string {
     } catch (\Throwable $e) {
         return null;
     }
+}
+
+
+/**
+ * Returns the default storage shape for parsed plugin readme data.
+ */
+function default_plugin_readme_txt_data(): array {
+    return [
+        'found' => false,
+        'file_name' => '',
+        'content' => [],
+    ];
 }
 
 

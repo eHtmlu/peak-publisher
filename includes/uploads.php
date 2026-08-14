@@ -129,7 +129,7 @@ function maybe_cleanup_tmp_uploads(): void {
 
     $now = time();
     $ttl = 24 * 60 * 60;
-    $fs = get_wp_filesystem();
+    $pattern = '/^(?P<stamp>\d{8}-\d{6})_(?P<rand>[A-Za-z0-9]{8})_user-\d+(?P<deleted>_deleted-\d+-[A-Za-z0-9]+)?$/';
 
     try {
         $dir = new \DirectoryIterator($base);
@@ -138,35 +138,44 @@ function maybe_cleanup_tmp_uploads(): void {
     }
 
     foreach ($dir as $entry) {
-        if ($entry->isDot()) {
+        if ($entry->isDot() || !$entry->isDir()) {
             continue;
         }
-        if ($entry->isDir()) {
-            $name = $entry->getFilename();
-            $path = $entry->getPathname();
-            // Strictly match our temp folder pattern:
-            //   {YYYYMMDD-HHMMSS}_{RANDOM8}_user-{USERID}[_deleted-{UNIX}-{RANDOM}]
-            $match = [];
-            $matched = (bool) preg_match(
-                '/^(?P<stamp>\d{8}-\d{6})_(?P<rand>[A-Za-z0-9]{8})_user-\d+(?P<deleted>_deleted-\d+-[A-Za-z0-9]+)?$/',
-                $name,
-                $match
-            );
-            if ($matched) {
-                $created_ts = null;
-                $dt = \DateTimeImmutable::createFromFormat('Ymd-His', $match['stamp'], new \DateTimeZone('UTC'));
-                if ($dt instanceof \DateTimeImmutable) {
-                    $created_ts = $dt->getTimestamp();
-                }
-                $is_marked_deleted = !empty($match['deleted']);
-                $is_older_than_ttl = ($created_ts !== null) ? (($now - $created_ts) > $ttl) : false;
-                if ($is_marked_deleted || $is_older_than_ttl) {
-                    // recursive delete; ignore failures
-                    $fs->delete(trailingslashit($path), true);
-                }
-            }
+
+        $name = $entry->getFilename();
+        $match = [];
+        $matched = (bool) preg_match($pattern, $name, $match);
+        if (!$matched) {
             continue;
         }
-        continue;
+
+        $created_ts = null;
+        $dt = \DateTimeImmutable::createFromFormat('Ymd-His', $match['stamp'], new \DateTimeZone('UTC'));
+        if ($dt instanceof \DateTimeImmutable) {
+            $created_ts = $dt->getTimestamp();
+        }
+
+        $is_marked_deleted = !empty($match['deleted']);
+        $is_older_than_ttl = $created_ts !== null ? (($now - $created_ts) > $ttl) : false;
+        if ($is_marked_deleted || $is_older_than_ttl) {
+            get_wp_filesystem()->delete(trailingslashit($entry->getPathname()), true);
+        }
+    }
+}
+
+
+/**
+ * Deletes a directory recursively after renaming it out of the active path.
+ */
+function delete_directory_with_race_protection(string $path): void {
+    if (!is_dir($path)) {
+        return;
+    }
+
+    $path = rtrim($path, '/\\');
+    $new_path = trailingslashit(dirname($path)) . basename($path) . '_deleted-' . time() . '-' . wp_generate_password(10, false) . '/';
+    $fs = get_wp_filesystem();
+    if ($fs->move($path, $new_path)) {
+        $fs->delete($new_path, true);
     }
 }

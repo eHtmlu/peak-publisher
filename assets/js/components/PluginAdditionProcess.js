@@ -1,5 +1,5 @@
 // PluginAdditionProcess Component
-lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpenSettings } = {}) => {
+lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpenSettings, setActiveUploadContext = () => {} } = {}) => {
     const { __, sprintf } = wp.i18n;
     const { useState, useEffect, useRef, createElement } = wp.element;
     const { useSelect } = wp.data;
@@ -415,11 +415,42 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
         setSelfHostedStep(1);
         setWporgStep(1);
         setWporgAction('import');
+        setActiveUploadContext({});
     };
 
     useEffect(() => {
         loadBootstrapCode();
     }, []);
+
+    useEffect(() => {
+        if (hostingType === 'self_hosted') {
+            setActiveUploadContext({
+                hosting_type_intended: 'self_hosted',
+            });
+            return () => {
+                setActiveUploadContext({});
+            };
+        }
+
+        if (hostingType !== 'wporg') {
+            setActiveUploadContext({});
+            return () => {};
+        }
+
+        setActiveUploadContext(wporgAccountReady && wporgUsername
+            ? {
+                hosting_type_intended: 'wporg',
+                username: wporgUsername,
+            }
+            : {
+                hosting_type_intended: 'wporg',
+                wporg_credentials_required: true,
+            });
+
+        return () => {
+            setActiveUploadContext({});
+        };
+    }, [hostingType, wporgAccountReady, wporgUsername, setActiveUploadContext]);
 
     useEffect(() => {
         if (hostingType === 'self_hosted' && selfHostedStep < 3) {
@@ -696,8 +727,12 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
                 ),
                 createElement('button', {
                     type: 'button',
-                    className: 'pblsh--choice-card is-disabled',
-                    disabled: true,
+                    className: 'pblsh--choice-card',
+                    onClick: () => {
+                        setWporgAction('deploy');
+                        window.dispatchEvent(new CustomEvent('pblsh:open-overlay-file-picker'));
+                    },
+                    disabled: !wporgAccountReady,
                 },
                     createElement('span', { className: 'pblsh--choice-card__icon' }, getSvgIcon('cloud_upload', { size: 32 })),
                     createElement('span', { className: 'pblsh--choice-card__title' }, __('Deploy ZIP release', 'peak-publisher')),

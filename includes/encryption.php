@@ -110,6 +110,12 @@ function get_encryption_key_status(): array {
 }
 
 
+function encryption_key_is_usable(): bool {
+    // Cheap gate for "is configured" checks: without a usable key, stored credentials cannot be decrypted.
+    return !is_wp_error(get_encryption_key());
+}
+
+
 function generate_encryption_key_snippet(): string {
     // Generate a fresh 32-byte key for the wp-config.php setup snippet.
     return "define('PBLSH_ENCRYPTION_KEY', 'base64:" . base64_encode(random_bytes(32)) . "');";
@@ -559,6 +565,36 @@ function get_wporg_credentials(string $username) {
 
     // No account exists for this username.
     return null;
+}
+
+
+/**
+ * @return string[] Normalized usernames of all stored wordpress.org accounts with an encrypted password.
+ */
+function get_usable_wporg_account_usernames(): array {
+    // Without a usable encryption key, stored accounts cannot be decrypted — treat them as not configured.
+    if (!encryption_key_is_usable()) {
+        return [];
+    }
+
+    $settings = get_option('pblsh_settings');
+    $accounts = is_array($settings) && is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
+    $usernames = [];
+    foreach ($accounts as $account) {
+        if (!is_array($account)) {
+            continue;
+        }
+        $username = normalize_wporg_username($account['username'] ?? null);
+        if (is_wp_error($username) || isset($usernames[$username])) {
+            continue;
+        }
+        if (!wporg_is_encrypted_password(wporg_string_from_value($account['password'] ?? ''))) {
+            continue;
+        }
+        $usernames[$username] = true;
+    }
+
+    return array_keys($usernames);
 }
 
 

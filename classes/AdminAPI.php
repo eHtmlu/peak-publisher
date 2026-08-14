@@ -60,9 +60,13 @@ class AdminAPI {
             'callback' => [$this, 'get_plugin_releases'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
-        
-        
-        
+
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/wporg-download-url', [
+            'methods' => 'GET',
+            'callback' => [$this, 'get_wporg_download_url'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)', [
             'methods' => 'PUT',
             'callback' => [$this, 'update_plugin'],
@@ -358,7 +362,7 @@ class AdminAPI {
     /**
      * Delete a release.
      */
-    public function delete_release(\WP_REST_Request $request): array {
+    public function delete_release(\WP_REST_Request $request) {
         $id = (int) $request->get_param('id');
         $release = get_post($id);
         if (!$release || $release->post_type !== 'pblsh_release') {
@@ -366,11 +370,7 @@ class AdminAPI {
         }
         $parent = get_post((int) $release->post_parent);
         if (is_wporg_plugin($parent)) {
-            return [
-                'status' => 'error',
-                'code' => 'wporg_release_delete_unsupported',
-                'message' => __('wporg tag deletion is not available in this slice.', 'peak-publisher'),
-            ];
+            return $this->delete_wporg_release_tag($release, $parent);
         }
 
         $zip_rel = (string) get_post_meta($release->ID, '_pblsh_zip_path', true);
@@ -390,6 +390,82 @@ class AdminAPI {
 
         wp_delete_post($release->ID, true);
         return [ 'status' => 'ok' ];
+    }
+
+    private function delete_wporg_release_tag(\WP_Post $release, \WP_Post $parent) {
+        $version = (string) ($release->post_title ?? '');
+        if ($version === '') {
+            $content = wporg_decode_json_object((string) $release->post_content);
+            $version = (string) ($content['plugin_data']['Version'] ?? '');
+        }
+        $version = trim($version);
+        if ($version === '') {
+            return $this->rest_error_response($this->make_rest_error(
+                'invalid_version',
+                __('Missing plugin version.', 'peak-publisher'),
+                400
+            ));
+        }
+
+        $preferred_username = wporg_string_from_value(get_post_meta((int) $parent->ID, '_pblsh_wporg_account_username', true));
+
+        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        try {
+            $account = SvnDeployWorkflow::find_author_account_result((string) $parent->post_name, $preferred_username !== '' ? $preferred_username : null);
+        } catch (\Throwable $e) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_access_check_failed',
+                __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
+                502
+            ));
+        }
+
+        $account_status = (string) ($account['status'] ?? 'error');
+        $username = (string) ($account['username'] ?? '');
+        if ($account_status !== 'ok' || $username === '') {
+            $code = $account_status === 'no_credentials'
+                ? 'wporg_no_credentials'
+                : ($account_status === 'error' ? 'wporg_access_check_failed' : 'wporg_no_write_access');
+            $status = $code === 'wporg_no_credentials' ? 400 : ($code === 'wporg_access_check_failed' ? 502 : 403);
+            return $this->rest_error_response($this->make_rest_error(
+                $code,
+                $account_status === 'no_credentials'
+                    ? __('No wordpress.org accounts are configured.', 'peak-publisher')
+                    : ((isset($account['message']) && is_string($account['message']) && $account['message'] !== '') ? $account['message'] : __('No saved wordpress.org account has SVN write access for this plugin.', 'peak-publisher')),
+                $status
+            ));
+        }
+
+        try {
+            $delete_result = SvnDeployWorkflow::delete_tag((string) $parent->post_name, $version, $username);
+        } catch (\Throwable $e) {
+            $code = $e instanceof \RuntimeException && $e->getMessage() !== '' ? $e->getMessage() : 'wporg_tag_delete_failed';
+            if ($code === '0' || $code === '') {
+                $code = 'wporg_tag_delete_failed';
+            }
+            $status = in_array($code, ['wporg_concurrent_external_change', 'deploy_in_progress'], true) ? 409 : 502;
+            if (in_array($code, ['no_write_access', 'invalid_credentials', 'account_not_configured'], true)) {
+                $status = 403;
+            }
+            return $this->rest_error_response($this->make_rest_error(
+                $code,
+                __('Could not delete the wordpress.org SVN tag.', 'peak-publisher'),
+                $status
+            ));
+        }
+
+        if ($preferred_username !== $username) {
+            update_post_meta((int) $parent->ID, '_pblsh_wporg_account_username', $username);
+        }
+
+        wp_delete_post((int) $release->ID, true);
+        invalidate_wporg_plugin_cache((int) $parent->ID);
+
+        return [
+            'status' => 'ok',
+            'revision' => (int) ($delete_result['revision'] ?? 0),
+            'committed' => !empty($delete_result['committed']),
+        ];
     }
 
     /**
@@ -433,6 +509,78 @@ class AdminAPI {
         // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Binary file output
         echo $data;
         exit;
+    }
+
+    public function get_wporg_download_url(\WP_REST_Request $request) {
+        $id = (int) $request->get_param('id');
+        $post = get_post($id);
+        if (!$post instanceof \WP_Post || !is_wporg_plugin($post)) {
+            return $this->rest_error_response($this->make_rest_error(
+                'unsupported_hosting_type',
+                __('wordpress.org download URLs are only available for wordpress.org plugins.', 'peak-publisher'),
+                404
+            ));
+        }
+
+        $version = trim((string) $request->get_param('version'));
+        if ($version === '') {
+            return $this->rest_error_response($this->make_rest_error(
+                'invalid_version',
+                __('Missing plugin version.', 'peak-publisher'),
+                400,
+                'version'
+            ));
+        }
+
+        $release = wporg_find_release_post_by_version((int) $post->ID, $version);
+        if (!$release instanceof \WP_Post) {
+            return $this->rest_error_response($this->make_rest_error(
+                'release_not_found',
+                __('Release not found.', 'peak-publisher'),
+                404
+            ));
+        }
+
+        $url = sprintf(
+            'https://downloads.wordpress.org/plugin/%s.%s.zip',
+            rawurlencode((string) $post->post_name),
+            rawurlencode($version)
+        );
+        $response = wp_remote_request($url, [
+            'method' => 'HEAD',
+            'timeout' => 15,
+            'redirection' => 3,
+            'user-agent' => 'Peak Publisher wordpress.org Download Check',
+        ]);
+
+        if (is_wp_error($response)) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_download_check_failed',
+                __('Could not verify the wordpress.org download URL.', 'peak-publisher'),
+                503
+            ));
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        if ($status === 404) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_download_not_available',
+                __('Release not yet available on wordpress.org. Releases typically appear a few minutes after deploy.', 'peak-publisher'),
+                404
+            ));
+        }
+        if ($status < 200 || $status >= 400) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_download_check_failed',
+                __('Could not verify the wordpress.org download URL.', 'peak-publisher'),
+                502
+            ));
+        }
+
+        return [
+            'status' => 'ok',
+            'url' => $url,
+        ];
     }
 
     
@@ -538,7 +686,7 @@ class AdminAPI {
     /**
      * Update a release.
      */
-    public function update_release(\WP_REST_Request $request): array {
+    public function update_release(\WP_REST_Request $request): array|\WP_REST_Response {
         $id = (int) $request->get_param('id');
         $release = get_post($id);
         if (!$release || $release->post_type !== 'pblsh_release') {
@@ -546,11 +694,11 @@ class AdminAPI {
         }
         $parent = get_post((int) $release->post_parent);
         if (is_wporg_plugin($parent)) {
-            return [
-                'status' => 'error',
-                'code' => 'wporg_release_immutable',
-                'message' => __('wporg releases are SVN tags and cannot be drafted.', 'peak-publisher'),
-            ];
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_release_immutable',
+                __('wporg releases are SVN tags and cannot be drafted.', 'peak-publisher'),
+                400
+            ));
         }
         $params = $request->get_json_params();
         $status = isset($params['status']) ? (string) $params['status'] : '';
@@ -597,9 +745,12 @@ class AdminAPI {
     /**
      * Get all assets for a plugin.
      */
-    public function handle_get_assets(\WP_REST_Request $request): array {
+    public function handle_get_assets(\WP_REST_Request $request): array|\WP_REST_Response {
         $id   = (int) $request->get_param('id');
         $post = get_post($id);
+        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
+            return $this->unsupported_asset_hosting_type_response();
+        }
         if (!$post || $post->post_type !== 'pblsh_plugin') {
             return ['status' => 'error', 'message' => 'Plugin not found.'];
         }
@@ -642,9 +793,12 @@ class AdminAPI {
      * Upload an asset file to a plugin slot.
      * Expects multipart/form-data with: file (binary), slot (string), screenshot_n (int, optional).
      */
-    public function handle_upload_asset(\WP_REST_Request $request): array {
+    public function handle_upload_asset(\WP_REST_Request $request): array|\WP_REST_Response {
         $id   = (int) $request->get_param('id');
         $post = get_post($id);
+        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
+            return $this->unsupported_asset_hosting_type_response();
+        }
         if (!$post || $post->post_type !== 'pblsh_plugin') {
             return ['status' => 'error', 'message' => 'Plugin not found.'];
         }
@@ -676,9 +830,12 @@ class AdminAPI {
      * Delete an asset from a plugin slot.
      * Expects JSON body: { slot: string, screenshot_n?: int }.
      */
-    public function handle_delete_asset(\WP_REST_Request $request): array {
+    public function handle_delete_asset(\WP_REST_Request $request): array|\WP_REST_Response {
         $id   = (int) $request->get_param('id');
         $post = get_post($id);
+        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
+            return $this->unsupported_asset_hosting_type_response();
+        }
         if (!$post || $post->post_type !== 'pblsh_plugin') {
             return ['status' => 'error', 'message' => 'Plugin not found.'];
         }
@@ -705,9 +862,12 @@ class AdminAPI {
      * Move a screenshot from one position to another.
      * Expects JSON body: { slot: "screenshot", from: int, to: int }.
      */
-    public function handle_move_asset(\WP_REST_Request $request): array {
+    public function handle_move_asset(\WP_REST_Request $request): array|\WP_REST_Response {
         $id   = (int) $request->get_param('id');
         $post = get_post($id);
+        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
+            return $this->unsupported_asset_hosting_type_response();
+        }
         if (!$post || $post->post_type !== 'pblsh_plugin') {
             return ['status' => 'error', 'message' => 'Plugin not found.'];
         }
@@ -724,6 +884,14 @@ class AdminAPI {
         $assets = $this->assets()->get_all($post->post_name);
         $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
         return ['status' => 'ok', 'assets' => $assets];
+    }
+
+    private function unsupported_asset_hosting_type_response(): \WP_REST_Response {
+        return $this->rest_error_response($this->make_rest_error(
+            'unsupported_hosting_type',
+            __('Plugin assets are only available for self-hosted plugins.', 'peak-publisher'),
+            404
+        ));
     }
 
     /**
@@ -831,7 +999,7 @@ class AdminAPI {
             $client = new WporgPluginSvnClient($username, $password);
             $client->test_credentials();
             return [ 'status' => 'ok' ];
-        } catch (WporgPluginSvnClientException $e) {
+        } catch (WporgSvnException $e) {
             // Known SVN failures keep their normalized error code and HTTP status.
             return $this->rest_error_response($this->make_rest_error(
                 $e->get_error_code(),
@@ -859,7 +1027,7 @@ class AdminAPI {
             return $this->rest_error_response($username);
         }
 
-        if (!$this->wporg_account_is_configured($username)) {
+        if (!in_array($username, get_usable_wporg_account_usernames(), true)) {
             return $this->rest_error_response($this->make_rest_error(
                 'account_not_configured',
                 __('Account not configured.', 'peak-publisher'),
@@ -871,6 +1039,12 @@ class AdminAPI {
         require_once __DIR__ . '/SvnDeployWorkflow.php';
         try {
             $plugins = SvnDeployWorkflow::discover_plugins_by_author($username);
+        } catch (WporgSvnException $e) {
+            return $this->rest_error_response($this->make_rest_error(
+                $e->get_error_code(),
+                $e->getMessage(),
+                $e->get_http_status()
+            ));
         } catch (\Throwable $e) {
             return $this->rest_error_response($this->make_rest_error(
                 'wporg_api_unavailable',
@@ -1031,7 +1205,7 @@ class AdminAPI {
         $skipped = [];
 
         foreach ($slugs as $slug) {
-            $existing = wporg_get_plugin_marker_by_slug($slug);
+            $existing = get_plugin_post_by_slug('pblsh_wporg_plugin', $slug);
             if ($existing instanceof \WP_Post) {
                 $skipped[] = $this->wporg_import_skip(
                     $slug,
@@ -1175,28 +1349,6 @@ class AdminAPI {
             'version' => (string) ($plugin['version'] ?? ''),
             'count_of_releases' => (int) ($plugin['count_of_releases'] ?? 0),
         ];
-    }
-
-    private function wporg_account_is_configured(string $username): bool {
-        $settings = get_option('pblsh_settings');
-        $accounts = is_array($settings) && is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
-
-        foreach ($accounts as $account) {
-            if (!is_array($account)) {
-                continue;
-            }
-
-            $stored_username = normalize_wporg_username($account['username'] ?? null);
-            if (is_wp_error($stored_username) || $stored_username !== $username) {
-                continue;
-            }
-
-            if (wporg_is_encrypted_password(wporg_string_from_value($account['password'] ?? ''))) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private function make_rest_error(string $code, string $message, int $status, ?string $field = null): \WP_Error {

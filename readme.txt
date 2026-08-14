@@ -116,6 +116,25 @@ Yes. You can optionally configure an IP/domain whitelist for the public endpoint
 = Do you support semantic versioning? =
 Yes. The validator recognizes major/minor/patch successions and warns on unexpected jumps.
 
+= Which distribution channel should I choose? =
+Choose wordpress.org if your plugin is free and open-source and you want it listed in the official WordPress plugin directory so that it can be easily found and installed by everyone — however, your plugin must first be [reviewed and approved](https://developer.wordpress.org/plugins/wordpress-org/) by the WordPress.org plugin team.
+
+Otherwise choose Self-hosted — releases are then distributed directly from your own server, without any review process, and go live instantly. Note that self-hosted plugins are also publicly accessible via the update API by default; you can restrict access with the IP/domain whitelist in the settings.
+
+= Can I use both distribution channels for one plugin? =
+No. A plugin uses exactly one distribution channel — either wordpress.org or self-hosted — and this choice applies to all future releases.
+
+Technically, the same code (apart from the `Update URI` header and the bootstrap code) could be shipped through both channels, but those would be two different plugins that merely share the same slug — a setup that is strongly discouraged.
+
+The only sensible exception is a temporary overlap while migrating from self-hosted to wordpress.org (see the next question): during the transition, the same code with the same slug is published through both channels — although Peak Publisher still manages these as two separate plugins.
+
+= Can I switch the distribution channel later? =
+Switching away from wordpress.org is practically impossible, because wordpress.org's technical plugin requirements prevent redirecting installed copies to another update source.
+
+Switching from self-hosted to wordpress.org, however, is possible, **provided that your plugin has been approved by the WordPress.org plugin team under the same slug it already uses.** Once approved, simply ship one last self-hosted release that removes the `Update URI` header and the bootstrap code — installed copies will then receive future updates from wordpress.org.
+
+**Warning:** In theory, a migration under a different slug might also work, but it can result in installed copies no longer receiving updates or even being deactivated unintentionally. In short: Only do this if you enjoy taking big risks — even if you plan to test it extensively.
+
 == Changelog ==
 
 = 1.3.1 - 2026-04-04 =

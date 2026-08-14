@@ -72,13 +72,24 @@ class UploadWorkflow {
         $cache = json_decode(file_get_contents($cache_file), true);
         $zip_path = (string) ($cache['zip_path'] ?? '');
         $data = (array) ($cache['data'] ?? []);
-        if (!file_exists($zip_path)) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'zip_missing', 'message' => 'ZIP file is missing.' ] ] ];
-        }
 
         // Check if the plugin and version are valid
         if (!$data['plugin_ok'] || !$data['version_ok']) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'plugin_or_version_invalid', 'message' => 'Plugin or version is invalid.' ] ] ];
+        }
+
+        $active_target = $this->resolve_finalize_target($request, $data);
+        if (isset($active_target['status'])) {
+            return $active_target;
+        }
+        if ($active_target['hosting_type'] === 'wporg') {
+            return $this->finalize_wporg_upload($data, $active_target['target']);
+        }
+        $data['hosting_type_resolved'] = 'self_hosted';
+        $data = $this->apply_target_release_context($data, $active_target['target']);
+
+        if (!file_exists($zip_path)) {
+            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'zip_missing', 'message' => 'ZIP file is missing.' ] ] ];
         }
 
         // Check if the plugin slug is valid
@@ -186,7 +197,7 @@ class UploadWorkflow {
         } */
 
         // Optional: cleanup temp folder later
-        $this->delete_directory_recursively_with_race_protection($this->tmp_root);
+        delete_directory_with_race_protection($this->tmp_root);
 
         return [
             'status' => 'ok',
@@ -307,6 +318,9 @@ class UploadWorkflow {
         }
 
         if ($phase === 'analyze') {
+            // Use the latest request intent for this analysis run
+            $request_context = $this->upload_request_context_from_request($request);
+
             $working_dir = $this->tmp_root . 'data/';
 
             // Detect root directory and main plugin file
@@ -349,12 +363,13 @@ class UploadWorkflow {
 
             // Determine plugin folder name and basename
             $plugin_folder_name = $has_top_level_folder || $fixed_top_level_folder ? basename($root) : basename($zip_path, '.zip');
+            $plugin_folder_source = $has_top_level_folder ? 'top_level_folder' : ($fixed_top_level_folder ? 'main_file_basename' : 'zip_filename');
             $plugin_basename = $plugin_folder_name . '/' . basename($main_file);
             $plugin_slug = sanitize_title($plugin_folder_name);
 
             // Process readme.txt (root-level, case-sensitive), normalize encoding/BOM if configured, and parse
             $readme_modified = false;
-            $readme_info = ['found' => false, 'file_name' => '', 'content' => []];
+            $readme_info = default_plugin_readme_txt_data();
             $readme_abs = $this->find_readme_txt($root);
             if ($readme_abs) {
                 [$readme_content, $was_modified, $readme_cleanup_info] = $this->ensure_readme_utf8_without_bom($readme_abs);
@@ -365,7 +380,7 @@ class UploadWorkflow {
                 // Parse readme.txt and check if it is able to be encoded to JSON, if not, set the content to an empty array to avoid JSON encoding errors later.
                 $readme_content_parsed = parse_readme_txt($readme_content);
                 $readme_cleanup_info['can_be_encoded_to_json'] = json_encode($readme_content_parsed) !== false;
-                $readme_info['content'] = $readme_cleanup_info['can_be_encoded_to_json'] ? $readme_content_parsed : null;
+                $readme_info['content'] = $readme_cleanup_info['can_be_encoded_to_json'] ? $readme_content_parsed : [];
             }
 
             // Get plugin data
@@ -423,6 +438,8 @@ class UploadWorkflow {
                     'bootstrap_is_latest' => $bootstrap['is_latest'] ?? false,
                     'plugin_basename' => $plugin_basename,
                     'plugin_slug' => $plugin_slug,
+                    'plugin_folder_name' => $plugin_folder_name,
+                    'plugin_folder_source' => $plugin_folder_source,
                     'content_hash' => $this->get_directory_content_hash($root),
                 ],
                 'cleanup_info' => [
@@ -452,6 +469,12 @@ class UploadWorkflow {
                 'plugin_readme_txt' => $readme_info,
             ];
 
+            $hosting_state = $this->build_hosting_type_analysis_state($data, $request_context);
+            if (is_wp_error($hosting_state)) {
+                return $this->upload_error($hosting_state->get_error_code(), $hosting_state->get_error_message(), $upload_id, $data);
+            }
+            $data = $hosting_state;
+
             // Determine if the ZIP needs to be rebuilt
             $any_deleted = false;
             foreach ($found_workspace_artifacts as $entry) { if (!empty($entry['deleted'])) { $any_deleted = true; break; } }
@@ -474,7 +497,6 @@ class UploadWorkflow {
         if ($phase === 'rebuild_zip') {
             $working_dir = $this->tmp_root . 'data/';
             $rebuilt = $this->build_zip($working_dir, $zip_path);
-            $this->delete_directory_recursively_with_race_protection($working_dir);
 
             if ($rebuilt) {
                 $cache['data']['result_zip'] = [
@@ -491,14 +513,581 @@ class UploadWorkflow {
         }
 
         if ($phase === 'result') {
+            $data = is_array($cache['data'] ?? null) ? $cache['data'] : [];
+            if (empty($data['phases']['analyze'])) {
+                return $this->upload_error(
+                    'upload_analyze_incomplete',
+                    __('Upload analysis has not completed.', 'peak-publisher'),
+                    $upload_id,
+                    $data
+                );
+            }
             return [
                 'status' => 'ok',
                 'upload_id' => $upload_id,
-                'data' => $cache['data'] ?? [],
+                'data' => $data,
+            ];
+        }
+
+        if ($phase === 'refresh_target_context') {
+            $data = (array) ($cache['data'] ?? []);
+            $target = $data['hosting_type_targets']['wporg'] ?? null;
+            if (!is_array($target)) {
+                return $this->upload_error('wporg_deploy_state_invalid', __('Upload is not a wordpress.org deploy.', 'peak-publisher'), $upload_id);
+            }
+
+            if (empty($target['pre_deploy_import']['required'])) {
+                // Return existing state when no pre-deploy import is pending
+                return [
+                    'status' => 'ok',
+                    'upload_id' => $upload_id,
+                    'data' => $data,
+                ];
+            }
+
+            // Refresh the target after the required wordpress.org import
+            $refreshed = $this->refresh_wporg_target_context($data);
+            if (is_wp_error($refreshed)) {
+                return $this->upload_error($refreshed->get_error_code(), $refreshed->get_error_message(), $upload_id, $data);
+            }
+
+            $cache['data'] = $refreshed;
+            $cache['data']['phases'][$phase] = $this->get_time_log();
+            @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
+
+            return [
+                'status' => 'ok',
+                'upload_id' => $upload_id,
+                'data' => $cache['data'],
             ];
         }
 
         return [ 'status' => 'error', 'errors' => [ [ 'code' => 'invalid_phase', 'message' => 'Invalid phase.' ] ] ];
+    }
+
+    private function upload_request_context_from_request(\WP_REST_Request $request): array {
+        // Extract the overlay upload intent from request parameters
+        $hosting_type_intended = sanitize_key((string) ($request->get_param('hosting_type_intended') ?? ''));
+        if (!in_array($hosting_type_intended, ['self_hosted', 'wporg'], true)) {
+            return [];
+        }
+
+        $context = [
+            'hosting_type_intended' => $hosting_type_intended,
+        ];
+        $username = wporg_string_from_value($request->get_param('username') ?? '');
+        if ($hosting_type_intended === 'wporg' && $username !== '') {
+            $context['username'] = $username;
+        }
+        return $context;
+    }
+
+    /**
+     * Derives the wordpress.org slug from the upload's top-level folder name.
+     * Transitional: the folder guard becomes obsolete once the auto_add_top_level_folder setting is removed
+     * (the folder then always exists), and the slug-format validation is planned to become channel-agnostic —
+     * at that point this function dissolves into the general analysis.
+     */
+    private function wporg_slug_from_upload_data(array $data) {
+        if (empty($data['cleanup_info']['has_top_level_folder']) && empty($data['cleanup_info']['fixed_top_level_folder'])) {
+            return new \WP_Error(
+                'wporg_top_level_folder_required',
+                __('wordpress.org deploys require a top-level plugin folder matching the plugin slug.', 'peak-publisher'),
+                [ 'status' => 400 ]
+            );
+        }
+
+        return normalize_wporg_slug($data['plugin_info']['plugin_folder_name'] ?? '', 'slug');
+    }
+
+    private function build_hosting_type_analysis_state(array $data, array $request_context = []) {
+        $intent = (string) ($request_context['hosting_type_intended'] ?? '');
+        $request_username = (string) ($request_context['username'] ?? '');
+
+        $slug = (string) ($data['plugin_info']['plugin_slug'] ?? '');
+        $wporg_slug = $this->wporg_slug_from_upload_data($data);
+        if (is_wp_error($wporg_slug)) {
+            // Keep wp.org in the target matrix; the slug error is rendered as a target blocker.
+            $wporg_slug = '';
+        }
+        $self_post = get_plugin_post_by_slug('pblsh_plugin', $slug);
+        $wporg_marker = get_plugin_post_by_slug('pblsh_wporg_plugin', $wporg_slug);
+        $has_self_hosted_signal = !empty($data['plugin_data']['UpdateURI']) || !empty($data['plugin_info']['bootstrap_file']);
+
+        $include_self_hosted = false;
+        $include_wporg = false;
+        $default = null;
+        $choice = false;
+
+        if ($intent === 'self_hosted') {
+            $include_self_hosted = true;
+            $include_wporg = $wporg_marker instanceof \WP_Post;
+            $default = 'self_hosted';
+            $choice = $include_wporg;
+        } elseif ($intent === 'wporg') {
+            $include_wporg = true;
+            $include_self_hosted = $self_post instanceof \WP_Post || $has_self_hosted_signal;
+            $default = 'wporg';
+            $choice = $include_self_hosted;
+        } else {
+            if ($has_self_hosted_signal) {
+                $include_self_hosted = true;
+                $include_wporg = $wporg_marker instanceof \WP_Post;
+                $default = 'self_hosted';
+                $choice = $include_wporg;
+            } elseif ($wporg_marker instanceof \WP_Post) {
+                $include_wporg = true;
+                $include_self_hosted = $self_post instanceof \WP_Post;
+                $default = 'wporg';
+                $choice = $include_self_hosted;
+            } elseif ($self_post instanceof \WP_Post) {
+                $include_self_hosted = true;
+                $default = 'self_hosted';
+            } else {
+                $include_self_hosted = true;
+                $include_wporg = true;
+                $default = null;
+                $choice = true;
+            }
+        }
+
+        $wporg_target = null;
+        if ($include_wporg) {
+            if ($wporg_marker instanceof \WP_Post) {
+                $preferred_username = wporg_string_from_value(get_post_meta((int) $wporg_marker->ID, '_pblsh_wporg_account_username', true));
+                if ($preferred_username === '' && $request_username !== '') {
+                    $preferred_username = $request_username;
+                }
+                $wporg_target = $this->build_wporg_target_for_marker($data, $wporg_marker, $preferred_username);
+                if (is_wp_error($wporg_target)) {
+                    if ($intent === 'wporg' || (!$has_self_hosted_signal && !$include_self_hosted)) {
+                        return $wporg_target;
+                    }
+                    $include_wporg = false;
+                    $choice = false;
+                }
+            } else {
+                $wporg_target = $this->build_wporg_pre_deploy_target($data, $request_context);
+            }
+        }
+
+        // wporg before self_hosted: the insertion order is both the display order and,
+        // via the array_key_first() fallbacks below, the priority order.
+        $targets = [];
+        if ($include_wporg && is_array($wporg_target)) {
+            $targets['wporg'] = $wporg_target;
+        }
+        if ($include_self_hosted) {
+            $targets['self_hosted'] = $this->build_self_hosted_target($data, $self_post);
+        }
+
+        if ($default !== null && !isset($targets[$default])) {
+            $default = array_key_first($targets);
+        }
+        if (empty($data['plugin_ok'])) {
+            // No target decision needed for something that can't be uploaded anyway.
+            $choice = false;
+        }
+        $resolved = $choice ? null : ($default ?: array_key_first($targets));
+        $active_target = $resolved !== null && isset($targets[$resolved]) ? $targets[$resolved] : null;
+
+        $data['hosting_type_intended'] = $intent !== '' ? $intent : null;
+        $data['hosting_type_default'] = $default;
+        $data['hosting_type_resolved'] = $resolved;
+        $data['hosting_type_choice'] = $choice;
+        $data['hosting_type_targets'] = $targets;
+        $data['slug'] = $resolved === 'wporg' && $wporg_slug !== '' ? $wporg_slug : $slug;
+        $data['slug_source'] = (string) ($data['plugin_info']['plugin_folder_source'] ?? '');
+
+        if (is_array($active_target)) {
+            $data = $this->apply_target_release_context($data, $active_target);
+        }
+
+        return $data;
+    }
+
+    private function refresh_wporg_target_context(array $data) {
+        // Resolve the slug and account from persisted upload state
+        $slug = normalize_wporg_slug($data['slug'] ?? null, 'slug');
+        if (is_wp_error($slug)) {
+            return $slug;
+        }
+
+        $target = is_array($data['hosting_type_targets']['wporg'] ?? null) ? $data['hosting_type_targets']['wporg'] : [];
+        $pre_deploy = is_array($target['pre_deploy_import'] ?? null) ? $target['pre_deploy_import'] : [];
+        $username = normalize_wporg_username($pre_deploy['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $username;
+        }
+
+        // Require the marker created by the pre-deploy import
+        $marker = get_plugin_post_by_slug('pblsh_wporg_plugin', $slug);
+        if (!$marker instanceof \WP_Post) {
+            return new \WP_Error(
+                'wporg_pre_deploy_import_required',
+                __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'),
+                [ 'status' => 409 ]
+            );
+        }
+
+        // Rebuild the target with current marker and access data
+        $next_target = $this->build_wporg_target_for_marker($data, $marker, $username);
+        if (is_wp_error($next_target)) {
+            return $next_target;
+        }
+
+        $data['hosting_type_targets']['wporg'] = $next_target;
+        return $this->apply_target_release_context($data, $next_target);
+    }
+
+    private function apply_target_release_context(array $data, array $target): array {
+        $data['existing_plugin'] = (int) ($target['existing_plugin_id'] ?? 0) ?: false;
+        $data['related_releases'] = $target['related_releases'] ?? false;
+        return $data;
+    }
+
+    private function build_self_hosted_target(array $data, ?\WP_Post $plugin_post): array {
+        $version = (string) ($data['plugin_data']['Version'] ?? '');
+        $related_releases = $plugin_post instanceof \WP_Post && $version !== ''
+            ? $this->find_related_releases((int) $plugin_post->ID, $version)
+            : false;
+
+        return [
+            'label' => __('Self-hosted', 'peak-publisher'),
+            'description' => __('Distributes the release directly from this Peak Publisher instance.', 'peak-publisher'),
+            'existing_plugin_id' => $plugin_post instanceof \WP_Post ? (int) $plugin_post->ID : null,
+            'available' => true,
+            'blocking_reason' => null,
+            'related_releases' => $related_releases,
+        ];
+    }
+
+    // Shared by both wporg target builders — the choice card must read the same regardless of import state.
+    private function wporg_target_labels(): array {
+        return [
+            'label' => __('wordpress.org', 'peak-publisher'),
+            'description' => __('Publishes the release in the official plugin directory on wordpress.org.', 'peak-publisher'),
+        ];
+    }
+
+    private function build_wporg_pre_deploy_target(array $data, array $context): array {
+        $usable_usernames = get_usable_wporg_account_usernames();
+        $username = '';
+        if (isset($context['username'])) {
+            $normalized = normalize_wporg_username($context['username'], 'username');
+            if (!is_wp_error($normalized) && in_array($normalized, $usable_usernames, true)) {
+                $username = $normalized;
+            }
+        }
+        if ($username === '') {
+            $username = $usable_usernames[0] ?? '';
+        }
+
+        $blockers = $this->wporg_marker_independent_blockers($data);
+        // Without a derivable slug there is nothing to import — the checklist then shows the slug blocker instead of the import gate.
+        $slug_available = !is_wp_error($this->wporg_slug_from_upload_data($data));
+
+        return [
+            ...$this->wporg_target_labels(),
+            'existing_plugin_id' => null,
+            'available' => $username !== '',
+            'blocking_reason' => $username !== '' ? null : 'wporg_no_credentials',
+            'pre_deploy_import' => [
+                'required' => $slug_available,
+                'status' => $slug_available ? 'required' : 'unavailable',
+                'action' => 'import_and_continue',
+                'username' => $username !== '' ? $username : null,
+            ],
+            'wporg_access_status' => 'not_checked',
+            'wporg_access_username' => null,
+            'account_username' => $username !== '' ? $username : null,
+            'target_validation' => [
+                'finalizable' => false,
+                'blocking_errors' => $blockers,
+            ],
+            'related_releases' => false,
+        ];
+    }
+
+    private function build_wporg_target_for_marker(array $data, \WP_Post $marker, ?string $preferred_username = null) {
+        // Refresh the local wporg cache before validating the deploy target
+        try {
+            get_wporg_plugin_data($marker);
+        } catch (\Throwable $e) {
+            // get_wporg_plugin_data() throws RuntimeExceptions with user-facing messages (wporg_cache.php).
+            return new \WP_Error(
+                'wporg_access_check_failed',
+                $e instanceof \RuntimeException && $e->getMessage() !== '' ? $e->getMessage() : __('Could not refresh wordpress.org SVN cache.', 'peak-publisher'),
+                [ 'status' => 502 ]
+            );
+        }
+
+        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        $access = SvnDeployWorkflow::find_author_account_result($marker->post_name, $preferred_username);
+        $access_status = (string) ($access['status'] ?? 'error');
+        if ($access_status === 'error') {
+            return new \WP_Error(
+                'wporg_access_check_failed',
+                isset($access['message']) && is_string($access['message']) ? $access['message'] : __('Could not verify wordpress.org SVN access.', 'peak-publisher'),
+                [ 'status' => 502 ]
+            );
+        }
+
+        $username = (string) ($access['username'] ?? '');
+        $available = $access_status === 'ok' && $username !== '';
+        $blocking_reason = match ($access_status) {
+            'no_credentials' => 'wporg_no_credentials',
+            'no_write_access' => 'wporg_no_write_access',
+            'not_found' => 'wporg_not_found',
+            default => null,
+        };
+
+        // Derive deploy mode from the uploaded version and cached releases
+        $version = (string) ($data['plugin_data']['Version'] ?? '');
+        $related_releases = $version !== '' ? $this->find_related_releases((int) $marker->ID, $version) : false;
+        $blockers = $this->wporg_marker_independent_blockers($data);
+        $deploy_mode = null;
+        if ($related_releases !== false) {
+            $latest = $related_releases['latest'] ?? false;
+            $uploaded_normalized = normalize_version_number($version);
+            // find_related_releases() only lists releases with a non-empty normalized_version.
+            $latest_normalized = $latest ? (string) $latest['normalized_version'] : '';
+            if ($latest_normalized === '' || version_compare($uploaded_normalized, $latest_normalized, '>=')) {
+                $deploy_mode = 'trunk_and_tag';
+            } else {
+                $deploy_mode = 'tag_only';
+            }
+        }
+        $finalizable = $available && empty($blockers) && in_array($deploy_mode, ['trunk_and_tag', 'tag_only'], true);
+
+        // Return the target shape consumed by the overlay and finalize
+        return [
+            ...$this->wporg_target_labels(),
+            'existing_plugin_id' => (int) $marker->ID,
+            'available' => $available,
+            'blocking_reason' => $blocking_reason,
+            'pre_deploy_import' => [ 'required' => false, 'status' => 'complete' ],
+            'wporg_access_status' => $access_status,
+            'wporg_access_username' => $available ? $username : null,
+            'account_username' => $available ? $username : null,
+            'deploy_mode' => $deploy_mode,
+            'target_validation' => [
+                'finalizable' => $finalizable,
+                'blocking_errors' => $blockers,
+            ],
+            'related_releases' => $related_releases,
+        ];
+    }
+
+    /**
+     * Builds the wporg deploy blockers that apply regardless of marker/import state.
+     * Every code returned here needs a dedicated checklist item in GlobalDropOverlay.js —
+     * the client has no generic fallback renderer for unknown blocker codes.
+     */
+    private function wporg_marker_independent_blockers(array $data): array {
+        $blockers = [];
+        $slug = $this->wporg_slug_from_upload_data($data);
+        if (is_wp_error($slug)) {
+            $blockers[] = [
+                'code' => $slug->get_error_code(),
+                'message' => $slug->get_error_message(),
+            ];
+        }
+        if (!empty($data['plugin_data']['UpdateURI'])) {
+            $blockers[] = [
+                'code' => 'wporg_update_uri_not_allowed',
+                'message' => __('wordpress.org plugins must not contain an Update URI header.', 'peak-publisher'),
+            ];
+        }
+        if (!empty($data['plugin_info']['bootstrap_file'])) {
+            $blockers[] = [
+                'code' => 'wporg_bootstrap_not_allowed',
+                'message' => __('Peak Publisher bootstrap code must be removed before deploying to wordpress.org.', 'peak-publisher'),
+            ];
+        }
+        return $blockers;
+    }
+
+    private function resolve_finalize_target(\WP_REST_Request $request, array $data): array {
+        $targets = is_array($data['hosting_type_targets'] ?? null) ? $data['hosting_type_targets'] : [];
+        if (empty($targets)) {
+            return $this->upload_error('invalid_hosting_type', __('Invalid upload target.', 'peak-publisher'));
+        }
+
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+
+        $has_choice = !empty($data['hosting_type_choice']);
+        $requested_hosting_type = sanitize_key((string) ($params['hosting_type'] ?? ''));
+        if ($has_choice) {
+            if ($requested_hosting_type === '') {
+                return $this->upload_error('hosting_type_missing', __('Choose where this upload should be published.', 'peak-publisher'));
+            }
+            if (!isset($targets[$requested_hosting_type])) {
+                return $this->upload_error('invalid_hosting_type', __('Invalid upload target.', 'peak-publisher'));
+            }
+            $hosting_type = $requested_hosting_type;
+        } else {
+            $hosting_type = (string) ($data['hosting_type_resolved'] ?? '');
+            if ($hosting_type === '' || !isset($targets[$hosting_type])) {
+                return $this->upload_error('invalid_hosting_type', __('Invalid upload target.', 'peak-publisher'));
+            }
+        }
+
+        $target = is_array($targets[$hosting_type] ?? null) ? $targets[$hosting_type] : [];
+        if (empty($target['available'])) {
+            return $this->upload_error(
+                (string) ($target['blocking_reason'] ?? 'target_unavailable'),
+                __('The selected upload target is not available.', 'peak-publisher')
+            );
+        }
+
+        if (!empty($target['pre_deploy_import']['required'])) {
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'));
+        }
+
+        $validation = is_array($target['target_validation'] ?? null) ? $target['target_validation'] : [];
+        $blocking_errors = is_array($validation['blocking_errors'] ?? null) ? $validation['blocking_errors'] : [];
+        if (!empty($blocking_errors)) {
+            return [
+                'status' => 'error',
+                'code' => 'target_validation_failed',
+                'message' => __('The selected upload target failed validation.', 'peak-publisher'),
+                'errors' => $blocking_errors,
+            ];
+        }
+
+        return [
+            'hosting_type' => $hosting_type,
+            'target' => $target,
+        ];
+    }
+
+    private function finalize_wporg_upload(array $data, array $target): array {
+        // Last gate before the irreversible SVN deploy: deliberately re-validates the target state
+        // that resolve_finalize_target() already checked in this request.
+        if (empty($target['available'])) {
+            return $this->upload_error((string) ($target['blocking_reason'] ?? 'target_unavailable'), __('wordpress.org deploy target is not available.', 'peak-publisher'));
+        }
+
+        if (!empty($target['pre_deploy_import']['required'])) {
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'));
+        }
+
+        $validation = is_array($target['target_validation'] ?? null) ? $target['target_validation'] : [];
+        $blocking_errors = is_array($validation['blocking_errors'] ?? null) ? $validation['blocking_errors'] : [];
+        if (!empty($blocking_errors)) {
+            return [
+                'status' => 'error',
+                'code' => 'target_validation_failed',
+                'message' => __('wordpress.org deploy validation failed.', 'peak-publisher'),
+                'errors' => $blocking_errors,
+            ];
+        }
+
+        if (!in_array((string) ($target['deploy_mode'] ?? ''), ['trunk_and_tag', 'tag_only'], true)) {
+            return $this->upload_error('wporg_deploy_state_invalid', __('Invalid wordpress.org deploy mode.', 'peak-publisher'));
+        }
+
+        // Validate the target slug, account, and version
+        $slug = $this->wporg_slug_from_upload_data($data);
+        if (is_wp_error($slug)) {
+            return $this->upload_error($slug->get_error_code(), $slug->get_error_message());
+        }
+        if ((string) ($data['slug'] ?? '') !== $slug) {
+            return $this->upload_error('wporg_deploy_state_invalid', __('Invalid wordpress.org deploy state.', 'peak-publisher'));
+        }
+
+        $username = normalize_wporg_username($target['wporg_access_username'] ?? null, 'username');
+        if (is_wp_error($username) || (string) ($target['wporg_access_status'] ?? '') !== 'ok') {
+            return $this->upload_error('wporg_access_check_failed', __('Could not verify wordpress.org SVN access.', 'peak-publisher'));
+        }
+
+        $version = (string) ($data['plugin_data']['Version'] ?? '');
+        if ($version === '') {
+            return $this->upload_error('plugin_or_version_invalid', __('Plugin or version is invalid.', 'peak-publisher'));
+        }
+
+        // Require the same imported marker that analyze approved
+        $marker_id = (int) ($target['existing_plugin_id'] ?? 0);
+        $marker = $marker_id > 0 ? get_post($marker_id) : null;
+        if (!$marker instanceof \WP_Post || !is_wporg_plugin($marker) || $marker->post_name !== $slug) {
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'));
+        }
+
+        // Deploy the prepared upload directory that analyze already validated
+        $working_dir = $this->tmp_root . 'data/';
+        if (!is_dir($working_dir)) {
+            return $this->upload_error('wporg_deploy_workdir_missing', __('Upload work directory is missing.', 'peak-publisher'));
+        }
+        $deploy_root = $this->detect_root_dir($working_dir);
+        if (!is_dir($deploy_root)) {
+            return $this->upload_error('wporg_deploy_workdir_missing', __('Upload work directory is missing.', 'peak-publisher'));
+        }
+
+        // Store the account used for this deploy on the marker
+        update_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', $username);
+
+        // Deploy the prepared directory to wordpress.org SVN
+        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        try {
+            $touch_trunk = (string) ($target['deploy_mode'] ?? '') !== 'tag_only';
+            $deploy_result = SvnDeployWorkflow::deploy_directory($deploy_root, $version, $slug, $username, $touch_trunk);
+        } catch (WporgSvnException $e) {
+            return $this->upload_error($e->get_error_code(), $e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->upload_error('wporg_deploy_failed', __('wordpress.org SVN deploy failed.', 'peak-publisher'));
+        }
+
+        // Mirror the committed tag into local release posts
+        $release_id = sync_wporg_deployed_release_post($marker, $version);
+        if (is_wp_error($release_id)) {
+            return [
+                'status' => 'error',
+                'code' => 'wporg_local_sync_failed_after_commit',
+                'message' => $release_id->get_error_message(),
+                'committed' => true,
+                'revision' => (int) ($deploy_result['revision'] ?? 0),
+                'slug' => $slug,
+                'plugin_id' => (int) $marker->ID,
+            ];
+        }
+
+        // Invalidate the marker cache and remove upload temp files
+        invalidate_wporg_plugin_cache((int) $marker->ID);
+        delete_directory_with_race_protection($this->tmp_root);
+
+        return [
+            'status' => 'ok',
+            'plugin_id' => (int) $marker->ID,
+            'release_id' => (int) $release_id,
+            'revision' => (int) ($deploy_result['revision'] ?? 0),
+            'committed' => true,
+            'touched_trunk' => !empty($deploy_result['touched_trunk']),
+        ];
+    }
+
+    private function upload_error(string $code, string $message, ?string $upload_id = null, array $data = []): array {
+        $out = [
+            'status' => 'error',
+            'code' => $code,
+            'message' => $message,
+            'errors' => [
+                [
+                    'code' => $code,
+                    'message' => $message,
+                ],
+            ],
+        ];
+        if ($upload_id !== null) {
+            $out['upload_id'] = $upload_id;
+        }
+        if (!empty($data)) {
+            $out['data'] = $data;
+        }
+        return $out;
     }
 
     /**
@@ -1034,7 +1623,7 @@ class UploadWorkflow {
         if (!is_dir($this->tmp_root)) {
             return [ 'status' => 'ok' ];
         }
-        $this->delete_directory_recursively_with_race_protection($this->tmp_root);
+        delete_directory_with_race_protection($this->tmp_root);
         return [ 'status' => 'ok' ];
     }
 
@@ -1091,27 +1680,13 @@ class UploadWorkflow {
 
         // Abort gracefully if archive creation failed in both strategies
         if (!$created) {
-            $this->delete_directory_recursively_with_race_protection($zip_new_dir);
+            delete_directory_with_race_protection($zip_new_dir);
             return false;
         }
 
         // Replace original archive directory with the newly created one
-        $this->delete_directory_recursively_with_race_protection(dirname($zip_path));
+        delete_directory_with_race_protection(dirname($zip_path));
         return get_wp_filesystem()->move($zip_new_dir, dirname($zip_path)) ? $generated_with : false;
-    }
-
-    /**
-     * Deletes a directory recursively with race protection.
-     *
-     * @param string $path Absolute path to the directory to delete.
-     * @return void
-     */
-    private function delete_directory_recursively_with_race_protection(string $path): void {
-        // Rename before deletion to prevent race conditions
-        $new_path = trailingslashit(dirname($path)) . basename($path) . '_deleted-' . time() . '-' . wp_generate_password(10, false) . '/';
-        if (get_wp_filesystem()->move($path, $new_path)) {
-            get_wp_filesystem()->delete($new_path, true);
-        }
     }
 
     /**

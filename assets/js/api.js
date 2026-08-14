@@ -27,6 +27,9 @@ lodash.set(window, 'Pblsh.API', {
     getPluginReleases: async (id) => {
         return await window.Pblsh.API.request('plugins/' + id + '/releases');
     },
+    getWporgDownloadUrl: async (id, version) => {
+        return await window.Pblsh.API.request('plugins/' + id + '/wporg-download-url?version=' + encodeURIComponent(version || ''));
+    },
     // Update a plugin
     updatePlugin: async (id, plugin) => {
         return await window.Pblsh.API.request('plugins/' + id, {
@@ -58,7 +61,7 @@ lodash.set(window, 'Pblsh.API', {
         return await window.Pblsh.API.request('admin/get-bootstrap-code');
     },
     // Start upload workflow (phase: upload_prepare), with progress callback
-    uploadStart: async (file, onProgress, opts) => {
+    uploadStart: async (file, onProgress, opts = {}) => {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', window.wpApiSettings.root + 'pblsh-admin/v1/admin/upload');
@@ -79,30 +82,30 @@ lodash.set(window, 'Pblsh.API', {
             xhr.onerror = () => reject(new Error('Network error during upload.'));
             const form = new FormData();
             form.append('file', file, file.name);
-            form.append('built_in_browser', opts?.builtInBrowserBy);
             form.append('phase', 'upload_prepare');
+            form.append('built_in_browser', opts.built_in_browser || '');
             xhr.send(form);
         });
     },
     // Continue upload workflow by phase
-    uploadContinue: async (uploadId, phase) => {
+    uploadContinue: async (upload_id, phase, body = {}) => {
         return await window.Pblsh.API.request('admin/upload', {
             method: 'POST',
-            body: { upload_id: uploadId, phase },
+            body: { ...body, upload_id, phase },
         });
     },
     // Finalize an uploaded ZIP (create plugin + release)
-    finalizeUpload: async (uploadId) => {
+    finalizeUpload: async (upload_id, body = {}) => {
         return await window.Pblsh.API.request('admin/upload/finalize', {
             method: 'POST',
-            body: { upload_id: uploadId },
+            body: { ...body, upload_id },
         });
     },
     // Discard an uploaded ZIP (cleanup temp data)
-    discardUpload: async (uploadId) => {
+    discardUpload: async (upload_id) => {
         return await window.Pblsh.API.request('admin/upload/discard', {
             method: 'POST',
-            body: { upload_id: uploadId },
+            body: { upload_id },
         });
     },
     // Settings

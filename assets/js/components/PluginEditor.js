@@ -1,6 +1,6 @@
 // PluginEditor Component (simplified overview + releases list)
 lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onToggleReleaseStatus, pendingReleaseIds, onTogglePluginStatus, pendingPluginStatus, isLoadingReleases, onBack, initialTab, onTabChange }) => {
-    const { __ } = wp.i18n;
+    const { __, sprintf } = wp.i18n;
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip, Button, DropdownMenu, MenuItem } = wp.components;
@@ -27,6 +27,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const [uploadingSlot, setUploadingSlot] = useState(null);   // 'icon_128' | 'screenshot-3' | null
     const [uploadProgress, setUploadProgress] = useState(0);
     const fileInputRefs = useRef({});  // { [slotKey]: HTMLInputElement }
+    const [downloadingReleaseId, setDownloadingReleaseId] = useState(null);
+    const downloadingReleaseIdRef = useRef(null);
     const validTabs = isWporg ? ['releases'] : ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
     const [draggingN, setDraggingN] = useState(null);     // screenshot_n being dragged
@@ -572,7 +574,34 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                     ),
                                                 );
                                             })(),
-                                            !isWporg && createElement(wp.components.DropdownMenu, {
+                                            isWporg && createElement(Tooltip, { text: __('Download', 'peak-publisher') },
+                                                createElement(Button, {
+                                                    isTertiary: true,
+                                                    icon: Pblsh.Utils.getSvgIcon('download', { size: 24 }),
+                                                    label: __('Download', 'peak-publisher'),
+                                                    isBusy: downloadingReleaseId === rel.id,
+                                                    disabled: downloadingReleaseId !== null && downloadingReleaseId !== rel.id,
+                                                    onClick: async () => {
+                                                        if (downloadingReleaseIdRef.current !== null) return;
+                                                        downloadingReleaseIdRef.current = rel.id;
+                                                        setDownloadingReleaseId(rel.id);
+                                                        try {
+                                                            const response = await Pblsh.API.getWporgDownloadUrl(pluginData.id, rel.version);
+                                                            if (response && response.status === 'ok' && response.url) {
+                                                                window.location = response.url;
+                                                                return;
+                                                            }
+                                                            Pblsh.Utils.showAlert(response?.message || __('Release not yet available on wordpress.org.', 'peak-publisher'), 'warning');
+                                                        } catch (e) {
+                                                            Pblsh.Utils.showAlert(e?.message || __('Release not yet available on wordpress.org.', 'peak-publisher'), 'warning');
+                                                        } finally {
+                                                            downloadingReleaseIdRef.current = null;
+                                                            setDownloadingReleaseId(null);
+                                                        }
+                                                    },
+                                                }),
+                                            ),
+                                            createElement(wp.components.DropdownMenu, {
                                                 icon: Pblsh.Utils.getSvgIcon('dots_horizontal', { size: 24 }),
                                                 label: __('More options', 'peak-publisher'),
                                                 children: ({ onClose }) => [
@@ -581,7 +610,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                         isDestructive: true,
                                                         onClick: async () => {
                                                             try {
-                                                                if (!confirm(__('Are you sure you want to permanently delete this release?', 'peak-publisher'))) { onClose(); return; }
+                                                                const message = isWporg
+                                                                    ? sprintf(__('Delete release %s from wordpress.org?', 'peak-publisher'), rel.version)
+                                                                        + '\n'
+                                                                        + __('This will permanently delete the wordpress.org SVN tag.', 'peak-publisher')
+                                                                    : sprintf(__('Delete release %s?', 'peak-publisher'), rel.version)
+                                                                        + '\n'
+                                                                        + __('This will permanently delete the ZIP file.', 'peak-publisher');
+                                                                if (!confirm(message)) { onClose(); return; }
                                                                 await Pblsh.API.deleteRelease(rel.id);
                                                                 onClose();
                                                                 if (typeof refreshPlugin === 'function') {
@@ -593,7 +629,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                         },
                                                     },
                                                         Pblsh.Utils.getSvgIcon('delete_forever', { size: 24 }),
-                                                        __('Delete permanently', 'peak-publisher')
+                                                        isWporg ? __('Delete from wordpress.org', 'peak-publisher') : __('Delete release', 'peak-publisher')
                                                     ),
                                                 ],
                                             })

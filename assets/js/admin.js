@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [currentPluginId, setCurrentPluginId] = useState(null);
         const [initialTab, setInitialTab] = useState(null);
+        const [activeUploadContext, setActiveUploadContext] = useState({});
         const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);
         const hasLoadedList = useSelect((select) => {
             try { return !!select('pblsh/plugins').hasLoadedList(); } catch (e) { return false; }
@@ -144,6 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const handleAddNewPlugin = () => {
             // keep local draft for UI only
             setIsNew(true);
+            setActiveUploadContext({});
             setView('addition-process');
             setQuery({ view: 'addition', plugin: null });
         };
@@ -152,6 +154,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 setIsNew(false);
                 setView('editor');
+                setActiveUploadContext({});
                 setCurrentPluginId(id);
                 setQuery({ plugin: id, view: null });
                 await window.Pblsh.Controllers.Plugins.fetchById(id);
@@ -187,6 +190,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setCurrentPluginId(null);
             setIsNew(false);
             setInitialTab(null);
+            setActiveUploadContext({});
             setQuery({ plugin: null, view: null, tab: null });
         };
 
@@ -271,6 +275,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 setCurrentPluginId(pluginId);
                 setIsNew(false);
                 setView('editor');
+                setActiveUploadContext({});
                 setQuery({ plugin: pluginId, view: null });
             } catch (error) {
                 showAlert(error.message, 'error');
@@ -294,6 +299,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return createElement(PluginAdditionProcess, {
                     onCreated: handleCreated,
                     onOpenSettings: openSettings,
+                    setActiveUploadContext,
                 });
             }
             else if (view === 'editor') {
@@ -336,7 +342,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         return createElement('div', { className: 'pblsh-app' },
             // Global drop overlay (always mounted)
-            createElement(GlobalDropOverlay, { onCreated: handleCreated }),
+            createElement(GlobalDropOverlay, { onCreated: handleCreated, activeUploadContext }),
 
             // Header (always visible)
             renderHeader(),

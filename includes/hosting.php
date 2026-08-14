@@ -17,6 +17,26 @@ function is_plugin_post(?\WP_Post $post): bool {
 
 
 /**
+ * Finds the plugin post of the given post type by its slug.
+ */
+function get_plugin_post_by_slug(string $post_type, string $slug): ?\WP_Post {
+    // An empty slug must not match: WP_Query drops an empty 'name' filter and would return an arbitrary post.
+    if ($slug === '') {
+        return null;
+    }
+
+    $posts = get_posts([
+        'post_type' => $post_type,
+        'post_status' => 'any',
+        'name' => $slug,
+        'posts_per_page' => 1,
+    ]);
+
+    return !empty($posts) && $posts[0] instanceof \WP_Post ? $posts[0] : null;
+}
+
+
+/**
  * Gets the public hosting type name for a plugin post, post ID, or post type string.
  */
 function get_plugin_hosting_type($post_or_id): string {

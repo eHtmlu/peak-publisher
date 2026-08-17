@@ -977,7 +977,6 @@ class SvnDeployWorkflow {
                 'bootstrap_is_latest' => false,
                 'plugin_basename' => $main_file !== '' ? $wporg_slug . '/' . $main_file : '',
                 'plugin_slug' => $wporg_slug,
-                'plugin_folder_name' => $wporg_slug,
                 'content_hash' => '',
             ],
         ];

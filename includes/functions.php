@@ -16,6 +16,25 @@ function get_update_uri(): string {
 
 
 /**
+ * The one authoritative source for channel display texts, keyed by hosting type.
+ * Exposed to the client as PblshData.channelTexts — upload state and targets carry
+ * facts only, never UI text.
+ */
+function get_channel_texts(): array {
+    return [
+        'wporg' => [
+            'label' => __('wordpress.org', 'peak-publisher'),
+            'description' => __('Publishes the release in the official plugin directory on wordpress.org.', 'peak-publisher'),
+        ],
+        'self_hosted' => [
+            'label' => __('Self-hosted', 'peak-publisher'),
+            'description' => __('Distributes the release directly from this Peak Publisher instance.', 'peak-publisher'),
+        ],
+    ];
+}
+
+
+/**
  * Gets deep links to the plugin's FAQ entries on wordpress.org, keyed by topic.
  * The questions must match the readme.txt FAQ questions verbatim — wordpress.org builds its anchors from them.
  */

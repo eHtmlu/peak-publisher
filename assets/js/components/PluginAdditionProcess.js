@@ -440,7 +440,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onOpe
         setActiveUploadContext(wporgAccountReady && wporgUsername
             ? {
                 hosting_type_intended: 'wporg',
-                username: wporgUsername,
+                wporg_username_intended: wporgUsername,
             }
             : {
                 hosting_type_intended: 'wporg',

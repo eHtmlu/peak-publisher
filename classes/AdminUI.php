@@ -167,6 +167,7 @@ class AdminUI {
                 'wporgImportChunkSize' => PBLSH_WPORG_IMPORT_CHUNK_SIZE,
                 'faqUrls' => get_peak_publisher_faq_urls(),
                 'assetSlots' => AssetManager::get_slots(),
+                'channelTexts' => get_channel_texts(),
                 'i18n' => [
                     'permalinkPlain'      => __('Plain'),
                     'permalinkDayAndName' => __('Day and name'),

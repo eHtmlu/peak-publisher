@@ -1,7 +1,6 @@
 // WporgAccessGate Component - shared wordpress.org onboarding and access gate
 const WporgAccessGate = ({
     variant = 'access_blocked',
-    slugSummary = '',
     username = '',
     accessStatus = '',
     message = '',
@@ -76,8 +75,7 @@ const WporgAccessGate = ({
                 createElement('p', { className: 'pblsh--wporg-access-gate__description' }, getVariantDescription()),
             ),
         ),
-        (slugSummary || username || message) ? createElement('div', { className: 'pblsh--wporg-access-gate__details' },
-            renderDetail(__('Plugin', 'peak-publisher'), slugSummary, 'slug'),
+        (username || message) ? createElement('div', { className: 'pblsh--wporg-access-gate__details' },
             renderDetail(__('Account', 'peak-publisher'), username, 'username'),
             renderDetail(__('Status', 'peak-publisher'), message, 'message'),
         ) : null,

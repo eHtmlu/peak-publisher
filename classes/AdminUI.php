@@ -60,6 +60,8 @@ class AdminUI {
         $script_files = [
             'utils.js',
             'utils-upload.js',
+            'utils-upload-result.js',
+            'upload-checks.js',
             'api.js',
             'stores/plugins.js',
             'stores/releases.js',

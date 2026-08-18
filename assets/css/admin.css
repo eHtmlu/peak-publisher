@@ -2650,7 +2650,7 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     display: inline-flex;
     align-items: center;
     gap: 0.375rem;
-    padding: 0.25rem 0.5rem;
+    padding-block: 0.25rem;
     border-radius: 3px;
 }
 
@@ -2658,6 +2658,7 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     border: 1px solid var(--border-color-light);
     background: #fff;
     cursor: pointer;
+    padding-inline: 0.5rem;
 }
 
 .pblsh--upload-result button.pblsh--publish-path__trigger:hover {

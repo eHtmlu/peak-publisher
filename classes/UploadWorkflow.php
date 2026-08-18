@@ -1478,20 +1478,24 @@ class UploadWorkflow {
      * @return string Content hash of the path.
      */
     private function get_directory_content_hash(string $path): string {
-        // iterate over all files and directories and calculate the hash of each relative path and for files calculate also the content hash (md5_file()). At the end, calculate the hash of all hashes and sort them.
+        // Iterate over all files and directories and hash each relative path and, for files, also the content. At the end, sort all hashes and hash the concatenation (sha256, like the ZIP fingerprints in original_zip/release_zip).
+        // Releases created before 2026-08 stored md5 values (32 hex chars) under the same keys
+        // (plugin_info.content_hash, _pblsh_directory_content_hash). Before using these hashes
+        // for comparisons, migrate the stored values (recompute from the stored ZIPs) or
+        // discriminate by length — an md5 value can never match a sha256 value.
         $hashes = [];
         $dirIt = new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS);
         $it = new \RecursiveIteratorIterator($dirIt, \RecursiveIteratorIterator::SELF_FIRST);
         foreach ($it as $entry) {
             $entry_path = $entry->getPathname();
             $relative_path = $this->rel_path($entry_path, $path);
-            $hashes[] = md5($relative_path);
+            $hashes[] = hash('sha256', $relative_path);
             if (is_file($entry_path)) {
-                $hashes[] = md5_file($entry_path);
+                $hashes[] = hash_file('sha256', $entry_path);
             }
         }
         sort($hashes);
-        return md5(implode('', $hashes));
+        return hash('sha256', implode('', $hashes));
     }
 
     /**

@@ -54,47 +54,11 @@ class WporgPluginSvnClient {
 
     public function list_directory(string $path = '', int $depth = 1): array {
         $depth = max(0, min(1, $depth));
-        $response = $this->propfind($path, $depth);
-        $status = (int) ($response['status'] ?? 0);
-
-        if ($status === 404) {
-            throw new WporgSvnException(
-                'not_found',
-                __('wordpress.org SVN path was not found.', 'peak-publisher'),
-                404
-            );
-        }
-        if (!$this->is_success_status($status) && $status !== 207) {
-            throw new WporgSvnException(
-                'svn_read_failed',
-                __('wordpress.org SVN returned an unexpected read response.', 'peak-publisher'),
-                502
-            );
-        }
-
-        return $this->entries_from_multistatus_body((string) ($response['body'] ?? ''));
+        return $this->directory_entries_from_response($this->propfind($path, $depth));
     }
 
     public function read_file(string $path): string {
-        $response = $this->request('GET', $path);
-        $status = (int) ($response['status'] ?? 0);
-
-        if ($status === 404) {
-            throw new WporgSvnException(
-                'not_found',
-                __('wordpress.org SVN file was not found.', 'peak-publisher'),
-                404
-            );
-        }
-        if (!$this->is_success_status($status)) {
-            throw new WporgSvnException(
-                'svn_read_failed',
-                __('wordpress.org SVN returned an unexpected file response.', 'peak-publisher'),
-                502
-            );
-        }
-
-        return (string) ($response['body'] ?? '');
+        return $this->file_body_from_response($this->request('GET', $path));
     }
 
     public static function is_batch_transport_available(): bool {
@@ -103,35 +67,14 @@ class WporgPluginSvnClient {
 
     public function list_directories_multi(array $paths, int $depth = 1, int $concurrency = 5): array {
         $depth = max(0, min(1, $depth));
-        $body = '<?xml version="1.0" encoding="utf-8"?>' .
-            '<D:propfind xmlns:D="DAV:"><D:prop>' .
-            '<D:resourcetype/><D:getlastmodified/><D:getcontentlength/>' .
-            '<D:version-name/><D:checked-in/><D:version-controlled-configuration/>' .
-            '</D:prop></D:propfind>';
-
         $responses = $this->request_paths_multi('PROPFIND', $paths, [
             'Depth' => (string) $depth,
             'Content-Type' => 'text/xml; charset=utf-8',
-        ], $body, $concurrency);
+        ], $this->propfind_body(), $concurrency);
 
         $out = [];
         foreach ($responses as $path => $response) {
-            $status = (int) ($response['status'] ?? 0);
-            if ($status === 404) {
-                throw new WporgSvnException(
-                    'not_found',
-                    __('wordpress.org SVN path was not found.', 'peak-publisher'),
-                    404
-                );
-            }
-            if (!$this->is_success_status($status) && $status !== 207) {
-                throw new WporgSvnException(
-                    'svn_read_failed',
-                    __('wordpress.org SVN returned an unexpected read response.', 'peak-publisher'),
-                    502
-                );
-            }
-            $out[$path] = $this->entries_from_multistatus_body((string) ($response['body'] ?? ''));
+            $out[$path] = $this->directory_entries_from_response($response);
         }
 
         return $out;
@@ -142,22 +85,7 @@ class WporgPluginSvnClient {
         $out = [];
 
         foreach ($responses as $path => $response) {
-            $status = (int) ($response['status'] ?? 0);
-            if ($status === 404) {
-                throw new WporgSvnException(
-                    'not_found',
-                    __('wordpress.org SVN file was not found.', 'peak-publisher'),
-                    404
-                );
-            }
-            if (!$this->is_success_status($status)) {
-                throw new WporgSvnException(
-                    'svn_read_failed',
-                    __('wordpress.org SVN returned an unexpected file response.', 'peak-publisher'),
-                    502
-                );
-            }
-            $out[$path] = (string) ($response['body'] ?? '');
+            $out[$path] = $this->file_body_from_response($response);
         }
 
         return $out;
@@ -948,16 +876,68 @@ class WporgPluginSvnClient {
     }
 
     private function propfind(string $path, int $depth): array {
-        $body = '<?xml version="1.0" encoding="utf-8"?>' .
+        return $this->request('PROPFIND', $path, [
+            'Depth' => (string) $depth,
+            'Content-Type' => 'text/xml; charset=utf-8',
+        ], $this->propfind_body());
+    }
+
+    // The one authoritative PROPFIND property list — the single (propfind) and batch
+    // (list_directories_multi) transports must request identical fields; drift here would
+    // fail silently with different data per transport.
+    private function propfind_body(): string {
+        return '<?xml version="1.0" encoding="utf-8"?>' .
             '<D:propfind xmlns:D="DAV:"><D:prop>' .
             '<D:resourcetype/><D:getlastmodified/><D:getcontentlength/>' .
             '<D:version-name/><D:checked-in/><D:version-controlled-configuration/>' .
             '</D:prop></D:propfind>';
+    }
 
-        return $this->request('PROPFIND', $path, [
-            'Depth' => (string) $depth,
-            'Content-Type' => 'text/xml; charset=utf-8',
-        ], $body);
+    /**
+     * Validates a directory-read (PROPFIND) response and extracts its entries — shared by
+     * list_directory() and list_directories_multi(), so status handling and error texts
+     * cannot drift between the single and batch transports.
+     */
+    private function directory_entries_from_response(array $response): array {
+        $status = (int) ($response['status'] ?? 0);
+        if ($status === 404) {
+            throw new WporgSvnException(
+                'not_found',
+                __('wordpress.org SVN path was not found.', 'peak-publisher'),
+                404
+            );
+        }
+        if (!$this->is_success_status($status) && $status !== 207) {
+            throw new WporgSvnException(
+                'svn_read_failed',
+                __('wordpress.org SVN returned an unexpected read response.', 'peak-publisher'),
+                502
+            );
+        }
+        return $this->entries_from_multistatus_body((string) ($response['body'] ?? ''));
+    }
+
+    /**
+     * Validates a file-read (GET) response and extracts its body — shared by read_file()
+     * and read_files_multi(), same anti-drift rationale as directory_entries_from_response().
+     */
+    private function file_body_from_response(array $response): string {
+        $status = (int) ($response['status'] ?? 0);
+        if ($status === 404) {
+            throw new WporgSvnException(
+                'not_found',
+                __('wordpress.org SVN file was not found.', 'peak-publisher'),
+                404
+            );
+        }
+        if (!$this->is_success_status($status)) {
+            throw new WporgSvnException(
+                'svn_read_failed',
+                __('wordpress.org SVN returned an unexpected file response.', 'peak-publisher'),
+                502
+            );
+        }
+        return (string) ($response['body'] ?? '');
     }
 
     private function options_activity_collection(string $path): array {

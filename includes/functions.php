@@ -209,10 +209,17 @@ function normalize_version_number(string $version): string {
 
 
 /**
- * Generates a slug for a release.
+ * Generates a slug for a release. Both channels share the pblsh_release post
+ * type (one slug namespace), and the same plugin slug × version may exist on
+ * wporg and self_hosted at once — so wporg releases carry their channel as
+ * prefix. Self-hosted is the unmarked home namespace, mirroring pblsh_plugin
+ * vs. pblsh_wporg_plugin; shipped self-hosted release slugs thus stay valid
+ * as they are — do not "symmetrize" the prefix. The underscore separator
+ * keeps the prefix unforgeable: plugin slugs never contain underscores.
  */
-function get_release_slug(string $plugin_slug, string $version): string {
-    return sanitize_title($plugin_slug . '_' . normalize_version_number($version));
+function get_release_slug(string $hosting_type, string $plugin_slug, string $version): string {
+    $prefix = $hosting_type === 'self_hosted' ? '' : $hosting_type . '_';
+    return sanitize_title($prefix . $plugin_slug . '_' . normalize_version_number($version));
 }
 
 

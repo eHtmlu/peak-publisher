@@ -871,7 +871,7 @@ class UploadWorkflow {
             'existing_plugin_id' => $plugin_post instanceof \WP_Post ? (int) $plugin_post->ID : null,
             'available' => true,
             'blocking_reason' => null,
-            'release_slug' => $slug !== '' && $version !== '' ? get_release_slug($slug, $version) : '',
+            'release_slug' => $slug !== '' && $version !== '' ? get_release_slug('self_hosted', $slug, $version) : '',
             'related_releases' => $related_releases,
         ];
     }

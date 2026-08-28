@@ -970,7 +970,7 @@ class SvnDeployWorkflow {
             'plugin_data' => $plugin_data,
             'plugin_info' => [
                 'normalized_version' => normalize_version_number((string) ($plugin_data['Version'] ?? '')),
-                'release_slug' => get_release_slug($wporg_slug, (string) ($plugin_data['Version'] ?? '')),
+                'release_slug' => get_release_slug('wporg', $wporg_slug, (string) ($plugin_data['Version'] ?? '')),
                 'main_file' => $main_file,
                 'bootstrap_file' => false,
                 'bootstrap_version' => '',

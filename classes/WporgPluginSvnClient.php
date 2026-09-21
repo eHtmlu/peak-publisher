@@ -523,7 +523,7 @@ class WporgPluginSvnClient {
         $this->require_commit_context();
         $message = trim($message);
         if ($message === '') {
-            $message = 'Deploy via Peak Publisher';
+            $message = 'Publish via Peak Publisher';
         }
 
         try {

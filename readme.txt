@@ -20,7 +20,7 @@ Peak Publisher turns your WordPress site into your own plugin update server. It�
 
 With a modern, task‑focused admin UI, you can add new plugins and releases via drag & drop, validate packages automatically, and publish or draft releases with one click. Your client plugins point to your Peak Publisher site via a standard `Update URI`, so WordPress will discover and install updates directly from you.
 
-**With this solution, you can have your own self-hosted plugin update server in just 5 minutes, allowing you to centrally manage your plugins and deploy updates with incredible ease.**
+**With this solution, you can have your own self-hosted plugin update server in just 5 minutes, allowing you to centrally manage your plugins and publish updates with incredible ease.**
 
 --
 
@@ -35,7 +35,7 @@ In just a few weeks, Peak Publisher will let you manage plugins hosted on wordpr
 == KEY FEATURES ==
 
 🚀 **Clean admin UI with a guided “Add New Plugin” flow**
-A short and focused user interface guides you through the entire process to deploy your first plugin with amazing ease within minutes.
+A short and focused user interface guides you through the entire process to publish your first plugin with amazing ease within minutes.
 
 ☝️ **Drag & drop a ZIP or simply the whole plugin folder**
 You can drop a ZIP file, but the easiest way is to simply drop the entire raw plugin folder or the folder's contents. The ZIP file will then be created automatically for you.
@@ -74,7 +74,7 @@ Packages are stored in a private, server-protected directory with no direct web 
 
 - Agencies that deliver custom plugins to multiple clients
 - Product teams with private/proprietary extensions
-- Creative plugin developers who want to deploy updates quickly and easily
+- Creative plugin developers who want to publish updates quickly and easily
 
 == Privacy ==
 
@@ -111,10 +111,10 @@ Your client plugin includes an `Update URI` header that points to your Peak Publ
 None. Peak Publisher does not track users or send telemetry. All communication happens between the client WordPress site and your Peak Publisher instance.
 
 = Can I restrict access to downloads? =
-Yes. You can optionally configure an IP/domain whitelist for the public endpoints. For stricter access control, consider placing your Peak Publisher site behind VPN, a reverse proxy, or adding your own authentication layer.
+Yes. You can optionally configure an IP/domain whitelist for the public endpoints. For stricter access control, consider placing your Peak Publisher site behind a VPN or a reverse proxy, or adding your own authentication layer.
 
 = Do you support semantic versioning? =
-Yes. The validator recognizes major/minor/patch successions and warns on unexpected jumps.
+Yes. The validator recognizes major/minor/patch increments and warns on unexpected jumps.
 
 = Which distribution channel should I choose? =
 Choose wordpress.org if your plugin is free and open-source and you want it listed in the official WordPress plugin directory so that it can be easily found and installed by everyone — however, your plugin must first be [reviewed and approved](https://developer.wordpress.org/plugins/wordpress-org/) by the WordPress.org plugin team.

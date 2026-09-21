@@ -24,11 +24,11 @@ function get_channel_texts(): array {
     return [
         'wporg' => [
             'label' => __('wordpress.org', 'peak-publisher'),
-            'description' => __('Publishes the release in the official plugin directory on wordpress.org.', 'peak-publisher'),
+            'description' => __('Manages plugins in the official directory.', 'peak-publisher'),
         ],
         'self_hosted' => [
             'label' => __('Self-hosted', 'peak-publisher'),
-            'description' => __('Distributes the release directly from this Peak Publisher instance.', 'peak-publisher'),
+            'description' => __('Manages plugins hosted on this site.', 'peak-publisher'),
         ],
     ];
 }

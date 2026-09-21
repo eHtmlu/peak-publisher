@@ -565,7 +565,7 @@ class AdminAPI {
         if ($status === 404) {
             return $this->rest_error_response($this->make_rest_error(
                 'wporg_download_not_available',
-                __('Release not yet available on wordpress.org. Releases typically appear a few minutes after deploy.', 'peak-publisher'),
+                __('Release not yet available on wordpress.org. Releases typically appear a few minutes after publishing.', 'peak-publisher'),
                 404
             ));
         }

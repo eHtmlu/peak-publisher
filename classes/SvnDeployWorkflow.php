@@ -87,7 +87,7 @@ class SvnDeployWorkflow {
                 self::apply_reconcile_plan($client, $plan);
             }
 
-            $commit = $client->commit(sprintf('Deploy %s %s via Peak Publisher', $wporg_slug, $version));
+            $commit = $client->commit(sprintf('Publish %s %s via Peak Publisher', $wporg_slug, $version));
             return [
                 'revision' => (int) ($commit['revision'] ?? 0),
                 'committed' => true,
@@ -855,15 +855,15 @@ class SvnDeployWorkflow {
      */
     private static function exception(string $code): WporgSvnException {
         [$message, $status] = match ($code) {
-            'deploy_directory_missing' => [__('The prepared deploy directory is missing.', 'peak-publisher'), 500],
+            'deploy_directory_missing' => [__('The prepared publish directory is missing.', 'peak-publisher'), 500],
             'account_not_configured' => [__('Account not configured.', 'peak-publisher'), 400],
             'wporg_tag_requires_php' => [__('wordpress.org requires the plugin to contain at least one PHP file.', 'peak-publisher'), 400],
             'not_found' => [__('The plugin was not found on wordpress.org SVN.', 'peak-publisher'), 404],
-            'wporg_concurrent_external_change' => [__('The wordpress.org SVN repository changed while the deploy was being prepared. Please try again.', 'peak-publisher'), 409],
+            'wporg_concurrent_external_change' => [__('The wordpress.org SVN repository changed while your release was being prepared. Please try again.', 'peak-publisher'), 409],
             'wporg_api_unavailable' => [__('wordpress.org API unavailable, try again later.', 'peak-publisher'), 503],
-            'invalid_svn_path' => [__('The plugin contains a file or folder path that cannot be deployed to wordpress.org SVN. Remove path segments containing ".." or backslashes and try again.', 'peak-publisher'), 400],
+            'invalid_svn_path' => [__('The plugin contains a file or folder path that cannot be published to wordpress.org SVN. Remove path segments containing ".." or backslashes and try again.', 'peak-publisher'), 400],
             'invalid_svn_path_segment' => [__('The version cannot be used as a wordpress.org SVN path segment. Remove slashes, backslashes, and ".." from the version.', 'peak-publisher'), 400],
-            'deploy_in_progress' => [__('Another wordpress.org deploy for this plugin is already in progress. Try again in a few minutes.', 'peak-publisher'), 409],
+            'deploy_in_progress' => [__('Another change to this plugin is still being written to wordpress.org. Try again in a few minutes.', 'peak-publisher'), 409],
         };
         return new WporgSvnException($code, $message, $status);
     }

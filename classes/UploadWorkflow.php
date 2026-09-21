@@ -530,7 +530,7 @@ class UploadWorkflow {
             $data = (array) ($cache['data'] ?? []);
             $target = $data['hosting_type_targets']['wporg'] ?? null;
             if (!is_array($target)) {
-                return $this->upload_error('wporg_deploy_state_invalid', __('Upload is not a wordpress.org deploy.', 'peak-publisher'), $upload_id);
+                return $this->upload_error('wporg_deploy_state_invalid', __('This upload has no wordpress.org destination.', 'peak-publisher'), $upload_id);
             }
 
             if (empty($target['pre_deploy_import']['required'])) {
@@ -1000,7 +1000,7 @@ class UploadWorkflow {
         if (!empty($data['plugin_info']['bootstrap_file'])) {
             $blockers[] = [
                 'code' => 'wporg_bootstrap_not_allowed',
-                'message' => __('Peak Publisher bootstrap code must be removed before deploying to wordpress.org.', 'peak-publisher'),
+                'message' => __('Peak Publisher bootstrap code must be removed before publishing on wordpress.org.', 'peak-publisher'),
             ];
         }
         return $blockers;
@@ -1043,7 +1043,7 @@ class UploadWorkflow {
         }
 
         if (!empty($target['pre_deploy_import']['required'])) {
-            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'));
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before publishing this ZIP.', 'peak-publisher'));
         }
 
         $validation = is_array($target['target_validation'] ?? null) ? $target['target_validation'] : [];
@@ -1067,11 +1067,11 @@ class UploadWorkflow {
         // Last gate before the irreversible SVN deploy: deliberately re-validates the target state
         // that resolve_finalize_target() already checked in this request.
         if (empty($target['available'])) {
-            return $this->upload_error((string) ($target['blocking_reason'] ?? 'target_unavailable'), __('wordpress.org deploy target is not available.', 'peak-publisher'));
+            return $this->upload_error((string) ($target['blocking_reason'] ?? 'target_unavailable'), __('The wordpress.org publish destination is not available.', 'peak-publisher'));
         }
 
         if (!empty($target['pre_deploy_import']['required'])) {
-            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'));
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before publishing this ZIP.', 'peak-publisher'));
         }
 
         $validation = is_array($target['target_validation'] ?? null) ? $target['target_validation'] : [];
@@ -1080,13 +1080,13 @@ class UploadWorkflow {
             return [
                 'status' => 'error',
                 'code' => 'target_validation_failed',
-                'message' => __('wordpress.org deploy validation failed.', 'peak-publisher'),
+                'message' => __('wordpress.org publish validation failed.', 'peak-publisher'),
                 'errors' => $blocking_errors,
             ];
         }
 
         if (!in_array((string) ($target['deploy_mode'] ?? ''), ['trunk_and_tag', 'tag_only'], true)) {
-            return $this->upload_error('wporg_deploy_state_invalid', __('Invalid wordpress.org deploy mode.', 'peak-publisher'));
+            return $this->upload_error('wporg_deploy_state_invalid', __('Invalid wordpress.org publish mode.', 'peak-publisher'));
         }
 
         // Validate the target slug, account, and version
@@ -1109,7 +1109,7 @@ class UploadWorkflow {
         $marker_id = (int) ($target['existing_plugin_id'] ?? 0);
         $marker = $marker_id > 0 ? get_post($marker_id) : null;
         if (!$marker instanceof \WP_Post || !is_wporg_plugin($marker) || $marker->post_name !== $slug) {
-            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'));
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before publishing this ZIP.', 'peak-publisher'));
         }
 
         // Deploy the prepared upload directory that analyze already validated
@@ -1133,7 +1133,7 @@ class UploadWorkflow {
         } catch (WporgSvnException $e) {
             return $this->upload_error($e->get_error_code(), $e->getMessage());
         } catch (\Throwable $e) {
-            return $this->upload_error('wporg_deploy_failed', __('wordpress.org SVN deploy failed.', 'peak-publisher'));
+            return $this->upload_error('wporg_deploy_failed', __('Publishing to wordpress.org SVN failed.', 'peak-publisher'));
         }
 
         // Mirror the committed tag into local release posts

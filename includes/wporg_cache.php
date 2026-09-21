@@ -399,7 +399,7 @@ function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version
         if (!is_array($tag)) {
             return new \WP_Error(
                 'wporg_deployed_tag_not_found',
-                __('The deployed wordpress.org tag could not be read after commit.', 'peak-publisher'),
+                __('The published wordpress.org tag could not be read after commit.', 'peak-publisher'),
                 [ 'status' => 502 ]
             );
         }

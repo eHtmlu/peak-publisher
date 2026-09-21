@@ -92,9 +92,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         const naturalSuccessors = releaseContext.naturalSuccessors;
         const isNaturalSuccessor = releaseContext.isNaturalSuccessor;
         const deployModeText = isWporg && target.deploy_mode === 'trunk_and_tag'
-            ? __('Deploy mode: update trunk and tag in one SVN commit.', 'peak-publisher')
+            ? __('Publish mode: update trunk and tag in one SVN commit.', 'peak-publisher')
             : (isWporg && target.deploy_mode === 'tag_only'
-                ? __('Deploy mode: tag-only deploy. Trunk stays unchanged.', 'peak-publisher')
+                ? __('Publish mode: tag-only. Trunk stays unchanged.', 'peak-publisher')
                 : '');
         const withDeployMode = (desc) => deployModeText ? [desc, createElement('br'), deployModeText] : desc;
 
@@ -240,7 +240,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 bootstrapFile && {
                     title: __('Bootstrap code must be removed', 'peak-publisher'),
                     type: 'error',
-                    desc: sprintf(__('Found in %s. Peak Publisher bootstrap code must be removed before deploying to wordpress.org.', 'peak-publisher'), bootstrapFile),
+                    desc: sprintf(__('Found in %s. Peak Publisher bootstrap code must be removed before publishing on wordpress.org.', 'peak-publisher'), bootstrapFile),
                 },
             ];
         }

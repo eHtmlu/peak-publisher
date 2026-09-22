@@ -1106,20 +1106,20 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         zipProgress !== false && createElement('div', { className: 'pblsh--progress' },
             filename && createElement('div', { className: 'pblsh--file-info' }, filename),
             createElement('div', { className: 'pblsh--progress__bar', style: { '--percentage': zipProgress + '%' } }),
-            createElement('div', { className: 'pblsh--progress__label' }, __('creating zip …', 'peak-publisher'), ' ', Math.floor(zipProgress), '%'),
+            createElement('div', { className: 'pblsh--progress__label' }, __('creating zip…', 'peak-publisher'), ' ', Math.floor(zipProgress), '%'),
         ),
         uploadProgress !== false && createElement('div', { className: 'pblsh--progress' },
             filename && createElement('div', { className: 'pblsh--file-info' }, filename),
             createElement('div', { className: 'pblsh--progress__bar', style: { '--percentage': uploadProgress + '%' } }),
-            createElement('div', { className: 'pblsh--progress__label' }, __('uploading …', 'peak-publisher'), ' ', Math.floor(uploadProgress), '%'),
+            createElement('div', { className: 'pblsh--progress__label' }, __('uploading…', 'peak-publisher'), ' ', Math.floor(uploadProgress), '%'),
         ),
         isProcessing && createElement('div', { className: 'pblsh--processing' },
             createElement('div', { className: 'pblsh--loading__spinner' }),
             createElement('div', { className: 'pblsh--processing__text' }, (
-                processPhase === 'upload_prepare' ? __('validating upload …', 'peak-publisher') :
-                processPhase === 'unpack' ? __('unpacking data …', 'peak-publisher') :
-                processPhase === 'analyze' ? __('analyzing data …', 'peak-publisher') :
-                __('loading results …', 'peak-publisher')
+                processPhase === 'upload_prepare' ? __('validating upload…', 'peak-publisher') :
+                processPhase === 'unpack' ? __('unpacking data…', 'peak-publisher') :
+                processPhase === 'analyze' ? __('analyzing data…', 'peak-publisher') :
+                __('loading results…', 'peak-publisher')
             )),
         ),
     );

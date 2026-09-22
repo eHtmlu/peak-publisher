@@ -1779,6 +1779,10 @@
 
 .pblsh--table__name-cell {
     min-width: 12.5rem; /* 200px */
+    /* Lets the auto table layout shrink this column below its content width,
+       so the nowrap slug's ellipsis can kick in instead of stretching the
+       table past its container. */
+    max-width: 1px;
     word-break: break-word;
     white-space: normal;
 }
@@ -2270,10 +2274,6 @@
 }
 
 .pblsh--settings--main__section-content .components-base-control:last-child {
-    /* Lets the auto table layout shrink this column below its content width,
-       so the nowrap slug's ellipsis can kick in instead of stretching the
-       table past its container. */
-    max-width: 1px;
     margin-bottom: 0;
 }
 

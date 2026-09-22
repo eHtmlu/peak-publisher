@@ -3,8 +3,9 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { __ } = wp.i18n;
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
-    const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
+    const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
     const { showAlert, getSvgIcon } = Pblsh.Utils;
+    const { ChannelPath } = Pblsh.Components;
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
@@ -32,12 +33,6 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
         try { return !!select('pblsh/plugins').hasLoadedList(); } catch (e) { return false; }
     }, []);
     const showInstallations = !!(serverSettings && serverSettings.count_plugin_installations);
-    const getHostingLabel = (plugin) => plugin && plugin.hosting_type === 'wporg'
-        ? __('WordPress.org', 'peak-publisher')
-        : __('Self-hosted', 'peak-publisher');
-    const getHostingClass = (plugin) => plugin && plugin.hosting_type === 'wporg'
-        ? 'pblsh--hosting-badge pblsh--hosting-badge--wporg'
-        : 'pblsh--hosting-badge pblsh--hosting-badge--self-hosted';
 
     return createElement('div', { className: 'pblsh--list' },
         !hasLoadedList
@@ -54,7 +49,6 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                             createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__icon-header' }),
                             createElement('th', { className: 'pblsh--table__name-header' }, __('Plugin Name', 'peak-publisher')),
-                            createElement('th', { className: 'pblsh--table__slug-header' }, __('Slug', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Latest Version', 'peak-publisher')),
                             showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher'))
@@ -90,13 +84,8 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                 createElement('td', { className: 'pblsh--table__name-cell' },
                                     createElement('div', { className: 'pblsh--table__name-content' },
                                         createElement('strong', null, plugin.name),
-                                        createElement('span', { className: getHostingClass(plugin) }, getHostingLabel(plugin))
+                                        createElement(ChannelPath, { channel: plugin.hosting_type, slug: plugin.slug })
                                     )
-                                ),
-                                createElement('td', { className: 'pblsh--table__slug-cell' },
-                                    createElement(Tooltip, { text: plugin.slug },
-                                        createElement('code', null, plugin.slug)
-                                    ),
                                 ),
                                 createElement('td', { className: 'pblsh--table__version-cell' },
                                     plugin.version

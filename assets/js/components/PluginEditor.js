@@ -16,10 +16,6 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const showInstallations = !!(serverSettings && serverSettings.count_plugin_installations);
     const isWporg = pluginData && pluginData.hosting_type === 'wporg';
-    const hostingLabel = isWporg ? __('WordPress.org', 'peak-publisher') : __('Self-hosted', 'peak-publisher');
-    const hostingClass = isWporg
-        ? 'pblsh--hosting-badge pblsh--hosting-badge--wporg'
-        : 'pblsh--hosting-badge pblsh--hosting-badge--self-hosted';
 
     // ---- Asset state ----
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
@@ -464,9 +460,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 createElement('div', null,
                                     createElement('h3', { className: 'pblsh--plugin-title' }, pluginData?.name),
                                     createElement('div', { className: 'pblsh--plugin-meta' },
-                                        createElement('strong', null, __('Slug', 'peak-publisher')),
-                                        createElement('code', null, safe(pluginData?.slug) || '—'),
-                                        createElement('span', { className: hostingClass }, hostingLabel),
+                                        createElement(Pblsh.Components.ChannelPath, { channel: pluginData?.hosting_type, slug: safe(pluginData?.slug) || '—' }),
                                     ),
                                 ),
                             ),

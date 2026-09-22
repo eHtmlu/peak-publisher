@@ -8,7 +8,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const { getSvgIcon, getFaqUrl } = Pblsh.Utils;
     const { getReleaseContext, getReleasePresentation } = Pblsh.UploadResultUtils;
     const { useUploadChecks } = Pblsh.Hooks;
-    const { WporgAccessGate } = Pblsh.Components;
+    const { WporgAccessGate, Checklist, NoticeBox } = Pblsh.Components;
 
     const fileInputRef = useRef(null);
     const dialogRef = useRef(null);
@@ -628,29 +628,10 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     }
 
     function renderChecklist(items) {
-        const checkTypes = {
-            ok: { className: 'pblsh--check pblsh--check--ok', icon: 'check_bold' },
-            info: { className: 'pblsh--check pblsh--check--info', icon: 'information_outline' },
-            error: { className: 'pblsh--check pblsh--check--error', icon: 'close_thick' },
-        };
         const normalizedItems = items.flat(Infinity).filter(Boolean);
         if (normalizedItems.length === 0) return null;
         return createElement('div', { className: 'pblsh--upload-result__checks' },
-            createElement('ul', { className: 'pblsh--checklist' },
-                normalizedItems.map((item, index) => {
-                    const checkType = checkTypes[item.type] || checkTypes.error;
-                    return createElement('li', {
-                        key: index,
-                        className: checkType.className,
-                    },
-                        createElement('span', { className: 'pblsh--check__icon' }, getSvgIcon(checkType.icon, { size: 24 })),
-                        createElement('span', { className: 'pblsh--check__text' },
-                            createElement('span', { className: 'pblsh--check__title' }, item.title),
-                            item.desc && createElement('span', { className: 'pblsh--check__desc' }, item.desc),
-                        ),
-                    );
-                }),
-            ),
+            createElement(Checklist, { items: normalizedItems }),
         );
     }
 
@@ -672,6 +653,10 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         classNames = [],
         header,
         identity = null,
+        // Pinned error strip between body and footer: errors are dialog state,
+        // not body content — visible in every scroll position and right next
+        // to the action they belong to.
+        notices = null,
         body = null,
         checklistItems = null,
         actions = [],
@@ -687,6 +672,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             renderUploadResultHeader(header),
             identity,
             bodyContent.length > 0 && createElement('div', { className: 'pblsh--upload-result__body' }, ...bodyContent),
+            notices,
             visibleActions.length > 0 && createElement('footer', { className: 'pblsh--upload-result__actions' }, ...visibleActions),
         );
     }
@@ -990,6 +976,29 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         });
     }
 
+    // Process errors (failed server phases) are not facts of the upload — they
+    // render as pinned flush notices between body and footer, not as checklist
+    // rows. Blocker codes are excluded: those have their dedicated checklist
+    // items. Message leads, the machine code stays visible for support cases.
+    function renderResultErrorNotices(resultErrors, blockers) {
+        const blockerCodes = (Array.isArray(blockers) ? blockers : []).map((blocker) => blocker?.code).filter(Boolean);
+        const errors = (Array.isArray(resultErrors) ? resultErrors : [])
+            .filter((error) => error && !blockerCodes.includes(error.code));
+        if (errors.length === 0) {
+            return null;
+        }
+        return errors.map((error, index) => createElement(NoticeBox, {
+            key: index,
+            variant: 'error',
+            className: 'pblsh--notice-box--flush',
+            error: {
+                code: error?.code || null,
+                // A phase error without a message still needs a human line.
+                message: error?.message || __('An unknown error occurred.', 'peak-publisher'),
+            },
+        }));
+    }
+
     function buildUploadActions(context, checklistItems) {
         const { meta, uploadId, targetKey, isWporg, target, validation, blockers, presentation } = context;
         const checksPass = Array.isArray(checklistItems)
@@ -1013,13 +1022,15 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     function buildUploadValidationModel(result, meta, targetKey) {
         const context = getUploadCheckContext(result, meta, targetKey);
-        const { pluginData, isWporg, releaseContext, presentation } = context;
+        const { pluginData, isWporg, releaseContext, presentation, resultErrors } = context;
         const pendingReleaseImport = isWporg && meta.plugin_ok && context.preDeployRequired && !meta.existing_plugin && !releaseContext.hasReleaseData;
         const gate = isWporg ? renderWporgGate(context) : null;
         const checklistItems = gate ? null : uploadChecks.buildUploadCheckItems(context);
 
         return {
             classNames: pendingReleaseImport ? [] : presentation.classNames,
+            // The gate owns its error display (WporgAccessGate).
+            notices: gate ? null : renderResultErrorNotices(resultErrors, context.blockers),
             identity: renderPublishPath(meta, context.uploadId),
             header: meta.plugin_ok ? {
                 headline: pluginData.Name,

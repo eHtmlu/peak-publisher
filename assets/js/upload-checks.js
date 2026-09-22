@@ -487,22 +487,10 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         };
     }
 
-    function checkResultErrors(context) {
-        const blockerCodes = context.blockers.map((blocker) => blocker?.code).filter(Boolean);
-        return context.extraResultErrors
-            .filter((error) => error && !blockerCodes.includes(error.code))
-            .map((error) => ({
-                title: __('Error', 'peak-publisher'),
-                type: 'error',
-                desc: [
-                    error?.message || __('An unknown error occurred.', 'peak-publisher'),
-                    error?.code && createElement('br'),
-                    error?.code && createElement('code', null, error.code),
-                ],
-            }));
-    }
-
     function buildUploadCheckItems(context) {
+        // Facts of upload × destination only — process errors (failed server
+        // phases) are NOT checklist rows; they render as pinned error notices
+        // between body and footer (GlobalDropOverlay).
         return [
             context.meta.plugin_ok && [
                 checkPluginFile(context),
@@ -512,7 +500,6 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 checkWorkspaceArtifacts(context),
                 checkReadmeTxt(context),
             ],
-            checkResultErrors(context),
         ].flat(Infinity).filter(Boolean);
     }
 

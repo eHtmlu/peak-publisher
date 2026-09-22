@@ -904,7 +904,8 @@
     --release-color: var(--color-red);
 }
 
-.pblsh--upload-result--newplugin {
+.pblsh--upload-result--newplugin,
+.pblsh--upload-result--firstrelease {
     --release-color: var(--color-green);
     --release-color-text-percent: 65%;
 }
@@ -968,8 +969,11 @@
     color: var(--release-color-text);
 }
 
+/* Solid badges: the alarm (invalid) and the two identity moments — new plugin
+   and first release share the full-tone green deliberately. */
 .pblsh--upload-result--invalid .pblsh--upload-result__plugin__type,
-.pblsh--upload-result--newplugin .pblsh--upload-result__plugin__type {
+.pblsh--upload-result--newplugin .pblsh--upload-result__plugin__type,
+.pblsh--upload-result--firstrelease .pblsh--upload-result__plugin__type {
     color: #fff;
     background-color: color-mix(in srgb, var(--release-color) 70%, #000);
 }

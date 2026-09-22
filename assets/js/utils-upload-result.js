@@ -36,19 +36,16 @@ lodash.set(window, 'Pblsh.UploadResultUtils', (() => {
         }
 
         const isNaturalSuccessor = naturalSuccessors.includes(pluginVersion.join('.'));
+        // The release kind is a relation to the previous release — without one
+        // there is nothing to classify (a release-less plugin is in its
+        // new-plugin moment instead; see getReleasePresentation).
         const releaseKind = {
-            major: meta.existing_plugin && (
-                (previousRelease && pluginVersion[0] > previousReleaseVersion[0]) ||
-                (!previousRelease && pluginVersion[1] === 0 && pluginVersion[2] === 0)
-            ),
-            minor: meta.existing_plugin && (
-                (previousRelease && pluginVersion[0] === previousReleaseVersion[0] && pluginVersion[1] > previousReleaseVersion[1]) ||
-                (!previousRelease && pluginVersion[1] > 0 && pluginVersion[2] === 0)
-            ),
-            patch: meta.existing_plugin && (
-                (previousRelease && pluginVersion[0] === previousReleaseVersion[0] && pluginVersion[1] === previousReleaseVersion[1] && pluginVersion[2] > previousReleaseVersion[2]) ||
-                (!previousRelease && pluginVersion[2] > 0)
-            ),
+            major: meta.existing_plugin && previousRelease
+                && pluginVersion[0] > previousReleaseVersion[0],
+            minor: meta.existing_plugin && previousRelease
+                && pluginVersion[0] === previousReleaseVersion[0] && pluginVersion[1] > previousReleaseVersion[1],
+            patch: meta.existing_plugin && previousRelease
+                && pluginVersion[0] === previousReleaseVersion[0] && pluginVersion[1] === previousReleaseVersion[1] && pluginVersion[2] > previousReleaseVersion[2],
         };
         releaseKind.unknown = meta.existing_plugin && !releaseKind.major && !releaseKind.minor && !releaseKind.patch;
 
@@ -72,8 +69,15 @@ lodash.set(window, 'Pblsh.UploadResultUtils', (() => {
         let state = 'invalid';
 
         if (meta.plugin_ok) {
+            // Both identity moments share the solid green — the color carries
+            // the moment, the wording carries the truth: NEW PLUGIN creates an
+            // entry that exists nowhere yet, FIRST RELEASE gives an already
+            // existing entry (imported wporg marker, or a release-less plugin)
+            // its first content.
             if (!meta.existing_plugin) {
                 state = 'new_plugin';
+            } else if (!releaseContext.hasReleaseData) {
+                state = 'first_release';
             } else if (existingRelease) {
                 state = 'replace_release';
             } else if (releaseKind.major) {
@@ -97,6 +101,11 @@ lodash.set(window, 'Pblsh.UploadResultUtils', (() => {
                 classNames: ['pblsh--upload-result--newplugin'],
                 type: __('New Plugin', 'peak-publisher'),
                 submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add Plugin', 'peak-publisher'),
+            },
+            first_release: {
+                classNames: ['pblsh--upload-result--firstrelease'],
+                type: __('First Release', 'peak-publisher'),
+                submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add First Release', 'peak-publisher'),
             },
             replace_release: {
                 classNames: ['pblsh--upload-result--releasereplacement'],

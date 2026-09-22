@@ -14,6 +14,8 @@
     --color-blue: #4180ff;
     --color-gray: #ccd6e0;
     --color-red: #dc3232;
+    --color-orange: #f29309;
+    --color-gold: #d4a017;
     --color-purple: #7a00df;
 
     --index-color-complete: var(--color-green);
@@ -26,6 +28,11 @@
 
     --border-color-light: #e5e7eb;
     --border-color-medium: #ddd;
+    /* Row-list rule system: the outer frame reads stronger than the rules
+       between rows. currentColor-based, so the mixes resolve against the
+       list's own text color at the point of use. */
+    --border-color-row-outer: color-mix(in srgb, currentColor 30%, transparent);
+    --border-color-row-between: color-mix(in srgb, currentColor 15%, transparent);
 
     --content-padding: var(--content-padding-block) var(--content-padding-inline);
 
@@ -286,6 +293,54 @@
     overflow: hidden;
     display: flex;
     align-items: center;
+}
+
+/* Plugin-header rundown — a two-column definition list shared by the
+   self-hosted "Header" step (required headers) and the recommended-headers
+   tip: the header names form a scannable column, each explanation sits beside
+   its name. Each dt/dd pair lives in a group div so the separator line can run
+   across both columns; subgrid keeps the columns aligned across groups. */
+.pblsh--plugin-headers {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0 1rem;
+}
+
+/* Rules follow the row-list system also used by the channel-choice facts:
+   outer frame around the list, softer rules between the groups. */
+.pblsh--plugin-headers__group {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: baseline;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border-color-row-between);
+}
+
+.pblsh--plugin-headers__group:first-child {
+    border-top-color: var(--border-color-row-outer);
+}
+
+.pblsh--plugin-headers__group:last-child {
+    border-bottom: 1px solid var(--border-color-row-outer);
+}
+
+.pblsh--plugin-headers__term {
+    margin: 0;
+}
+
+.pblsh--plugin-headers__desc {
+    margin: 0;
+}
+
+/* Content flows — elements keep their own margins, only the edges are trimmed. */
+.pblsh--plugin-headers__desc > :first-child {
+    margin-top: 0;
+}
+
+.pblsh--plugin-headers__desc > :last-child {
+    margin-bottom: 0;
 }
 
 .pblsh--addition-process .pblsh--step {
@@ -602,10 +657,44 @@
     }
 }
 
-.pblsh--ul {
+/* Real content lists opt in to the bullet look — layout lists keep the
+   wp-admin reset (a bare ul selector would style every component's list from
+   outside). Owned base; pblsh--arrow-list varies only the marker. */
+.pblsh--content-list {
     list-style: initial;
-    list-style-type: "→ ";
     padding-inline-start: 1.5em;
+}
+
+.pblsh--content-list.pblsh--arrow-list {
+    list-style-type: "→ ";
+}
+
+/* Real content tables — the same opt-in as content lists, for facts in
+   flowing text (tips). Sized to its content; the paragraph rhythm around it.
+   Rules follow the row-list system: outer frame above and below, a softer
+   rule between the rows, no vertical rules. */
+.pblsh--content-table {
+    margin: 1em 0;
+    border-collapse: collapse;
+}
+
+.pblsh--content-table th,
+.pblsh--content-table td {
+    padding: 0.5rem 1rem;
+    text-align: center;
+    border-top: 1px solid var(--border-color-row-between);
+}
+
+.pblsh--content-table th {
+    font-weight: 600;
+}
+
+.pblsh--content-table > :first-child > tr:first-child > * {
+    border-top-color: var(--border-color-row-outer);
+}
+
+.pblsh--content-table > :last-child > tr:last-child > * {
+    border-bottom: 1px solid var(--border-color-row-outer);
 }
 
 .pblsh--controls {
@@ -1173,7 +1262,146 @@
     }
 }
 
-/* Validation checklist */
+/* Shared <time> affordance (Pblsh.Utils.getTimeTooltipProps) — the dotted
+   underline signals the precise localized moment in the native tooltip. */
+.pblsh--time-tooltip {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
+/* Shared tinted message box (NoticeBox component) — icon + optional title +
+   content. Info (blue) and warning (amber) mean the same wherever they appear;
+   spacing towards the surroundings stays with the caller. */
+.pblsh--notice-box {
+    /* The paragraph rhythm — the box is a block in flowing content; layout
+       containers that own their spacing zero this via a context class. */
+    margin: 1em 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.75rem;
+    align-items: start;
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--pblsh-notice-color);
+    border-left-width: 0.5rem; /* 8px — the WP admin notice accent bar */
+    background: color-mix(in srgb, var(--pblsh-notice-color) 10%, #fff);
+    /* Font size and line height are inherited on purpose — the WordPress admin
+       default (13px) is the app's de-facto text size. */
+}
+
+/* The variants only pick the color: every colored part (bar, border, tint, icon)
+   derives from this one property, so overriding it recolors the whole box. */
+.pblsh--notice-box--info {
+    --pblsh-notice-color: var(--color-blue);
+}
+
+.pblsh--notice-box--warning {
+    /* The palette's warning orange — deliberately not WP's #ffb900 amber, which
+       is too light to read as bar, border, or icon on light ground. */
+    --pblsh-notice-color: var(--color-orange);
+}
+
+.pblsh--notice-box--error {
+    --pblsh-notice-color: var(--color-red);
+}
+
+/* Flush: the box as a pinned, edge-to-edge strip (e.g. the upload result's
+   error slot between body and footer) — no own frame, the accent bar stays
+   as the signature; the neighbours provide the separating edges. */
+.pblsh--notice-box--flush {
+    margin: 0;
+    border-radius: 0;
+    border-block: 0;
+    border-right: 0;
+}
+
+.pblsh--notice-box__icon {
+    line-height: 1;
+    color: var(--pblsh-notice-color);
+}
+
+/* The title is the box's headline line; the gap towards the text comes from
+   the following paragraph's own margin. */
+.pblsh--notice-box__title {
+    display: block;
+}
+
+/* Content flows: elements keep their own margins (complex content may need
+   individual spacing); the container only trims the edges. */
+.pblsh--notice-box__content > :first-child {
+    margin-top: 0;
+}
+
+.pblsh--notice-box__content > :last-child {
+    margin-bottom: 0;
+}
+
+/* The machine code right beneath the human message (`error.code`) — muted support detail. */
+.pblsh--notice-box__code {
+    color: #646970;
+    font-size: 0.75rem;
+}
+
+/* Shared help-link pattern (FaqLink and TipLink components) — small icon plus a
+   bold linked line: FaqLink opens the plugin FAQ in a new tab, TipLink opens an
+   in-app tip dialog. Link color without underline; underline appears on
+   hover/focus (explicit on the text span — an inline-flex link does not draw the
+   parent's text-decoration through its flex items). */
+.pblsh--tip-link {
+    /* TipLink is a <button> — strip the native chrome before the shared look. */
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    cursor: pointer;
+}
+
+.pblsh--faq-link,
+.pblsh--tip-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    text-decoration: none;
+    font-weight: 600;
+    /* Muted slate-blue mix of the plugin blue and the admin text gray — still
+       reads as interactive, but does not compete with real actions. */
+    color: color-mix(in srgb, var(--color-blue) 50%, #646970);
+}
+
+.pblsh--faq-link:hover,
+.pblsh--faq-link:focus-visible,
+.pblsh--tip-link:hover,
+.pblsh--tip-link:focus-visible {
+    color: var(--color-blue);
+}
+
+.pblsh--faq-link__icon,
+.pblsh--tip-link__icon {
+    display: inline-flex;
+    line-height: 1;
+}
+
+/* The tip mark's two-tone bulb — glowing glass over a metal-gray base; the
+   tips' recognition mark, stable on hover. */
+.pblsh--tip-bulb__glass {
+    fill: #ffd207;
+}
+
+.pblsh--tip-bulb__base {
+    fill: #a7aaad;
+}
+
+.pblsh--faq-link:hover .pblsh--faq-link__text,
+.pblsh--faq-link:focus-visible .pblsh--faq-link__text,
+.pblsh--tip-link:hover .pblsh--tip-link__text,
+.pblsh--tip-link:focus-visible .pblsh--tip-link__text {
+    text-decoration: underline;
+}
+
+/* Check rows — the shared base rendered by the Checklist component: the upload
+   result checklist and the wporg import facts use the same anatomy. */
 
 .pblsh--upload-result__body {
     flex: 1;
@@ -1211,8 +1439,9 @@
 }
 
 .pblsh--check--ok .pblsh--check__icon { color: var(--index-color-complete); }
-.pblsh--check--warn .pblsh--check__icon { color: #ffb900; }
-.pblsh--check--error .pblsh--check__icon { color: #dc3232; }
+.pblsh--check--celebrate .pblsh--check__icon { color: var(--color-gold); }
+.pblsh--check--warn .pblsh--check__icon { color: var(--color-orange); }
+.pblsh--check--error .pblsh--check__icon { color: var(--color-red); }
 .pblsh--check--info .pblsh--check__icon { color: inherit; }
 
 .pblsh--check__icon svg {
@@ -1303,6 +1532,114 @@
 }
 .pblsh--modal::backdrop {
     background: rgba(0,0,0,0.7);
+}
+
+/* Tip dialog — the modal opened by a TipLink: the header stays put, the body
+   scrolls when a tip outgrows the cap (the upload overlay's dialog anatomy).
+   The height follows the content. */
+.pblsh--modal--tip {
+    width: calc(100% - 2rem);
+    max-width: 40rem; /* 640px */
+    max-height: calc(100% - 2rem);
+}
+
+.pblsh--modal--tip[open] {
+    display: flex;
+    flex-direction: column;
+}
+
+.pblsh--tip-dialog {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* Icon and close button stay pinned to the first title line even when the
+   title wraps. */
+.pblsh--tip-dialog__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+}
+
+/* Centered within the height of one title line, so the start alignment still
+   looks centered next to a single-line title. */
+.pblsh--tip-dialog__icon {
+    display: flex;
+    align-items: center;
+    height: 2rem; /* one title line */
+}
+
+/* The dialog owns its title styling — doubled class beats the admin's generic
+   .wrap h1 (0,1,1), which would otherwise leak its padding into the header.
+   Rendered at the admin page-title size: the open modal is its own document. */
+.pblsh--tip-dialog .pblsh--tip-dialog__title {
+    margin: 0;
+    padding: 0;
+    font-size: 1.4375rem; /* 23px — the admin page-title size */
+    font-weight: 400;
+    line-height: 2rem; /* 32px — one title line, matches the bulb icon */
+}
+
+.pblsh--tip-dialog__close {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    /* Tucked into the header padding so the button box keeps one identical
+       distance (1.125rem) to the top, right, and bottom edges. The symmetric
+       vertical pull also keeps the header at one title line and the button
+       centered on it. */
+    margin: -0.125rem -0.375rem -0.125rem auto;
+    width: 2.25rem; /* 36px */
+    height: 2.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    color: #646970;
+}
+
+.pblsh--tip-dialog__close:hover,
+.pblsh--tip-dialog__close:focus-visible {
+    background: #f0f0f1;
+    color: #1d2327;
+}
+
+.pblsh--tip-dialog__body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 1.5rem;
+    border-top: 1px solid var(--border-color-light);
+}
+
+/* Section headings inside a tip: clearly detached from the section above,
+   tight to their own text below (the following paragraph's top margin still
+   provides the minimum gap). Declared before the edge trimming, which shares
+   this specificity and must keep the last word for the first heading. */
+.pblsh--tip-dialog__body h2 {
+    margin: 2em 0 0.5em;
+}
+
+/* Content flows — elements keep their own margins, only the edges are trimmed. */
+.pblsh--tip-dialog__body > :first-child {
+    margin-top: 0;
+}
+
+.pblsh--tip-dialog__body > :last-child {
+    margin-bottom: 0;
+}
+
+
+/* Snippets in tips carry the app's code look independent of where the TipLink
+   is embedded. */
+.pblsh--tip-dialog__body pre {
+    margin: 0;
+    border-radius: 0.25rem;
+    overflow: hidden;
 }
 
 
@@ -1496,6 +1833,35 @@
     border-radius: 0.1875rem; /* 3px */
     font-size: 0.75rem; /* 12px */
     color: #666;
+}
+
+/* ChannelPath — the publish path in short (channel icon + slug), shared by
+   the plugin list and the editor header. */
+.pblsh--channel-path {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    /* As light as WCAG AA allows: ~4.5:1 on the row hover gray — do not
+       lighten further. */
+    color: #737373;
+    max-width: 100%;
+}
+
+.pblsh--channel-path__icon {
+    display: inline-flex;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+/* Bare like the upload overlay's publish path — no chip background. Always one
+   line: overlong slugs get an ellipsis, the tooltip carries the full slug. */
+.pblsh--channel-path code {
+    padding: 0;
+    background: transparent;
+    font-size: 0.75rem; /* 12px */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Version Column */

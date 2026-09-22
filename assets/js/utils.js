@@ -1,8 +1,74 @@
 
 lodash.set(window, 'Pblsh.Utils', {
 
+    // Placeholder for a stored wordpress.org password in REST payloads — must
+    // match the server's WPORG_PASSWORD_MASKED constant.
+    WPORG_PASSWORD_MASKED: '__MASKED__',
+
+    // Relative wording for a past moment ("just now" … "3 days ago"); beyond a
+    // month the absolute date reads better. Returns null for missing/invalid
+    // input so callers choose their own fallback.
+    formatRelativeTime: (value) => {
+        const { __, _n, sprintf } = wp.i18n;
+        const then = value ? new Date(value) : null;
+        if (!then || isNaN(then.getTime())) return null;
+        const minutes = Math.round((Date.now() - then.getTime()) / 60000);
+        if (minutes < 1) return __('just now', 'peak-publisher');
+        if (minutes < 60) return sprintf(_n('%d minute ago', '%d minutes ago', minutes, 'peak-publisher'), minutes);
+        const hours = Math.round(minutes / 60);
+        if (hours < 24) return sprintf(_n('%d hour ago', '%d hours ago', hours, 'peak-publisher'), hours);
+        const days = Math.round(hours / 24);
+        if (days <= 30) return sprintf(_n('%d day ago', '%d days ago', days, 'peak-publisher'), days);
+        return sprintf(__('on %s', 'peak-publisher'), then.toLocaleDateString());
+    },
+
+    // Props for a <time> element with the shared precise-moment affordance: the
+    // dotted underline (class pblsh--time-tooltip) signals the exact localized
+    // timestamp in the native tooltip. Empty props for missing/invalid input.
+    getTimeTooltipProps: (value) => {
+        const then = value ? new Date(value) : null;
+        if (!then || isNaN(then.getTime())) return {};
+        return {
+            className: 'pblsh--time-tooltip',
+            dateTime: then.toISOString(),
+            title: then.toLocaleString(),
+        };
+    },
+
+    // Channel presentation — one home for every surface that renders a channel
+    // (choice cards, destination rows, publish-path trigger). Label and
+    // description come from the server config (authoritative source:
+    // get_channel_texts()); the icon names are client-side.
+    getChannelLabel: (key) => (window.PblshData?.channelTexts || {})[key]?.label || key,
+    getChannelDescription: (key) => (window.PblshData?.channelTexts || {})[key]?.description || '',
+    getChannelIcon: (key) => ({ wporg: 'wordpress', self_hosted: 'server' })[key],
+
     // Get the deep link to one of the plugin's FAQ entries on wordpress.org (server-provided, see get_peak_publisher_faq_urls())
     getFaqUrl: (key) => (window.PblshData?.faqUrls || {})[key],
+    // Generated fallback icon for plugins without directory assets (mirrors the
+    // wordpress.org directory's geopattern fallback).
+    getGeopatternIconUrl: (slug) => (window.PblshData?.geopatternIconBase || '') + encodeURIComponent(slug) + '.svg',
+
+    // Copy text to the clipboard; falls back to the execCommand path where the
+    // Clipboard API is unavailable. Resolves to whether the copy succeeded.
+    copyText: async (text) => {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch (e) {}
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return ok;
+    },
 
     // Show alert message (for errors and warnings)
     showAlert: (message, type = 'error') => {
@@ -82,6 +148,18 @@ lodash.set(window, 'Pblsh.Utils', {
             chart_line: 'M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z',
             information_outline: 'M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z',
             chat_alert: 'M12,3C17.5,3 22,6.58 22,11C22,15.42 17.5,19 12,19C10.76,19 9.57,18.82 8.47,18.5C5.55,21 2,21 2,21C4.33,18.67 4.7,17.1 4.75,16.5C3.05,15.07 2,13.13 2,11C2,6.58 6.5,3 12,3M11,14V16H13V14H11M11,12H13V6H11V12Z',
+            lock: 'M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z',
+            open_in_new: 'M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z',
+            help_circle_outline: 'M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z',
+            alert: 'M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2L1,21Z',
+            alert_outline: 'M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16Z',
+            alert_octagon_outline: 'M8.27,3L3,8.27V15.73L8.27,21H15.73L21,15.73V8.27L15.73,3H8.27M8.41,5H15.58L19,8.41V15.58L15.58,19H8.41L5,15.58V8.41L8.41,5M11,7H13V13H11V7M11,15H13V17H11V15Z',
+            account: 'M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z',
+            update: 'M21,10.12H14.22L16.96,7.3C14.23,4.6 9.81,4.5 7.08,7.2C4.35,9.91 4.35,14.28 7.08,17C9.81,19.7 14.23,19.7 16.96,17C18.32,15.65 19,14.08 19,12.1H21C21,14.08 20.12,16.65 18.36,18.39C14.85,21.87 9.15,21.87 5.64,18.39C2.14,14.92 2.11,9.28 5.62,5.81C9.13,2.34 14.76,2.34 18.27,5.81L21,3V10.12M12.5,8V12.25L16,14.33L15.28,15.54L11,13V8H12.5Z',
+            rocket_launch: 'M13.13 22.19L11.5 18.36C13.07 17.78 14.54 17 15.9 16.09L13.13 22.19M5.64 12.5L1.81 10.87L7.91 8.1C7 9.46 6.22 10.93 5.64 12.5M21.61 2.39C21.61 2.39 16.66 .269 11 5.93C8.81 8.12 7.5 10.53 6.65 12.64C6.37 13.39 6.56 14.21 7.11 14.77L9.24 16.89C9.79 17.45 10.61 17.63 11.36 17.35C13.5 16.53 15.88 15.19 18.07 13C23.73 7.34 21.61 2.39 21.61 2.39M14.54 9.46C13.76 8.68 13.76 7.41 14.54 6.63S16.59 5.85 17.37 6.63C18.14 7.41 18.15 8.68 17.37 9.46C16.59 10.24 15.32 10.24 14.54 9.46M8.88 16.53L7.47 15.12L8.88 16.53M6.24 22L9.88 18.36C9.54 18.27 9.21 18.12 8.91 17.91L4.83 22H6.24M2 22H3.41L8.18 17.24L6.76 15.83L2 20.59V22Z',
+            send: 'M2,21L23,12L2,3V10L17,12L2,14V21Z',
+            scale_balance: 'M12,3C10.73,3 9.6,3.8 9.18,5H3V7H4.95L2,14C1.53,16 3,17 5.5,17C8,17 9.56,16 9,14L6.05,7H9.18C9.5,7.85 10.15,8.5 11,8.82V20H2V22H22V20H13V8.82C13.85,8.5 14.5,7.85 14.82,7H17.95L15,14C14.53,16 16,17 18.5,17C21,17 22.56,16 22,14L19.05,7H21V5H14.82C14.4,3.8 13.27,3 12,3M12,5A1,1 0 0,1 13,6A1,1 0 0,1 12,7A1,1 0 0,1 11,6A1,1 0 0,1 12,5M5.5,10.25L7,14H4L5.5,10.25M18.5,10.25L20,14H17L18.5,10.25Z',
+            account_group: 'M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z',
         };
 
         const pathData = iconPaths[iconType] || iconPaths.cog;

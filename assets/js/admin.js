@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const { useState, useEffect, useRef, createElement, render } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
-    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings } = window.Pblsh.Components;
+    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
 
     // Permalink check — shown instead of the app when permalinks are set to "Plain"
@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', function() {
             ),
             createElement('div', { className: 'pblsh--permalink-notice' },
                 createElement('div', { className: 'pblsh--permalink-notice__icon' },
-                    Pblsh.Utils.getSvgIcon('chat_alert', { size: 48 })
+                    Pblsh.Utils.getSvgIcon('alert_outline', { size: 48 })
                 ),
                 createElement('h3', { className: 'pblsh--permalink-notice__title' },
                     __('Pretty Permalinks Required', 'peak-publisher')
@@ -358,7 +358,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 createElement(Settings, {
                     onClose: closeSettings,
                 })
-            )
+            ),
+
+            // Tip dialog host — opened via the 'pblsh:open-tip' event from TipLink
+            createElement(TipDialog)
         );
     };
 

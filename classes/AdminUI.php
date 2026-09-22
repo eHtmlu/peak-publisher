@@ -59,6 +59,7 @@ class AdminUI {
         // Define all scripts to enqueue (slugs will be auto-generated from file paths)
         $script_files = [
             'utils.js',
+            'tips.js',
             'utils-upload.js',
             'utils-upload-result.js',
             'upload-checks.js',
@@ -69,6 +70,11 @@ class AdminUI {
             //'components/ListManager.js',
             //'components/ComboboxControl.js',
             //'components/TriStateCheckboxControl.js',
+            'components/Checklist.js',
+            'components/FaqLink.js',
+            'components/TipLink.js',
+            'components/ChannelPath.js',
+            'components/NoticeBox.js',
             'components/PluginList.js',
             //'components/SuccessMessage.js',
             'components/PluginEditor.js',
@@ -168,6 +174,9 @@ class AdminUI {
                 'permalinkSettingsUrl' => admin_url('options-permalink.php'),
                 'wporgImportChunkSize' => PBLSH_WPORG_IMPORT_CHUNK_SIZE,
                 'faqUrls' => get_peak_publisher_faq_urls(),
+                // Icon fallback for plugins without directory assets — the endpoint
+                // generates the pattern purely from the slug in the URL.
+                'geopatternIconBase' => geopattern_icon_base_url(),
                 'assetSlots' => AssetManager::get_slots(),
                 'channelTexts' => get_channel_texts(),
                 'i18n' => [

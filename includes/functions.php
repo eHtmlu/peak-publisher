@@ -486,9 +486,15 @@ function get_geopattern_icon_url( $post = null, ?string $color = null ): string 
     }
 
     // The slug + color combine to form the cache buster, like on wordpress.org.
-    $url = rest_url( 'pblsh/v1/plugins/geopattern-icon/' . $plugin->post_name . $color . '.svg' );
+    return geopattern_icon_base_url() . $plugin->post_name . $color . '.svg';
+}
 
-    return $url;
+
+/**
+ * Base URL of the public geopattern-icon endpoint (route registered in PublicAPI).
+ */
+function geopattern_icon_base_url(): string {
+    return rest_url( 'pblsh/v1/plugins/geopattern-icon/' );
 }
 
 

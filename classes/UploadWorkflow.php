@@ -1114,6 +1114,16 @@ class UploadWorkflow {
             return $this->upload_error('wporg_deploy_failed', __('Publishing to wordpress.org SVN failed.', 'peak-publisher'));
         }
 
+        // Deploy outcome, recorded where it becomes known — the mirror post below is regenerated
+        // from SVN and cannot tell how the tag got there.
+        $data['hosting_type_resolved'] = 'wporg';
+        $data['wporg_deploy'] = [
+            'username' => $username,
+            'deploy_mode' => (string) $target['deploy_mode'],
+            'revision' => (int) ($deploy_result['revision'] ?? 0),
+            'touched_trunk' => !empty($deploy_result['touched_trunk']),
+        ];
+
         // Mirror the committed tag into local release posts
         $release_id = sync_wporg_deployed_release_post($marker, $version);
         if (is_wp_error($release_id)) {
@@ -1127,6 +1137,10 @@ class UploadWorkflow {
                 'plugin_id' => (int) $marker->ID,
             ];
         }
+
+        // The upload state is the forensic record of this deploy. It lives in post meta because the
+        // mirror post's content is regenerated from SVN by the tag sync and must stay that way.
+        update_post_meta((int) $release_id, '_pblsh_upload_state', wp_slash(json_encode($data)));
 
         // Invalidate the marker cache and remove upload temp files
         invalidate_wporg_plugin_cache((int) $marker->ID);

@@ -1,14 +1,14 @@
 // GlobalDropOverlay Component - handles app-wide drag & drop upload
 lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUploadContext = {} } = {}) => {
-    const { __ } = wp.i18n;
+    const { __, _n } = wp.i18n;
     const sprintf = wp.i18n.sprintf ?? window.sprintf;
-    const { useState, useEffect, useRef, createElement, createInterpolateElement } = wp.element;
-    const { Button, TextControl } = wp.components;
+    const { useState, useEffect, useRef, createElement } = wp.element;
+    const { Button, TextControl, Spinner } = wp.components;
     const { useSelect } = wp.data;
-    const { getSvgIcon, getFaqUrl } = Pblsh.Utils;
+    const { getSvgIcon, getChannelLabel, getChannelDescription, getChannelIcon } = Pblsh.Utils;
     const { getReleaseContext, getReleasePresentation } = Pblsh.UploadResultUtils;
     const { useUploadChecks } = Pblsh.Hooks;
-    const { WporgAccessGate, Checklist, NoticeBox } = Pblsh.Components;
+    const { WporgImportFacts, WporgAccountForm, ChannelChoiceCards, Checklist, NoticeBox } = Pblsh.Components;
 
     const fileInputRef = useRef(null);
     const dialogRef = useRef(null);
@@ -21,11 +21,16 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const [uploadProgress, setUploadProgress] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [processPhase, setProcessPhase] = useState('');
+    // True only while the wporg import request itself runs — the import
+    // signals (busy label, stripes) must not fire for other processing.
+    const importRunning = isProcessing && processPhase === 'wporg_import';
     const [validationResult, setValidationResult] = useState(null);
     const [filename, setFilename] = useState('');
     const [destinationPanelOpen, setDestinationPanelOpen] = useState(false);
     const [slugEditValue, setSlugEditValue] = useState('');
     const [slugEditError, setSlugEditError] = useState('');
+    // Focus target when a failed slug change reopens the destination panel.
+    const slugEditInputRef = useRef(null);
     const [selectedHostingType, setSelectedHostingType] = useState(null);
 
     // Owns the per-upload confirmation decisions and builds the checklist items (upload-checks.js).
@@ -335,16 +340,6 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         };
     }
 
-    const targetIcons = {
-        wporg: 'wordpress',
-        self_hosted: 'server',
-    };
-
-    // Channel display texts live in the static PblshData config (authoritative source:
-    // get_channel_texts()) — upload state and targets carry facts only, never UI text.
-    // This also labels destinations of a channel that is currently not included in the targets.
-    const getChannelLabel = (channelKey) => PblshData?.channelTexts?.[channelKey]?.label || channelKey;
-    const getChannelDescription = (channelKey) => PblshData?.channelTexts?.[channelKey]?.description || '';
 
     function candidateDestination(candidate, channelKey) {
         // The single place a candidate becomes a destination object — the existing flag always
@@ -424,7 +419,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         // the channel cards) — so the row shows the channel description instead of a slug.
         return createElement('span', { className: 'pblsh--destination-option__text' },
             createElement('span', { className: 'pblsh--destination-option__headline' },
-                targetIcons[destination.hostingType] && createElement('span', { className: 'pblsh--destination-option__icon' }, getSvgIcon(targetIcons[destination.hostingType], { size: 18 })),
+                getChannelIcon(destination.hostingType) && createElement('span', { className: 'pblsh--destination-option__icon' }, getSvgIcon(getChannelIcon(destination.hostingType), { size: 18 })),
                 createElement('span', { className: 'pblsh--destination-option__label' }, getChannelLabel(destination.hostingType)),
                 createElement('span', { className: 'pblsh--destination-option__badge is-new' }, __('new plugin', 'peak-publisher')),
             ),
@@ -438,7 +433,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         // right-aligned (flex-wrap lets it break to its own line for long slugs).
         return createElement('span', { className: 'pblsh--destination-option__text' },
             createElement('span', { className: 'pblsh--destination-option__headline' },
-                targetIcons[destination.hostingType] && createElement('span', { className: 'pblsh--destination-option__icon' }, getSvgIcon(targetIcons[destination.hostingType], { size: 18 })),
+                getChannelIcon(destination.hostingType) && createElement('span', { className: 'pblsh--destination-option__icon' }, getSvgIcon(getChannelIcon(destination.hostingType), { size: 18 })),
                 createElement('span', { className: 'pblsh--destination-option__label' }, getChannelLabel(destination.hostingType)),
                 createElement('span', { className: 'pblsh--destination-option__sep', 'aria-hidden': 'true' }, getSvgIcon('arrow_right', { size: 16 })),
                 // Every rendered destination row carries a slug (assignment rows and panel
@@ -473,7 +468,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             });
             rows.push(...newRows);
 
-            return createElement('div', { className: 'pblsh--destination-choice pblsh--destination-choice--list', role: 'radiogroup', 'aria-label': __('Publish destination', 'peak-publisher') },
+            return createElement('div', { className: 'pblsh--destination-choice', role: 'radiogroup', 'aria-label': __('Publish destination', 'peak-publisher') },
                 createElement('h3', { className: 'pblsh--destination-choice__prompt' }, __('Where does this release belong?', 'peak-publisher')),
                 rows.map((destination) => {
                     // A channel can appear more than once here (existing row + new-plugin
@@ -483,7 +478,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                     const id = 'pblsh-upload-destination-' + value;
                     return createElement('label', {
                         key: destination.hostingType + ':' + destination.slug,
-                        className: 'pblsh--destination-choice__option pblsh--destination-option',
+                        className: 'pblsh--option-card pblsh--destination-choice__option pblsh--destination-option',
                         htmlFor: id,
                     },
                         createElement('input', {
@@ -524,73 +519,24 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
         // Channel mode: every destination is a new plugin — the decision is only the channel.
         // The slug resolves automatically afterwards and stays editable in the publish-path
-        // row, so the cards deliberately don't show it.
-        return createElement('div', { className: 'pblsh--destination-choice', role: 'radiogroup', 'aria-label': __('Publish destination', 'peak-publisher') },
-            destinations.length > 1 && createElement('h3', { className: 'pblsh--destination-choice__prompt' },
-                __('Choose the distribution channel', 'peak-publisher')),
-            destinations.map((destination) => {
-                // One card per channel in this mode — the hosting type is the natural id.
-                const id = 'pblsh-upload-destination-' + destination.hostingType;
-                return createElement('label', {
-                    key: destination.hostingType + ':' + destination.slug,
-                    className: 'pblsh--destination-choice__option',
-                    htmlFor: id,
-                },
-                    createElement('input', {
-                        id,
-                        type: 'radio',
-                        name: 'pblsh-upload-destination',
-                        value: destination.hostingType,
-                        checked: false,
-                        onChange: () => selectDestination(destination, meta, uploadId),
-                    }),
-                    targetIcons[destination.hostingType] && createElement('span', { className: 'pblsh--destination-choice__icon' }, getSvgIcon(targetIcons[destination.hostingType], { size: 24 })),
-                    createElement('span', { className: 'pblsh--destination-choice__label' }, getChannelLabel(destination.hostingType)),
-                    createElement('span', { className: 'pblsh--destination-choice__desc' }, getChannelDescription(destination.hostingType)),
-                );
-            }),
-            destinations.length > 1 && createElement('div', { className: 'pblsh--destination-choice__note' },
-                createElement('span', { className: 'pblsh--destination-choice__note-icon' }, getSvgIcon('information_outline', { size: 20 })),
-                createElement('div', { className: 'pblsh--destination-choice__note-text' },
-                    createElement('p', null,
-                        createElement('strong', null,
-                            __('Not sure?', 'peak-publisher')
-                        ),
-                    ),
-                    createElement('p', null,
-                        createInterpolateElement(
-                            sprintf(__('Choose <strong>%s</strong> if your plugin is free and open-source and you want it listed in the official WordPress plugin directory so that it can be easily found and installed by everyone — however, your plugin must first be <a>reviewed and approved</a> by the WordPress.org plugin team.', 'peak-publisher'), getChannelLabel('wporg')),
-                            {
-                                strong: createElement('strong'),
-                                a: createElement('a', { href: 'https://developer.wordpress.org/plugins/wordpress-org/', target: '_blank' }),
-                            }
-                        ),
-                    ),
-                    createElement('p', null,
-                        // Once license management exists, examples become useful again: "— for example premium, internal, or client plugins."
-                        createInterpolateElement(
-                            sprintf(__('Otherwise choose <strong>%1$s</strong> — releases are then distributed directly from your own server %2$s, without any review process, and go live instantly. Note that self-hosted plugins are also publicly accessible via the update API by default; you can restrict access with the IP/domain whitelist in the settings.', 'peak-publisher'), getChannelLabel('self_hosted'), window.location.hostname),
-                            {
-                                strong: createElement('strong'),
-                            }
-                        ),
-                    ),
-                    createElement('ul', { className: 'pblsh--destination-choice__note-links' },
-                        createElement('li', null,
-                            createElement('a', { href: getFaqUrl('bothChannels'), target: '_blank' }, __('Can I use both channels for one plugin?', 'peak-publisher')),
-                        ),
-                        createElement('li', null,
-                            createElement('a', { href: getFaqUrl('switchLater'), target: '_blank' }, __('Can I switch the channel later?', 'peak-publisher')),
-                        ),
-                    ),
-                ),
-            ),
-        );
+        // row, so the cards deliberately don't show it. Rendering is the shared channel
+        // cards component — the identical choice the add-new flow presents.
+        return createElement(ChannelChoiceCards, {
+            onSelect: (channelKey) => {
+                const destination = destinations.find((entry) => entry.hostingType === channelKey);
+                if (destination) {
+                    selectDestination(destination, meta, uploadId);
+                }
+            },
+        });
     }
 
     async function finalizeCreation(uploadId, opts = {}) {
         if (!uploadId) return;
         setIsProcessing(true);
+        // The operation declares what it is — a leftover re-resolution phase
+        // must not show the destination wait state during the finalize.
+        setProcessPhase('finalize');
         let res;
         try {
             res = await Pblsh.API.finalizeUpload(uploadId, opts);
@@ -697,6 +643,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     function renderSlugEdit(uploadId) {
         return createElement('div', { className: 'pblsh--slug-edit' },
             createElement(TextControl, {
+                ref: slugEditInputRef,
                 label: __('Custom plugin slug', 'peak-publisher'),
                 hideLabelFromVision: true,
                 placeholder: __('custom-slug', 'peak-publisher'),
@@ -729,7 +676,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         if (!active) return null;
         const destinations = getDestinations(meta);
         const rowContent = [
-            targetIcons[activeKey] && createElement('span', { className: 'pblsh--publish-path__trigger-icon' }, getSvgIcon(targetIcons[activeKey], { size: 18 })),
+            getChannelIcon(activeKey) && createElement('span', { className: 'pblsh--publish-path__trigger-icon' }, getSvgIcon(getChannelIcon(activeKey), { size: 18 })),
             createElement('span', null, getChannelLabel(activeKey)),
             createElement('span', { className: 'pblsh--publish-path__sep', 'aria-hidden': 'true' }, getSvgIcon('arrow_right', { size: 16 })),
             // The result gate only renders this row for a target with a resolved slug —
@@ -848,14 +795,25 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     async function runSlugSelection(upload_id, slug, selectHostingTypeOnSuccess = null) {
         setIsProcessing(true);
+        // The operation declares what it is — the result body shows the
+        // transitional wait state on this phase instead of the old slug's facts.
+        setProcessPhase('set_slug');
+        // The panel closes together with the switch to the wait state; a
+        // failure reopens it, because the error message lives under the slug
+        // input — and puts the focus back there for the correction.
+        setDestinationPanelOpen(false);
+        const reopenWithError = (message) => {
+            setSlugEditError(message || __('Could not set the plugin slug.', 'peak-publisher'));
+            setDestinationPanelOpen(true);
+            window.requestAnimationFrame(() => slugEditInputRef.current?.focus());
+        };
         try {
             const resSet = await Pblsh.API.uploadContinue(upload_id, 'set_slug', { slug });
             if (resSet?.status !== 'ok') {
-                setSlugEditError(resSet?.errors?.[0]?.message || __('Could not set the plugin slug.', 'peak-publisher'));
+                reopenWithError(resSet?.errors?.[0]?.message);
                 return;
             }
             const resResult = await Pblsh.API.uploadContinue(upload_id, 'result');
-            setDestinationPanelOpen(false);
             setSlugEditValue('');
             setValidationResult(withUploadId(resResult, upload_id));
             if (selectHostingTypeOnSuccess) {
@@ -867,7 +825,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             // focus continues on the publish-path trigger of the fresh result view.
             window.requestAnimationFrame(() => destinationTriggerRef.current?.focus());
         } catch (error) {
-            setSlugEditError(error?.message || __('Could not set the plugin slug.', 'peak-publisher'));
+            reopenWithError(error?.message);
         } finally {
             setIsProcessing(false);
         }
@@ -883,13 +841,50 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         await runSlugSelection(upload_id, slug, selectHostingTypeOnSuccess);
     }
 
+    async function refreshTargetContext(upload_id, meta) {
+        // Re-run the server's target resolution after gate progress (account saved, import done).
+        setIsProcessing(true);
+        // Its own phase: the import signals end with the import — this tail is
+        // a destination re-resolution and shows the same wait state as one.
+        setProcessPhase('refresh_target');
+        try {
+            const refreshed = await Pblsh.API.uploadContinue(upload_id, 'refresh_target_context');
+            setValidationResult(refreshed);
+        } catch (error) {
+            // The upload itself is long done — only the destination re-resolution
+            // failed, and the code says so (WporgImportFacts titles by it).
+            setValidationResult({
+                status: 'error',
+                errors: [{ code: 'wporg_target_refresh_failed', message: error?.message || __('Could not refresh the publish destination.', 'peak-publisher') }],
+                data: meta || {},
+                upload_id,
+            });
+        } finally {
+            setIsProcessing(false);
+        }
+    }
+
     async function importWporgAndContinue(upload_id, meta, target) {
         // Import current wordpress.org state before refreshing the deploy target
         const slug = meta?.slug || '';
         const username = target?.pre_deploy_import?.username || '';
         if (!upload_id || !slug || !username) return;
 
+        const fail = (code, message) => {
+            setValidationResult({
+                status: 'error',
+                errors: [{ code, message: message || __('wordpress.org import failed.', 'peak-publisher') }],
+                data: meta || {},
+                upload_id,
+            });
+            setIsProcessing(false);
+        };
+
         setIsProcessing(true);
+        // The operation declares what it is — the import signals (busy button
+        // label, identity-card stripes) key on this phase, not on the generic
+        // processing flag (a slug change must not light them up).
+        setProcessPhase('wporg_import');
         try {
             const response = await Pblsh.API.importWporgPlugins(username, [slug]);
             const imported = Array.isArray(response?.imported) ? response.imported : [];
@@ -897,22 +892,22 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             const importedOk = imported.some((item) => item && item.slug === slug);
             const alreadyImported = skipped.some((item) => item && item.slug === slug && item.reason === 'already_imported');
             if (!importedOk && !alreadyImported) {
+                // The server's structured skip reason travels through as the error code.
                 const firstSkip = skipped.find((item) => item && item.slug === slug) || skipped[0] || null;
-                throw new Error(firstSkip?.message || __('wordpress.org import failed.', 'peak-publisher'));
+                fail(firstSkip?.reason || 'wporg_import_failed', firstSkip?.message);
+                return;
             }
-
-            const refreshed = await Pblsh.API.uploadContinue(upload_id, 'refresh_target_context');
-            setValidationResult(refreshed);
         } catch (error) {
-            setValidationResult({
-                status: 'error',
-                errors: [{ code: 'wporg_import_failed', message: error?.message || __('wordpress.org import failed.', 'peak-publisher') }],
-                data: meta || {},
-                upload_id,
-            });
-        } finally {
-            setIsProcessing(false);
+            fail('wporg_import_failed', error?.message);
+            return;
         }
+        // The freshly imported plugin belongs on the main list right away; the
+        // flow continues inside this dialog, so refresh in the background.
+        try {
+            window.Pblsh?.Controllers?.Plugins?.fetchList?.();
+        } catch (error) {}
+        setIsProcessing(false);
+        await refreshTargetContext(upload_id, meta);
     }
 
     function getUploadCheckContext(result, meta, targetKey) {
@@ -924,12 +919,6 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         const preDeployRequired = !!target?.pre_deploy_import?.required;
         const releaseContext = getReleaseContext(meta);
         const resultErrors = Array.isArray(result?.errors) ? result.errors : [];
-        const firstResultError = resultErrors[0] || null;
-        // Mirrors the access-blocked condition in WporgAccessGate.getVariant: when the gate shows,
-        // it displays the first result error as its status row, so the checklist must skip it.
-        const extraResultErrors = targetKey === 'wporg' && !preDeployRequired && target.wporg_access_status !== 'ok'
-            ? resultErrors.slice(1)
-            : resultErrors;
 
         return {
             result,
@@ -944,36 +933,38 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             blockers,
             preDeployRequired,
             releaseContext,
-            presentation: getReleasePresentation(meta, releaseContext, targetKey === 'wporg'),
+            // A closed wporg plugin flips the submit verb to "commit" — the
+            // publish promise doesn't hold while wordpress.org distributes nothing.
+            presentation: getReleasePresentation(meta, releaseContext, targetKey === 'wporg',
+                targetKey === 'wporg' && target?.wporg_directory_hint?.state === 'closed'),
             resultErrors,
-            firstResultError,
-            extraResultErrors,
         };
     }
 
-    function renderWporgGate(context) {
-        const { meta, uploadId, target, resultErrors, extraResultErrors, firstResultError, preDeployRequired } = context;
+    // Routing for the wporg pre-screens that run before the regular checklist:
+    // account (credentials missing, undecryptable or rejected) → import (state not
+    // mirrored yet) → checklist; the one dead end (repository vanished) is 'not_found'.
+    function wporgScreen(context) {
+        const { meta, target, preDeployRequired } = context;
+        if (!meta.plugin_ok) return null;
         const accessStatus = target?.wporg_access_status || '';
-        const variant = meta.plugin_ok ? WporgAccessGate.getVariant({
-            accessStatus,
-            blockingReason: target?.blocking_reason || '',
-            preDeployRequired,
-            hasImportUsername: !!target?.pre_deploy_import?.username,
-        }) : null;
-        if (!variant) return null;
+        const blockingReason = target?.blocking_reason || '';
+        // credentials_rejected means the stored password no longer works — the account
+        // screen with its re-entry form is the fix, same as having no credentials.
+        const needsCredentials = blockingReason === 'wporg_no_credentials'
+            || accessStatus === 'no_credentials'
+            || accessStatus === 'credentials_rejected'
+            || (preDeployRequired && !target?.pre_deploy_import?.username);
 
-        const canImportAndContinue = !!meta?.slug && !!uploadId && !!target.available && !!target?.pre_deploy_import?.username;
+        if (needsCredentials) return 'account';
+        if (preDeployRequired) return 'import';
 
-        return createElement(WporgAccessGate, {
-            variant,
-            username: target?.account_username || '',
-            accessStatus,
-            message: firstResultError?.message || '',
-            errors: preDeployRequired ? resultErrors : extraResultErrors,
-            isBusy: isProcessing,
-            primaryDisabled: !canImportAndContinue,
-            onPrimary: variant === 'import_required' ? () => importWporgAndContinue(uploadId, meta, target) : null,
-        });
+        // The one hard fact that blocks: the repository does not exist. 'error'
+        // and 'not_checked' are warn-only (checklist warning) — the publish
+        // surfaces real errors, the MERGE is the hard gate.
+        if (accessStatus === 'not_found') return 'not_found';
+
+        return null;
     }
 
     // Process errors (failed server phases) are not facts of the upload — they
@@ -1001,8 +992,9 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     function buildUploadActions(context, checklistItems) {
         const { meta, uploadId, targetKey, isWporg, target, validation, blockers, presentation } = context;
+        // Only 'error' rows block the finalize — every other type is informational.
         const checksPass = Array.isArray(checklistItems)
-            ? checklistItems.every(item => item.type === 'ok' || item.type === 'info')
+            ? checklistItems.every(item => item.type !== 'error')
             : false;
         const targetFinalizable = !isWporg || (!!target?.available && !!validation.finalizable && blockers.length === 0);
         const canFinalize = !!meta.plugin_ok && !!meta.slug && checksPass && targetFinalizable;
@@ -1022,15 +1014,77 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     function buildUploadValidationModel(result, meta, targetKey) {
         const context = getUploadCheckContext(result, meta, targetKey);
-        const { pluginData, isWporg, releaseContext, presentation, resultErrors } = context;
+        const { pluginData, isWporg, releaseContext, presentation, target, uploadId, resultErrors } = context;
         const pendingReleaseImport = isWporg && meta.plugin_ok && context.preDeployRequired && !meta.existing_plugin && !releaseContext.hasReleaseData;
-        const gate = isWporg ? renderWporgGate(context) : null;
-        const checklistItems = gate ? null : uploadChecks.buildUploadCheckItems(context);
+        const screen = isWporg ? wporgScreen(context) : null;
+        const accessStatus = target?.wporg_access_status || '';
+
+        // The wporg pre-screens are ordinary steps of this dialog: their content lives
+        // in the body, their primary action (if any) in the shared footer.
+        let body = null;
+        let actions = null;
+        if (screen === 'account') {
+            body = createElement(WporgAccountForm, {
+                errorMessage: accessStatus === 'credentials_rejected'
+                    ? __('wordpress.org rejected the currently saved SVN password.', 'peak-publisher')
+                    : '',
+                // The saved credentials re-resolve the target context.
+                onSaved: () => refreshTargetContext(uploadId, meta),
+            });
+            actions = [renderDiscardButton(uploadId)];
+        } else if (screen === 'import') {
+            body = createElement(WporgImportFacts, {
+                slug: meta?.slug || '',
+                accessStatus,
+                accessMessage: target?.wporg_access_message || '',
+                directoryHint: target?.wporg_directory_hint || null,
+                username: target?.pre_deploy_import?.username || '',
+                importing: importRunning,
+                errors: resultErrors,
+            });
+            // target.available is the server's one availability rule — false for a
+            // slug that does not exist on wordpress.org: nothing to import then, the
+            // facts explain it and point to the publish path instead of a dead action.
+            const canImport = !!meta?.slug && !!uploadId && !!target.available
+                && !!target?.pre_deploy_import?.username;
+            // The known release count sets the duration expectation while the
+            // busy button is the only live feedback of the running import.
+            const importReleaseCount = target?.wporg_directory_hint?.release_count;
+            actions = [
+                renderDiscardButton(uploadId),
+                createElement(Button, {
+                    isPrimary: true,
+                    isBusy: importRunning,
+                    disabled: !canImport || isProcessing,
+                    onClick: () => importWporgAndContinue(uploadId, meta, target),
+                    __next40pxDefaultSize: true,
+                }, importRunning
+                    ? (Number.isFinite(importReleaseCount) && importReleaseCount > 0
+                        ? sprintf(_n('Importing %d release…', 'Importing %d releases…', importReleaseCount, 'peak-publisher'), importReleaseCount)
+                        : __('Importing…', 'peak-publisher'))
+                    : __('Import and continue…', 'peak-publisher')),
+            ];
+        } else if (screen === 'not_found') {
+            // Dead end — an imported plugin whose SVN repository no longer exists;
+            // rendered in the shared checklist language.
+            body = createElement(Checklist, {
+                items: [
+                    {
+                        title: __('Not available on wordpress.org', 'peak-publisher'),
+                        type: 'error',
+                        desc: __('The plugin’s SVN repository no longer exists on wordpress.org.', 'peak-publisher'),
+                    },
+                ],
+            });
+            actions = [renderDiscardButton(uploadId)];
+        }
+
+        const checklistItems = screen ? null : uploadChecks.buildUploadCheckItems(context);
 
         return {
             classNames: pendingReleaseImport ? [] : presentation.classNames,
-            // The gate owns its error display (WporgAccessGate).
-            notices: gate ? null : renderResultErrorNotices(resultErrors, context.blockers),
+            // The import screen owns its error display (WporgImportFacts).
+            notices: screen === 'import' ? null : renderResultErrorNotices(resultErrors, context.blockers),
             identity: renderPublishPath(meta, context.uploadId),
             header: meta.plugin_ok ? {
                 headline: pluginData.Name,
@@ -1042,9 +1096,9 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                 desc: __('No valid plugin main file could be found', 'peak-publisher'),
                 type: presentation.type,
             },
-            body: gate,
+            body,
             checklistItems,
-            actions: gate ? [renderDiscardButton(context.uploadId)] : buildUploadActions(context, checklistItems),
+            actions: actions || buildUploadActions(context, checklistItems),
         };
     }
 
@@ -1055,8 +1109,11 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         if (meta?.plugin_ok && ((meta?.hosting_type_choice && !activeTargetKey) || (activeTarget && !activeTarget.slug))) {
             // Open destination decision — channel choice or slug ambiguity: the choice is the
             // only content, so it lives in the scrollable body instead of the fixed slot and
-            // the publish-path row stays hidden until the destination is settled.
+            // the publish-path row stays hidden until the destination is settled. The body
+            // turns into the gray decision surface (the publish-path row's color): once the
+            // destination is chosen, that surface collapses into the path row.
             return renderUploadResultShell({
+                classNames: ['pblsh--upload-result--choosing'],
                 header: {
                     headline: meta?.plugin_data?.Name || '',
                     desc: meta?.plugin_data?.Version || '',
@@ -1072,7 +1129,25 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
         const isWporgUploadResult = meta.hosting_type_resolved === 'wporg' || meta.hosting_type_intended === 'wporg';
         const modelTargetKey = activeTargetKey || (isWporgUploadResult ? 'wporg' : 'self_hosted');
-        return renderUploadResultShell(buildUploadValidationModel(result, meta, modelTargetKey));
+        const model = buildUploadValidationModel(result, meta, modelTargetKey);
+        if (isProcessing && ['set_slug', 'refresh_target'].includes(processPhase)) {
+            // Every destination re-resolution (slug change, post-import
+            // refresh, account save) replaces the stale facts with the same
+            // wait state. The body waits; header (name and version are
+            // slug-independent), publish path and the disabled actions stay,
+            // so the layout doesn't jump.
+            return renderUploadResultShell({
+                ...model,
+                // Stale error notices step aside with the rest of the old facts.
+                notices: null,
+                body: createElement('div', { className: 'pblsh--upload-result__resolving' },
+                    createElement(Spinner),
+                    createElement('span', null, __('Resolving the publish destination…', 'peak-publisher')),
+                ),
+                checklistItems: null,
+            });
+        }
+        return renderUploadResultShell(model);
     }
 
     // Always keep overlay in DOM for smooth fade-in/out

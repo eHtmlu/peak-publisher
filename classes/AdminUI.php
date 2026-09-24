@@ -72,15 +72,17 @@ class AdminUI {
             'components/TipLink.js',
             'components/ChannelPath.js',
             'components/NoticeBox.js',
+            'components/ChannelChoiceCards.js',
+            'components/WporgAccountForm.js',
+            'components/WporgImportTable.js',
             'components/PluginList.js',
             'components/PluginEditor.js',
             'components/Settings.js',
-            'components/WporgAccessGate.js',
+            'components/WporgImportFacts.js',
             'components/PluginAdditionProcess.js',
             'components/GlobalDropOverlay.js',
             'admin.js',
             //'highlightjs/highlight.js',
-            //'highlightjs-highlight-lines/highlightjs-highlight-lines.js',
         ];
 
         //$settings = wp_enqueue_code_editor([ 'type' => 'php' ]);
@@ -95,13 +97,6 @@ class AdminUI {
             PBLSH_PLUGIN_URL . 'assets/libs/highlightjs/highlight.js',
             [],
             filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs/highlight.js'),
-            true
-        );
-        wp_enqueue_script(
-            'pblsh-highlightjs-highlight-lines',
-            PBLSH_PLUGIN_URL . 'assets/libs/highlightjs-highlight-lines/highlightjs-highlight-lines.js',
-            ['pblsh-highlightjs'],
-            filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs-highlight-lines/highlightjs-highlight-lines.js'),
             true
         );
         // JSZip for client-side zipping of folders before upload
@@ -119,7 +114,7 @@ class AdminUI {
             wp_enqueue_script(
                 $handle,
                 PBLSH_PLUGIN_URL . 'assets/js/' . $file,
-                $previous_handle ? [$previous_handle] : ['wp-element', 'wp-components', 'wp-i18n', 'wp-data', 'wp-api', 'wp-api-fetch', 'lodash', 'pblsh-highlightjs', 'pblsh-highlightjs-highlight-lines', 'pblsh-jszip'],
+                $previous_handle ? [$previous_handle] : ['wp-element', 'wp-components', 'wp-i18n', 'wp-data', 'wp-api', 'wp-api-fetch', 'lodash', 'pblsh-highlightjs', 'pblsh-jszip'],
                 filemtime(PBLSH_PLUGIN_DIR . 'assets/js/' . $file),
                 true
             );
@@ -154,11 +149,8 @@ class AdminUI {
             'PblshData',
             [
                 'bootstrapUpdateURI' => get_update_uri(),
-                'wpVersion' => function_exists('wp_get_wp_version') ? wp_get_wp_version() : $GLOBALS['wp_version'],
-                'phpVersion' => PHP_VERSION,
                 'hasPlainPermalinks' => get_option('permalink_structure') === '',
                 'permalinkSettingsUrl' => admin_url('options-permalink.php'),
-                'wporgImportChunkSize' => PBLSH_WPORG_IMPORT_CHUNK_SIZE,
                 'faqUrls' => get_peak_publisher_faq_urls(),
                 // Icon fallback for plugins without directory assets — the endpoint
                 // generates the pattern purely from the slug in the URL.

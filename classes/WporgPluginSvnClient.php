@@ -25,31 +25,34 @@ class WporgPluginSvnClient {
         $this->password = $password !== '' ? $password : null;
     }
 
+    /**
+     * Validates the credentials with a write-class request: wordpress.org stopped
+     * authenticating read requests entirely (verified 2026-08-19 — PROPFIND accepts
+     * any Authorization header), so only MKACTIVITY actually checks the password.
+     * The probe activity never touches repository content and is deleted right away.
+     */
     public function test_credentials(): array {
-        $response = $this->request('PROPFIND', '', [
-            'Depth' => '0',
-        ]);
-        $status = (int) ($response['status'] ?? 0);
-
-        if ($status === 207 || ($status >= 200 && $status < 300)) {
-            return [
-                'status' => 'ok',
-            ];
-        }
-
-        if ($status === 401 || $status === 403) {
+        $activity = $this->create_activity('', 'pblsh-probe');
+        if (in_array($activity['options_status'], [ 401, 403 ], true)
+            || in_array($activity['mkactivity_status'], [ 401, 403 ], true)) {
             throw new WporgSvnException(
                 'invalid_credentials',
                 __('Invalid wordpress.org username or password.', 'peak-publisher'),
                 401
             );
         }
+        if ($activity['step'] !== 'ok') {
+            throw new WporgSvnException(
+                'svn_auth_check_failed',
+                __('wordpress.org SVN returned an unexpected authentication response.', 'peak-publisher'),
+                502
+            );
+        }
 
-        throw new WporgSvnException(
-            'svn_auth_check_failed',
-            __('wordpress.org SVN returned an unexpected authentication response.', 'peak-publisher'),
-            502
-        );
+        $this->discard_activity($activity['activity_url']);
+        return [
+            'status' => 'ok',
+        ];
     }
 
     public function list_directory(string $path = '', int $depth = 1): array {
@@ -91,193 +94,90 @@ class WporgPluginSvnClient {
         return $out;
     }
 
-    public function can_write(string $path): array {
+    /**
+     * Checks whether the plugin repository exists and the stored credentials are accepted.
+     *
+     * wordpress.org stopped enforcing per-plugin write access on WebDAV probe requests
+     * (verified 2026-08-19: CHECKOUT against a foreign plugin succeeds; commits are
+     * rejected at MERGE time instead), so this check deliberately claims nothing about
+     * write access. Ownership hints come from the public contributor list instead.
+     *
+     * @return array{status:string, message:string|null} status: ok|not_found|credentials_rejected|error
+     */
+    public function check_repo_access(string $path): array {
         $path = trim($path, '/');
         if ($path === '' || $this->username === null || $this->password === null) {
-            return $this->can_write_result(
+            return $this->repo_access_result(
                 'error',
-                false,
                 __('Stored wordpress.org credentials are required for this check.', 'peak-publisher')
             );
         }
 
         $root_path = $path . '/';
-        $activity_created = false;
-        $activity_url = '';
-        $cleanup_status = 0;
-
         try {
-            // Read the current revision before probing write access
-            $before = $this->propfind($root_path, 0);
-            $before_status = (int) ($before['status'] ?? 0);
-            if ($before_status === 404) {
-                return $this->can_write_result(
+            $lookup = $this->propfind($root_path, 0);
+            $lookup_status = (int) ($lookup['status'] ?? 0);
+            if ($lookup_status === 404) {
+                return $this->repo_access_result(
                     'not_found',
-                    false,
                     __('Plugin not found on wordpress.org SVN.', 'peak-publisher')
                 );
             }
-            if ($before_status === 401) {
-                return $this->can_write_result(
-                    'error',
-                    false,
+            // 401 and 403 are both credential rejections — the same reading as test_credentials().
+            if ($lookup_status === 401 || $lookup_status === 403) {
+                return $this->repo_access_result(
+                    'credentials_rejected',
                     __('The saved wordpress.org credentials were rejected by SVN.', 'peak-publisher')
                 );
             }
-            if ($before_status === 403) {
-                return $this->can_write_result(
-                    'no_write_access',
-                    false,
-                    __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher')
-                );
-            }
-            if (!$this->is_success_status($before_status) && $before_status !== 207) {
-                return $this->can_write_result(
+            if (!$this->is_success_status($lookup_status) && $lookup_status !== 207) {
+                return $this->repo_access_result(
                     'error',
-                    false,
                     __('wordpress.org SVN returned an unexpected plugin lookup response.', 'peak-publisher')
                 );
             }
 
-            $before_revision = $this->first_prop((string) $before['body'], 'version-name');
-            $checked_in_href = $this->first_nested_href((string) $before['body'], 'checked-in');
-            if ($checked_in_href === '') {
-                return $this->can_write_result(
-                    'error',
-                    false,
-                    __('wordpress.org SVN did not return a checked-in resource for this plugin.', 'peak-publisher')
-                );
-            }
-
-            $options = $this->options_activity_collection($root_path);
-            $options_status = (int) ($options['status'] ?? 0);
-            if ($options_status === 401) {
-                return $this->can_write_result(
-                    'error',
-                    false,
+            // Reads are anonymous on wordpress.org SVN — only a write-class request
+            // (MKACTIVITY) actually validates the credentials. The probe activity is
+            // deleted right away and never touches repository content.
+            $activity = $this->create_activity($root_path, 'pblsh-probe');
+            // 401 and 403 are both credential rejections — the same reading as test_credentials().
+            if (in_array($activity['options_status'], [ 401, 403 ], true)
+                || in_array($activity['mkactivity_status'], [ 401, 403 ], true)) {
+                return $this->repo_access_result(
+                    'credentials_rejected',
                     __('The saved wordpress.org credentials were rejected by SVN.', 'peak-publisher')
                 );
             }
-            if ($options_status === 403) {
-                return $this->can_write_result(
-                    'no_write_access',
-                    false,
-                    __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher')
+            if ($activity['step'] === 'options') {
+                return $this->repo_access_result(
+                    'error',
+                    __('wordpress.org SVN did not allow a credentials probe.', 'peak-publisher')
                 );
             }
-            if (!$this->is_success_status($options_status)) {
-                return $this->can_write_result(
+            if ($activity['step'] === 'collection') {
+                return $this->repo_access_result(
                     'error',
-                    false,
-                    __('wordpress.org SVN did not allow a write-access probe activity.', 'peak-publisher')
-                );
-            }
-
-            // Create a temporary SVN activity for the access probe
-            $activity_collection = $this->first_nested_href((string) $options['body'], 'activity-collection-set');
-            if ($activity_collection === '') {
-                return $this->can_write_result(
-                    'error',
-                    false,
                     __('wordpress.org SVN did not return an activity collection.', 'peak-publisher')
                 );
             }
-
-            $activity_url = rtrim($this->absolutize_url($activity_collection), '/') .
-                '/pblsh-probe-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(4));
-            $mkactivity = $this->request_url('MKACTIVITY', $activity_url);
-            $mkactivity_status = (int) ($mkactivity['status'] ?? 0);
-            if ($mkactivity_status === 401) {
-                return $this->can_write_result(
+            if ($activity['step'] !== 'ok') {
+                return $this->repo_access_result(
                     'error',
-                    false,
-                    __('The saved wordpress.org credentials were rejected by SVN.', 'peak-publisher')
+                    __('wordpress.org SVN could not create the temporary credentials probe activity.', 'peak-publisher')
                 );
             }
-            if ($mkactivity_status === 403) {
-                return $this->can_write_result(
-                    'no_write_access',
-                    false,
-                    __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher')
-                );
-            }
-            if (!$this->is_success_status($mkactivity_status)) {
-                return $this->can_write_result(
-                    'error',
-                    false,
-                    __('wordpress.org SVN could not create a temporary write-access probe activity.', 'peak-publisher')
-                );
-            }
-            $activity_created = true;
-
-            // Check out the root without writing a new revision
-            $checkout_url = $this->absolutize_url($checked_in_href);
-            $checkout = $this->checkout($checkout_url, $activity_url);
-            $checkout_status = (int) ($checkout['status'] ?? 0);
-
-            $probe_status = 'error';
-            $has_write_access = false;
-            $message = __('wordpress.org SVN returned an unexpected write-access response.', 'peak-publisher');
-            if ($this->is_success_status($checkout_status)) {
-                $probe_status = 'ok';
-                $has_write_access = true;
-                $message = null;
-            } elseif ($checkout_status === 403) {
-                $probe_status = 'no_write_access';
-                $message = __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher');
-            } elseif ($checkout_status === 401) {
-                $message = __('The saved wordpress.org credentials were rejected by SVN.', 'peak-publisher');
-            }
+            $this->discard_activity($activity['activity_url']);
         } catch (WporgSvnException $e) {
-            return $this->can_write_result('error', false, $e->getMessage());
+            return $this->repo_access_result('error', $e->getMessage());
         } catch (\Throwable $e) {
-            return $this->can_write_result(
+            return $this->repo_access_result(
                 'error',
-                false,
-                __('wordpress.org SVN write-access check failed.', 'peak-publisher')
-            );
-        } finally {
-            if ($activity_created && $activity_url !== '') {
-                // Remove the temporary probe activity
-                try {
-                    $cleanup = $this->request_url('DELETE', $activity_url);
-                    $cleanup_status = (int) ($cleanup['status'] ?? 0);
-                } catch (\Throwable $e) {
-                    $cleanup_status = 0;
-                }
-            }
-        }
-
-        if ($activity_created && !$this->is_success_status($cleanup_status)) {
-            return $this->can_write_result(
-                'error',
-                false,
-                __('wordpress.org SVN temporary write-access probe activity could not be cleaned up.', 'peak-publisher')
+                __('wordpress.org SVN credentials check failed.', 'peak-publisher')
             );
         }
 
-        try {
-            // Ensure the probe did not create a revision
-            $after = $this->propfind($root_path, 0);
-            $after_revision = $this->first_prop((string) $after['body'], 'version-name');
-            if ($before_revision !== '' && $after_revision !== '' && $before_revision !== $after_revision) {
-                return $this->can_write_result(
-                    'error',
-                    false,
-                    __('wordpress.org SVN revision changed during the write-access probe.', 'peak-publisher')
-                );
-            }
-        } catch (\Throwable $e) {
-            if ($has_write_access) {
-                return $this->can_write_result(
-                    'error',
-                    false,
-                    __('wordpress.org SVN write-access probe could not verify that no revision was created.', 'peak-publisher')
-                );
-            }
-        }
-
-        return $this->can_write_result($probe_status, $has_write_access, $message);
+        return $this->repo_access_result('ok', null);
     }
 
     public function begin_commit(string $wporg_slug): void {
@@ -308,18 +208,13 @@ class WporgPluginSvnClient {
                     404
                 );
             }
-            if ($root_status === 401) {
+            // 401 and 403 are both credential rejections — the same reading as the
+            // probes: wordpress.org decides plugin write access only at MERGE time.
+            if ($root_status === 401 || $root_status === 403) {
                 throw new WporgSvnException(
                     'invalid_credentials',
                     __('The saved wordpress.org credentials were rejected by SVN.', 'peak-publisher'),
                     401
-                );
-            }
-            if ($root_status === 403) {
-                throw new WporgSvnException(
-                    'no_write_access',
-                    __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher'),
-                    403
                 );
             }
             if (!$this->is_success_status($root_status) && $root_status !== 207) {
@@ -340,66 +235,39 @@ class WporgPluginSvnClient {
                 );
             }
 
-            $options = $this->options_activity_collection($root_path);
-            $options_status = (int) ($options['status'] ?? 0);
-            if ($options_status === 401) {
+            // Create an SVN activity for this commit. 401 and 403 are both credential
+            // rejections — the same reading as the probes (write access: MERGE time).
+            $activity = $this->create_activity($root_path, 'pblsh-commit');
+            if (in_array($activity['options_status'], [ 401, 403 ], true)
+                || in_array($activity['mkactivity_status'], [ 401, 403 ], true)) {
                 throw new WporgSvnException(
                     'invalid_credentials',
                     __('The saved wordpress.org credentials were rejected by SVN.', 'peak-publisher'),
                     401
                 );
             }
-            if ($options_status === 403) {
-                throw new WporgSvnException(
-                    'no_write_access',
-                    __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher'),
-                    403
-                );
-            }
-            if (!$this->is_success_status($options_status)) {
+            if ($activity['step'] === 'options') {
                 throw new WporgSvnException(
                     'svn_commit_setup_failed',
                     __('wordpress.org SVN did not allow a commit activity.', 'peak-publisher'),
                     502
                 );
             }
-
-            $activity_collection = $this->first_nested_href((string) $options['body'], 'activity-collection-set');
-            if ($activity_collection === '') {
+            if ($activity['step'] === 'collection') {
                 throw new WporgSvnException(
                     'svn_commit_setup_failed',
                     __('wordpress.org SVN did not return an activity collection.', 'peak-publisher'),
                     502
                 );
             }
-
-            $this->activity_url = rtrim($this->absolutize_url($activity_collection), '/') .
-                '/pblsh-commit-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(4));
-
-            // Create an SVN activity for this commit
-            $mkactivity = $this->request_url('MKACTIVITY', $this->activity_url);
-            $mkactivity_status = (int) ($mkactivity['status'] ?? 0);
-            if ($mkactivity_status === 401) {
-                throw new WporgSvnException(
-                    'invalid_credentials',
-                    __('The saved wordpress.org credentials were rejected by SVN.', 'peak-publisher'),
-                    401
-                );
-            }
-            if ($mkactivity_status === 403) {
-                throw new WporgSvnException(
-                    'no_write_access',
-                    __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher'),
-                    403
-                );
-            }
-            if (!$this->is_success_status($mkactivity_status)) {
+            if ($activity['step'] !== 'ok') {
                 throw new WporgSvnException(
                     'svn_commit_setup_failed',
                     __('wordpress.org SVN could not create a commit activity.', 'peak-publisher'),
                     502
                 );
             }
+            $this->activity_url = $activity['activity_url'];
             $this->activity_created = true;
 
             // Check out the working baseline and plugin root
@@ -425,12 +293,12 @@ class WporgPluginSvnClient {
             $root_checkout = $this->checkout($this->absolutize_url($root_checked_in), $this->activity_url);
             $root_checkout_status = (int) ($root_checkout['status'] ?? 0);
             if (!$this->is_success_status($root_checkout_status)) {
+                // No 403 special case: the credentials passed MKACTIVITY just before,
+                // and wordpress.org enforces write access only at MERGE time.
                 throw new WporgSvnException(
-                    $root_checkout_status === 403 ? 'no_write_access' : 'svn_commit_setup_failed',
-                    $root_checkout_status === 403
-                        ? __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher')
-                        : __('wordpress.org SVN could not check out the plugin working root.', 'peak-publisher'),
-                    $root_checkout_status === 403 ? 403 : 502
+                    'svn_commit_setup_failed',
+                    __('wordpress.org SVN could not check out the plugin working root.', 'peak-publisher'),
+                    502
                 );
             }
             $working_root = $this->response_header($root_checkout, 'location');
@@ -588,11 +456,7 @@ class WporgPluginSvnClient {
             return;
         }
 
-        try {
-            $this->request_url('DELETE', $this->activity_url);
-        } catch (\Throwable $e) {
-        }
-
+        $this->discard_activity($this->activity_url);
         $this->reset_commit_state();
     }
 
@@ -940,6 +804,120 @@ class WporgPluginSvnClient {
         return (string) ($response['body'] ?? '');
     }
 
+    /**
+     * Returns the path's oldest log entry (creation commit), or null when it cannot
+     * be determined. wordpress.org creates every plugin repository with the fixed
+     * message "Adding {title} by {user_login}." — their own SVN watcher parses this
+     * format, which makes it a reliable ownership hint for freshly approved plugins.
+     *
+     * @return array{revision:string, date:string, message:string}|null date is ISO 8601.
+     */
+    public function get_initial_log_entry(string $path): ?array {
+        $path = trim($path, '/');
+        if ($path === '') {
+            return null;
+        }
+        $root_path = $path . '/';
+
+        try {
+            // The log report needs a numeric end revision — the node's last-changed revision.
+            $lookup = $this->propfind($root_path, 0);
+            $lookup_status = (int) ($lookup['status'] ?? 0);
+            if (!$this->is_success_status($lookup_status) && $lookup_status !== 207) {
+                return null;
+            }
+            $head = $this->first_prop((string) ($lookup['body'] ?? ''), 'version-name');
+            if ($head === '' || !ctype_digit($head)) {
+                return null;
+            }
+
+            $body = '<?xml version="1.0" encoding="utf-8"?>' .
+                '<S:log-report xmlns:S="svn:">' .
+                '<S:start-revision>0</S:start-revision>' .
+                '<S:end-revision>' . $head . '</S:end-revision>' .
+                '<S:limit>1</S:limit>' .
+                '<S:path></S:path>' .
+                '</S:log-report>';
+            $report = $this->request('REPORT', $root_path, [
+                'Content-Type' => 'text/xml; charset=utf-8',
+            ], $body);
+            if (!$this->is_success_status((int) ($report['status'] ?? 0))) {
+                return null;
+            }
+
+            $xml = (string) ($report['body'] ?? '');
+            $message = $this->first_prop($xml, 'comment');
+            if ($message === '') {
+                return null;
+            }
+
+            return [
+                'revision' => $this->first_prop($xml, 'version-name'),
+                'date' => $this->first_prop($xml, 'date'),
+                'message' => $message,
+            ];
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Returns the distinct committer names of the path's most recent log entries
+     * (newest first), or null when the log cannot be read. The commit history is
+     * the only public evidence of actual commit access — it covers deploys made
+     * through Peak Publisher and external SVN commits alike.
+     *
+     * @return string[]|null
+     */
+    public function get_recent_log_authors(string $path, int $limit = 200): ?array {
+        $path = trim($path, '/');
+        if ($path === '' || $limit < 1) {
+            return null;
+        }
+        $root_path = $path . '/';
+
+        try {
+            // The log report needs a numeric start revision — the node's last-changed revision.
+            $lookup = $this->propfind($root_path, 0);
+            $lookup_status = (int) ($lookup['status'] ?? 0);
+            if (!$this->is_success_status($lookup_status) && $lookup_status !== 207) {
+                return null;
+            }
+            $head = $this->first_prop((string) ($lookup['body'] ?? ''), 'version-name');
+            if ($head === '' || !ctype_digit($head)) {
+                return null;
+            }
+
+            $body = '<?xml version="1.0" encoding="utf-8"?>' .
+                '<S:log-report xmlns:S="svn:">' .
+                '<S:start-revision>' . $head . '</S:start-revision>' .
+                '<S:end-revision>0</S:end-revision>' .
+                '<S:limit>' . (int) $limit . '</S:limit>' .
+                '<S:path></S:path>' .
+                '</S:log-report>';
+            $report = $this->request('REPORT', $root_path, [
+                'Content-Type' => 'text/xml; charset=utf-8',
+            ], $body);
+            if (!$this->is_success_status((int) ($report['status'] ?? 0))) {
+                return null;
+            }
+
+            if (!preg_match_all('~<[^>]*:?creator-displayname[^>]*>(.*?)</[^>]*:?creator-displayname>~s', (string) ($report['body'] ?? ''), $matches)) {
+                return null;
+            }
+            $authors = [];
+            foreach ($matches[1] as $author) {
+                $author = trim(html_entity_decode(strip_tags($author), ENT_QUOTES | ENT_XML1));
+                if ($author !== '') {
+                    $authors[$author] = true;
+                }
+            }
+            return array_keys($authors);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     private function options_activity_collection(string $path): array {
         $body = '<?xml version="1.0" encoding="utf-8"?>' .
             '<D:options xmlns:D="DAV:"><D:activity-collection-set/></D:options>';
@@ -947,6 +925,48 @@ class WporgPluginSvnClient {
         return $this->request('OPTIONS', $path, [
             'Content-Type' => 'text/xml; charset=utf-8',
         ], $body);
+    }
+
+    /**
+     * The shared OPTIONS → MKACTIVITY sequence behind every write-class
+     * credentials probe and commit start: fetch the activity collection, derive
+     * a unique activity URL, create the activity. Stops at the first failed
+     * step and reports the raw statuses — interpreting them (probe verdict vs.
+     * commit error) stays with each caller's contract.
+     *
+     * @return array{step:'options'|'collection'|'mkactivity'|'ok', options_status:int, mkactivity_status:int|null, activity_url:string|null}
+     */
+    private function create_activity(string $path, string $name_prefix): array {
+        $options = $this->options_activity_collection($path);
+        $result = [
+            'step' => 'options',
+            'options_status' => (int) ($options['status'] ?? 0),
+            'mkactivity_status' => null,
+            'activity_url' => null,
+        ];
+        if (!$this->is_success_status($result['options_status'])) {
+            return $result;
+        }
+
+        $activity_collection = $this->first_nested_href((string) ($options['body'] ?? ''), 'activity-collection-set');
+        if ($activity_collection === '') {
+            $result['step'] = 'collection';
+            return $result;
+        }
+
+        $result['activity_url'] = rtrim($this->absolutize_url($activity_collection), '/') .
+            '/' . $name_prefix . '-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(4));
+        $mkactivity = $this->request_url('MKACTIVITY', $result['activity_url']);
+        $result['mkactivity_status'] = (int) ($mkactivity['status'] ?? 0);
+        $result['step'] = $this->is_success_status($result['mkactivity_status']) ? 'ok' : 'mkactivity';
+        return $result;
+    }
+
+    // Best-effort cleanup; a leftover empty activity has no repository effect.
+    private function discard_activity(string $activity_url): void {
+        try {
+            $this->request_url('DELETE', $activity_url);
+        } catch (\Throwable $e) {}
     }
 
     private function checkout(string $url, string $activity_url): array {
@@ -962,10 +982,9 @@ class WporgPluginSvnClient {
         ], $body);
     }
 
-    private function can_write_result(string $status, bool $has_write_access, ?string $message): array {
+    private function repo_access_result(string $status, ?string $message): array {
         return [
             'status' => $status,
-            'has_write_access' => $has_write_access,
             'message' => $message,
         ];
     }

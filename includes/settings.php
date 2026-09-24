@@ -8,8 +8,8 @@ defined('ABSPATH') || exit;
 /**
  * Gets settings needed during early plugin bootstrap.
  *
- * This intentionally avoids the full settings API builder because it also adds
- * admin-only credential metadata.
+ * These two flags are read on every request (standalone gating), so they get
+ * their own statically cached path instead of the full settings builder.
  *
  * @return array{standalone_mode:bool,standalone_redirect_url:string}
  */
@@ -81,28 +81,39 @@ function get_peak_publisher_settings_defaults(): array {
         ],
         'ip_whitelist' => [],
         'standalone_redirect_url' => '',
-        'wporg_accounts' => [],
     ];
 }
 
 /**
- * Gets plugin settings (defaults + sanitized option).
+ * Gets the operational plugin settings (defaults + sanitized option).
+ *
+ * Runs on every public request (IP whitelist, install counting), so it stays
+ * free of credential metadata — that lives in get_peak_publisher_settings_for_api().
  */
 function get_peak_publisher_settings(): array {
     $defaults = get_peak_publisher_settings_defaults();
     $raw = get_option('pblsh_settings');
     $data = is_array($raw) ? $raw : [];
     $merged = array_merge($defaults, $data);
-    $out = sanitize_peak_publisher_non_secret_settings($merged);
+    return sanitize_peak_publisher_non_secret_settings($merged);
+}
 
-    $stored_accounts = is_array($data['wporg_accounts'] ?? null) ? $data['wporg_accounts'] : [];
+/**
+ * The settings shape served to the admin UI: the operational settings plus the
+ * credential metadata (masked accounts with usability probes, storage status) —
+ * per-account decrypt probes make this too expensive for the public path.
+ */
+function get_peak_publisher_settings_for_api(): array {
+    $out = get_peak_publisher_settings();
+
+    $raw = get_option('pblsh_settings');
+    $stored_accounts = is_array($raw['wporg_accounts'] ?? null) ? $raw['wporg_accounts'] : [];
     $out['wporg_accounts'] = get_wporg_accounts_for_api($stored_accounts);
 
-    $key_status = get_encryption_key_status();
+    $storage_status = get_credential_storage_status();
     $out['wporg_credentials'] = [
-        'encryption_key_status' => $key_status['status'],
-        'encryption_key_message' => $key_status['message'],
-        'wp_config_snippet' => generate_encryption_key_snippet(),
+        'storage_status' => $storage_status['status'],
+        'storage_message' => $storage_status['message'],
     ];
 
     return $out;
@@ -124,7 +135,7 @@ function update_peak_publisher_settings(array $settings) {
         return $resolved;
     }
 
-    $sanitized = sanitize_peak_publisher_settings($resolved);
+    $sanitized = sanitize_peak_publisher_settings($resolved, $current);
     if (is_wp_error($sanitized)) {
         return $sanitized;
     }
@@ -164,15 +175,17 @@ function sanitize_peak_publisher_non_secret_settings(array $settings): array {
 }
 
 /**
- * Sanitizes the plugin settings for the save path.
+ * Sanitizes the plugin settings for the save path. $current (the stored option)
+ * carries the accounts' credential-verdict stamps through the save.
  *
  * @return array|\WP_Error
  */
-function sanitize_peak_publisher_settings(array $settings) {
+function sanitize_peak_publisher_settings(array $settings, array $current = []) {
     $out = sanitize_peak_publisher_non_secret_settings($settings);
 
     $accounts = is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
-    $sanitized_accounts = sanitize_wporg_accounts($accounts);
+    $current_accounts = is_array($current['wporg_accounts'] ?? null) ? $current['wporg_accounts'] : [];
+    $sanitized_accounts = sanitize_wporg_accounts($accounts, $current_accounts);
     if (is_wp_error($sanitized_accounts)) {
         return $sanitized_accounts;
     }

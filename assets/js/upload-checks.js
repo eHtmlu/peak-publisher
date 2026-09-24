@@ -487,12 +487,120 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         };
     }
 
+    // Warn-only probe failure — the target stays usable: upfront verification
+    // is a convenience, wordpress.org decides at publish time (the same
+    // tolerance the import station shows for a failed access check).
+    function checkWporgAccessProbe(context) {
+        if (!context.isWporg || context.target?.wporg_access_status !== 'error') {
+            return null;
+        }
+        return {
+            title: __('wordpress.org access not verifiable right now', 'peak-publisher'),
+            type: 'warning',
+            // Guidance first, the raw server message labeled behind it — the
+            // same anatomy as the closed-state's "Reason:" detail.
+            desc: [
+                __('You can still try publishing — wordpress.org will decide at publish time.', 'peak-publisher'),
+                context.target?.wporg_access_message
+                    ? ' ' + sprintf(__('Error message: %s', 'peak-publisher'), context.target.wporg_access_message)
+                    : '',
+            ],
+        };
+    }
+
+    // The pre-dialog refresh of the local wordpress.org mirror failed — the
+    // release facts below may be stale. Warn-only: the publish itself is
+    // guarded by the deploy's concurrent-change detection.
+    function checkWporgRefreshFailure(context) {
+        if (!context.isWporg || !context.target?.wporg_refresh_error) {
+            return null;
+        }
+        return {
+            title: __('Plugin status cannot be retrieved', 'peak-publisher'),
+            type: 'warning',
+            // Guidance first, the raw server message labeled behind it — the
+            // same anatomy as the closed-state's "Reason:" detail.
+            desc: [
+                __('You can still try publishing — the publish itself detects concurrent changes.', 'peak-publisher'),
+                ' ' + sprintf(__('Error message: %s', 'peak-publisher'), context.target.wporg_refresh_error),
+            ],
+        };
+    }
+
+    function checkWporgOwnershipHint(context) {
+        const { isWporg, target } = context;
+        // Heuristic directory/ownership hint — warns, never blocks: write access is
+        // only decided by wordpress.org at deploy time. The state/relation cases
+        // mirror WporgImportFacts and the import table's renderRowHint — extend
+        // them together. The texts speak to "you"; when multi-account support
+        // arrives, reconsider naming the checked account.
+        const hint = isWporg && target?.wporg_directory_hint && typeof target.wporg_directory_hint === 'object'
+            ? target.wporg_directory_hint
+            : null;
+        if (!hint) {
+            return null;
+        }
+
+        // Every fresh state is the first-release moment and celebrates (like
+        // the import screen's celebration box) — deliberately without access
+        // caveats: whether publishing goes through is a separate concern (the
+        // import screen's relation panels carry it, and a rejected publish
+        // surfaces right on the next click). Only the owner speaks personally.
+        if (hint.state === 'fresh' && hint.relation === 'owner') {
+            return {
+                title: __('Your first wordpress.org release 🎉', 'peak-publisher'),
+                type: 'celebrate',
+                desc: __('You are publishing your very first release — the public plugin page will go live once wordpress.org has processed the release. This can take up to several minutes.', 'peak-publisher'),
+            };
+        }
+        if (hint.state === 'fresh') {
+            return {
+                title: __('First wordpress.org release 🎉', 'peak-publisher'),
+                type: 'celebrate',
+                desc: __('You are publishing the very first release — the public plugin page will go live once wordpress.org has processed the release. This can take up to several minutes.', 'peak-publisher'),
+            };
+        }
+        if (hint.state === 'closed') {
+            return {
+                title: __('Closed in the plugin directory', 'peak-publisher'),
+                type: 'warning',
+                desc: [
+                    __('wordpress.org closed this plugin — with commit access you can usually still commit updates to SVN, but wordpress.org will only distribute them once the plugin has been reopened.', 'peak-publisher'),
+                    hint.reason ? ' ' + sprintf(__('Reason: %s.', 'peak-publisher'), hint.reason) : '',
+                ],
+            };
+        }
+        // Info here, warning on the import surfaces — deliberately different
+        // tiers for the same state: at import the slug is freshly chosen (a
+        // wrong slug is the dominant risk there), while the checklist is only
+        // reachable through an already imported plugin, so the slug had its
+        // deliberate confirmation and the access fact is all that remains.
+        if (hint.relation === 'not_listed') {
+            return {
+                title: __('Your account doesn’t seem to be associated with this plugin', 'peak-publisher'),
+                type: 'info',
+                desc: __('No evidence was found that you manage this plugin. Publishing updates requires commit access, which wordpress.org will verify at publish time.', 'peak-publisher'),
+            };
+        }
+        if (!hint.relation || hint.relation === 'unknown') {
+            return {
+                title: __('Account connection not verified', 'peak-publisher'),
+                type: 'info',
+                desc: __('Could not determine how this plugin relates to your account. Your credentials were accepted — whether you can publish will be decided by wordpress.org at publish time.', 'peak-publisher'),
+            };
+        }
+        return null;
+    }
+
     function buildUploadCheckItems(context) {
         // Facts of upload × destination only — process errors (failed server
         // phases) are NOT checklist rows; they render as pinned error notices
         // between body and footer (GlobalDropOverlay).
         return [
             context.meta.plugin_ok && [
+                checkWporgAccessProbe(context),
+                checkWporgRefreshFailure(context),
+                checkWporgOwnershipHint(context),
                 checkPluginFile(context),
                 checkVersion(context),
                 checkUpdateUri(context),

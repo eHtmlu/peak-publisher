@@ -411,7 +411,7 @@ class AdminAPI {
 
         require_once __DIR__ . '/SvnDeployWorkflow.php';
         try {
-            $account = SvnDeployWorkflow::find_author_account_result((string) $parent->post_name, $preferred_username !== '' ? $preferred_username : null);
+            $account = SvnDeployWorkflow::resolve_wporg_account_access((string) $parent->post_name, $preferred_username !== '' ? $preferred_username : null);
         } catch (\Throwable $e) {
             return $this->rest_error_response($this->make_rest_error(
                 'wporg_access_check_failed',
@@ -423,15 +423,17 @@ class AdminAPI {
         $account_status = (string) ($account['status'] ?? 'error');
         $username = (string) ($account['username'] ?? '');
         if ($account_status !== 'ok' || $username === '') {
-            $code = $account_status === 'no_credentials'
-                ? 'wporg_no_credentials'
-                : ($account_status === 'error' ? 'wporg_access_check_failed' : 'wporg_no_write_access');
-            $status = $code === 'wporg_no_credentials' ? 400 : ($code === 'wporg_access_check_failed' ? 502 : 403);
+            [$code, $status] = match ($account_status) {
+                'no_credentials' => ['wporg_no_credentials', 400],
+                'not_found' => ['wporg_not_found', 404],
+                'credentials_rejected' => ['wporg_credentials_rejected', 401],
+                default => ['wporg_access_check_failed', 502],
+            };
             return $this->rest_error_response($this->make_rest_error(
                 $code,
-                $account_status === 'no_credentials'
-                    ? __('No wordpress.org accounts are configured.', 'peak-publisher')
-                    : ((isset($account['message']) && is_string($account['message']) && $account['message'] !== '') ? $account['message'] : __('No saved wordpress.org account has SVN write access for this plugin.', 'peak-publisher')),
+                (isset($account['message']) && is_string($account['message']) && $account['message'] !== '')
+                    ? $account['message']
+                    : __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
                 $status
             ));
         }
@@ -926,7 +928,7 @@ class AdminAPI {
     }
 
     public function get_peak_publisher_settings_rest(): array {
-        return get_peak_publisher_settings();
+        return get_peak_publisher_settings_for_api();
     }
 
     public function save_peak_publisher_settings_rest(\WP_REST_Request $request) {
@@ -943,7 +945,7 @@ class AdminAPI {
                 [ 'status' => 500 ]
             ));
         }
-        return get_peak_publisher_settings();
+        return get_peak_publisher_settings_for_api();
     }
 
     public function test_svn_credentials(\WP_REST_Request $request) {
@@ -969,8 +971,11 @@ class AdminAPI {
             ));
         }
 
-        // A masked password means the user is testing the stored credential.
+        // A masked password means the user is testing the stored credential — the
+        // probe's verdict is then recorded on the stored account.
+        $using_stored_credentials = false;
         if ($password === WPORG_PASSWORD_MASKED) {
+            $using_stored_credentials = true;
             $credentials = get_wporg_credentials($username);
             if (is_wp_error($credentials)) {
                 return $this->rest_error_response($credentials);
@@ -985,21 +990,30 @@ class AdminAPI {
             }
             $password = $credentials['password'];
         } else {
-            // Keep testing aligned with saving: credentials are only accepted when they can be stored securely.
-            $key = get_encryption_key();
-            if (is_wp_error($key)) {
-                return $this->rest_error_response($key);
+            // Keep testing aligned with saving: credentials are only accepted when they
+            // can be stored securely. A test must not create the key file, though — that
+            // is the first save's job.
+            $storage_error = get_credential_storage_error();
+            if ($storage_error !== null) {
+                return $this->rest_error_response($storage_error);
             }
         }
 
         // Load the wordpress.org plugin SVN client only for the endpoint that needs it.
         require_once __DIR__ . '/WporgPluginSvnClient.php';
         try {
-            // PROPFIND against the repository root verifies Basic Auth without checking plugin permissions.
+            // An MKACTIVITY probe verifies Basic Auth without checking plugin permissions.
             $client = new WporgPluginSvnClient($username, $password);
             $client->test_credentials();
+            if ($using_stored_credentials) {
+                // Explicit probe: always refresh the stamp — the badge jump is the feedback.
+                record_wporg_credentials_verdict($username, true, true);
+            }
             return [ 'status' => 'ok' ];
         } catch (WporgSvnException $e) {
+            if ($using_stored_credentials && $e->get_error_code() === 'invalid_credentials') {
+                record_wporg_credentials_verdict($username, false);
+            }
             // Known SVN failures keep their normalized error code and HTTP status.
             return $this->rest_error_response($this->make_rest_error(
                 $e->get_error_code(),
@@ -1072,6 +1086,15 @@ class AdminAPI {
             }
         }
 
+        // For imported plugins the local mirror is the authority on the release
+        // count — delivered here, so the client needs no directory lookup for them.
+        $release_counts_by_plugin_id = [];
+        if (!empty($already_imported_by_slug)) {
+            foreach (fetch_releases_grouped_by_parent(array_values($already_imported_by_slug)) as $plugin_id => $releases) {
+                $release_counts_by_plugin_id[(int) $plugin_id] = count($releases);
+            }
+        }
+
         $out = [];
         foreach ($plugins as $plugin) {
             if (!is_array($plugin)) {
@@ -1084,9 +1107,13 @@ class AdminAPI {
             $out[] = [
                 'slug' => $slug,
                 'name' => (string) ($plugin['name'] ?? $slug),
+                'icon' => isset($plugin['icon']) && is_string($plugin['icon']) ? $plugin['icon'] : null,
                 'already_imported' => isset($already_imported_by_slug[$slug]),
                 'existing_plugin_id' => $already_imported_by_slug[$slug] ?? null,
-                'has_write_access' => null,
+                'count_of_releases' => isset($already_imported_by_slug[$slug])
+                    ? ($release_counts_by_plugin_id[$already_imported_by_slug[$slug]] ?? 0)
+                    : null,
+                'directory_hint' => null,
                 'access_status' => 'pending',
             ];
         }
@@ -1135,12 +1162,24 @@ class AdminAPI {
         ]);
         $existing_post = !empty($existing) && $existing[0] instanceof \WP_Post ? $existing[0] : null;
 
+        // Already imported: the local mirror is the authority on the release count.
+        $local_release_count = null;
+        if ($existing_post instanceof \WP_Post) {
+            $releases_by_parent = fetch_releases_grouped_by_parent([ (int) $existing_post->ID ]);
+            $local_release_count = count($releases_by_parent[(int) $existing_post->ID] ?? []);
+        }
+
         require_once __DIR__ . '/WporgPluginSvnClient.php';
         $client = new WporgPluginSvnClient($username, $credentials['password']);
-        $access = $client->can_write($slug);
+        $access = $client->check_repo_access($slug);
         $access_status = (string) ($access['status'] ?? 'error');
-        if (!in_array($access_status, ['ok', 'no_write_access', 'not_found', 'error'], true)) {
-            $access_status = 'error';
+
+        // The directory hint is the remaining upfront ownership signal (heuristic,
+        // warn-only); write access itself is only decided at MERGE time.
+        $directory_hint = null;
+        if ($access_status === 'ok') {
+            require_once __DIR__ . '/SvnDeployWorkflow.php';
+            $directory_hint = SvnDeployWorkflow::directory_hint($slug, $username);
         }
 
         return [
@@ -1150,8 +1189,9 @@ class AdminAPI {
                 'name' => null,
                 'already_imported' => $existing_post instanceof \WP_Post,
                 'existing_plugin_id' => $existing_post instanceof \WP_Post ? (int) $existing_post->ID : null,
-                'has_write_access' => $access_status === 'ok' && !empty($access['has_write_access']),
+                'count_of_releases' => $local_release_count,
                 'access_status' => $access_status,
+                'directory_hint' => $directory_hint,
                 'message' => isset($access['message']) && is_string($access['message']) ? $access['message'] : null,
             ],
         ];
@@ -1217,23 +1257,28 @@ class AdminAPI {
             }
 
             try {
-                $access = $client->can_write($slug);
+                $access = $client->check_repo_access($slug);
             } catch (\Throwable $e) {
                 $skipped[] = $this->wporg_import_skip($slug, 'access_check_failed');
                 continue;
             }
 
+            // Importing needs no ownership — it only mirrors public SVN data (pending
+            // ownership transfers, agency handovers). The UI shows the contributor
+            // hint beforehand, and SVN enforces write access at deploy time.
             $access_status = (string) ($access['status'] ?? 'error');
             $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
-            if ($access_status === 'no_write_access') {
-                $skipped[] = $this->wporg_import_skip($slug, 'no_write_access', $access_message);
-                continue;
+            // The access check's MKACTIVITY judges the stored credentials — record it.
+            if ($access_status === 'ok') {
+                record_wporg_credentials_verdict($username, true);
+            } elseif ($access_status === 'credentials_rejected') {
+                record_wporg_credentials_verdict($username, false);
             }
             if ($access_status === 'not_found') {
                 $skipped[] = $this->wporg_import_skip($slug, 'not_found', $access_message);
                 continue;
             }
-            if ($access_status !== 'ok' || empty($access['has_write_access'])) {
+            if ($access_status !== 'ok') {
                 $skipped[] = $this->wporg_import_skip($slug, 'access_check_failed', $access_message);
                 continue;
             }
@@ -1297,7 +1342,6 @@ class AdminAPI {
     private function wporg_import_skip(string $slug, string $reason, ?string $message = null, ?int $existing_plugin_id = null): array {
         $default_messages = [
             'already_imported' => __('Plugin already imported.', 'peak-publisher'),
-            'no_write_access' => __('The saved wordpress.org account does not have SVN write access for this plugin.', 'peak-publisher'),
             'not_found' => __('Plugin not found on wordpress.org SVN.', 'peak-publisher'),
             'access_check_failed' => __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
         ];

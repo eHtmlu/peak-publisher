@@ -88,12 +88,17 @@ class SvnDeployWorkflow {
             }
 
             $commit = $client->commit(sprintf('Publish %s %s via Peak Publisher', $wporg_slug, $version));
+            // A successful commit is the strongest possible credential verdict.
+            record_wporg_credentials_verdict($username, true);
             return [
                 'revision' => (int) ($commit['revision'] ?? 0),
                 'committed' => true,
                 'touched_trunk' => $touch_trunk,
             ];
         } catch (WporgSvnException $e) {
+            if ($e->get_error_code() === 'invalid_credentials') {
+                record_wporg_credentials_verdict($username, false);
+            }
             if ($client instanceof WporgPluginSvnClient && in_array($e->get_error_code(), ['wporg_concurrent_external_change'], true)) {
                 $client->abort();
             }
@@ -318,10 +323,24 @@ class SvnDeployWorkflow {
         }
     }
 
-    public static function find_author_account_result(string $wporg_slug, ?string $preferred_username = null): array {
+    /**
+     * Resolves the account a wordpress.org operation runs with and probes it:
+     * repository existence and credential acceptance. Write access is not
+     * probeable — wordpress.org decides it at MERGE time (2026-08); the upfront
+     * ownership signal is directory_hint().
+     *
+     * Exactly one account is probed, and there is no fallback to another one when
+     * it is rejected: a rotated password must surface for the account the user
+     * meant, never be bypassed by a silent identity switch.
+     *
+     * @return array{status:string, username:string|null, message:string|null}
+     *         status: ok|no_credentials|not_found|credentials_rejected|error;
+     *         username: the resolved account, null only for no_credentials.
+     */
+    public static function resolve_wporg_account_access(string $wporg_slug, ?string $preferred_username = null): array {
         $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
-        $accounts = get_usable_wporg_account_usernames();
-        if (empty($accounts)) {
+        $username = select_wporg_account_username($preferred_username);
+        if ($username === null) {
             return [
                 'status' => 'no_credentials',
                 'username' => null,
@@ -329,70 +348,357 @@ class SvnDeployWorkflow {
             ];
         }
 
-        $preferred = null;
-        if ($preferred_username !== null && trim($preferred_username) !== '') {
-            $preferred = normalize_wporg_username($preferred_username, 'username');
-            if (is_wp_error($preferred)) {
-                $preferred = null;
-            }
+        $credentials = get_wporg_credentials($username);
+        if (is_wp_error($credentials) || $credentials === null || empty($credentials['password'])) {
+            return [
+                'status' => 'error',
+                'username' => $username,
+                'message' => is_wp_error($credentials) ? $credentials->get_error_message() : __('Could not verify wordpress.org SVN access.', 'peak-publisher'),
+            ];
         }
 
-        $ordered = [];
-        if (is_string($preferred) && in_array($preferred, $accounts, true)) {
-            $ordered[] = $preferred;
+        try {
+            $access = self::svn_client($username, $credentials['password'])->check_repo_access($wporg_slug);
+        } catch (\Throwable $e) {
+            return [
+                'status' => 'error',
+                'username' => $username,
+                'message' => $e instanceof WporgSvnException ? $e->getMessage() : __('Could not verify wordpress.org SVN access.', 'peak-publisher'),
+            ];
         }
-        foreach ($accounts as $account_username) {
-            if (!in_array($account_username, $ordered, true)) {
-                $ordered[] = $account_username;
-            }
-        }
 
-        $saw_not_found = false;
-        $last_message = null;
-        foreach ($ordered as $account_username) {
-            $credentials = get_wporg_credentials($account_username);
-            if (is_wp_error($credentials) || $credentials === null || empty($credentials['password'])) {
-                $last_message = is_wp_error($credentials) ? $credentials->get_error_message() : null;
-                continue;
-            }
-
-            try {
-                $client = self::svn_client($account_username, $credentials['password']);
-                $access = $client->can_write($wporg_slug);
-            } catch (\Throwable $e) {
-                return [
-                    'status' => 'error',
-                    'username' => null,
-                    'message' => $e instanceof WporgSvnException ? $e->getMessage() : __('Could not verify wordpress.org SVN access.', 'peak-publisher'),
-                ];
-            }
-
-            $access_status = (string) ($access['status'] ?? 'error');
-            $last_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : $last_message;
-            if ($access_status === 'ok' && !empty($access['has_write_access'])) {
-                return [
-                    'status' => 'ok',
-                    'username' => $account_username,
-                    'message' => null,
-                ];
-            }
-            if ($access_status === 'error') {
-                return [
-                    'status' => 'error',
-                    'username' => null,
-                    'message' => $last_message,
-                ];
-            }
-            if ($access_status === 'not_found') {
-                $saw_not_found = true;
-            }
+        $status = (string) ($access['status'] ?? 'error');
+        // The MKACTIVITY inside the access check is a real credential verdict.
+        if ($status === 'ok') {
+            record_wporg_credentials_verdict($username, true);
+        } elseif ($status === 'credentials_rejected') {
+            record_wporg_credentials_verdict($username, false);
         }
 
         return [
-            'status' => $saw_not_found ? 'not_found' : 'no_write_access',
-            'username' => null,
-            'message' => $last_message,
+            'status' => $status,
+            'username' => $username,
+            'message' => isset($access['message']) && is_string($access['message']) ? $access['message'] : null,
         ];
+    }
+
+    /**
+     * Directory/ownership hint for a plugin slug — the best available upfront signal
+     * since write access is not probeable before the MERGE. Heuristic by design, so
+     * callers warn and never block. Two orthogonal facts, so the UI can present them
+     * as separate points:
+     * - state — published | fresh (approved, page not live yet; 'created' = ISO 8601
+     *   UTC time of the repository creation commit) | closed (or temporarily disabled;
+     *   'reason' when public) | unknown
+     * - relation — the account's connection to the plugin:
+     *   owner (directory author_profile, or the creation commit "Adding {title} by
+     *   {login}." — the format wordpress.org's own SVN watcher parses) |
+     *   committer (recent SVN commit history: the only public evidence of actual
+     *   commit access; checked lazily, only to rescue a pending not_listed verdict —
+     *   absence proves nothing, so it never downgrades) |
+     *   listed (public contributor list) | not_listed | unknown
+     * 'owner' carries the plugin owner's name when known, for contrast display.
+     * 'name'/'icon'/'description' carry the directory listing's identity (published;
+     * closed responses still provide the name) so the UI can show WHICH plugin the
+     * directory serves under this slug before anything is imported.
+     *
+     * Remote failures degrade to 'unknown' facts — for a valid slug the hint
+     * never throws, so callers consume it without a guard.
+     *
+     * @return array{state:string, relation:string, owner:string|null, created:string|null, reason:string|null, name:string|null, icon:string|null, description:string|null, release_count:int|null, closed_date:string|null}
+     */
+    public static function directory_hint(string $wporg_slug, string $username): array {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $hint = self::compute_directory_hint($wporg_slug, $username);
+
+        // Extension/override point (also used to simulate states in development —
+        // some, like a freshly approved own plugin, cannot occur on demand).
+        $filtered = apply_filters('pblsh_wporg_directory_hint', $hint, $wporg_slug, $username);
+        return is_array($filtered) ? array_merge($hint, array_intersect_key($filtered, $hint)) : $hint;
+    }
+
+    private static function compute_directory_hint(string $wporg_slug, string $username): array {
+        $hint = [
+            'state' => 'unknown',
+            'relation' => 'unknown',
+            'owner' => null,
+            'created' => null,
+            'reason' => null,
+            'name' => null,
+            'icon' => null,
+            'description' => null,
+            'release_count' => null,
+            'closed_date' => null,
+        ];
+        $normalized = normalize_wporg_username($username);
+        if (is_wp_error($normalized)) {
+            return $hint;
+        }
+
+        $info = self::fetch_directory_info($wporg_slug);
+
+        if ($info['state'] === 'published') {
+            $hint['state'] = 'published';
+            $hint['name'] = $info['name'];
+            $hint['icon'] = $info['icon'];
+            $hint['description'] = $info['description'];
+            $hint['release_count'] = $info['release_count'];
+            $directory_owner = wporg_string_from_value($info['owner'] ?? '');
+            $hint['owner'] = $directory_owner !== '' ? $directory_owner : null;
+            // Owner beats the contributor listing — it also covers owners a readme
+            // forgot to list as contributors.
+            if ($directory_owner !== '' && self::username_in_list($normalized, [ $directory_owner ])) {
+                $hint['relation'] = 'owner';
+            } elseif (self::username_in_list($normalized, $info['contributors'])) {
+                $hint['relation'] = 'listed';
+            } elseif (self::has_committed_before($wporg_slug, $normalized)) {
+                // Last rescue before the warning: team and agency committers often appear
+                // in neither owner nor readme — but their commits are public. One extra
+                // SVN roundtrip, paid only in the case that would otherwise warn.
+                $hint['relation'] = 'committer';
+            } else {
+                $hint['relation'] = 'not_listed';
+            }
+            return $hint;
+        }
+
+        if ($info['state'] === 'closed') {
+            // The closed API response carries no owner or contributor data — the
+            // relation deliberately stays unknown instead of guessing.
+            $hint['state'] = 'closed';
+            $hint['reason'] = $info['reason'];
+            $hint['name'] = $info['name'];
+            $hint['closed_date'] = $info['closed_date'];
+            return $hint;
+        }
+
+        if ($info['state'] === 'unpublished') {
+            // Freshly approved: the page only goes live with the first commit, but the
+            // repository creation commit already names the owner and the approval time.
+            $hint['state'] = 'fresh';
+            $creation = self::creation_commit_facts($wporg_slug);
+            if ($creation !== null) {
+                $hint['owner'] = $creation['owner'];
+                $hint['created'] = $creation['created'];
+                $hint['relation'] = self::username_in_list($normalized, [ $creation['owner'] ]) ? 'owner' : 'not_listed';
+            }
+            return $hint;
+        }
+
+        return $hint;
+    }
+
+    /**
+     * Fetches the plugin's public directory state from the plugins.info API.
+     * Deliberately uncached: the hint is only requested a few times per upload flow,
+     * and after the user fixes something on wordpress.org (contributor added, plugin
+     * published or reopened) the next check must reflect it immediately.
+     *
+     * @return array{state:string, contributors:string[], owner:string|null, reason:string|null, name:string|null, icon:string|null, description:string|null, release_count:int|null, closed_date:string|null}
+     *         state: published|closed|unpublished|unknown; owner = user_nicename of the
+     *         current plugin owner (from author_profile), only for published plugins;
+     *         release_count = number of tagged versions (what an import creates as
+     *         releases), only for published plugins; closed_date = Y-m-d closure
+     *         date, only for closed plugins (null when wordpress.org withholds it).
+     */
+    private static function fetch_directory_info(string $wporg_slug): array {
+        $url = add_query_arg([
+            'action' => 'plugin_information',
+            'request' => [
+                'slug' => $wporg_slug,
+                // icons and short_description are opt-in fields in the 1.2 API.
+                'fields' => [ 'contributors' => true, 'icons' => true, 'short_description' => true ],
+            ],
+        ], 'https://api.wordpress.org/plugins/info/1.2/');
+
+        $response = wp_remote_get($url, [
+            'timeout' => 20,
+            'redirection' => 3,
+            'user-agent' => 'Peak Publisher wordpress.org Discovery',
+        ]);
+        $unknown = [ 'state' => 'unknown', 'contributors' => [], 'owner' => null, 'reason' => null, 'name' => null, 'icon' => null, 'description' => null, 'release_count' => null, 'closed_date' => null ];
+        if (is_wp_error($response)) {
+            return $unknown;
+        }
+        // The API answers unknown AND closed plugins with HTTP 404 — both carry a
+        // meaningful JSON body, so 404 is a determinate outcome, not a failure.
+        $status_code = (int) wp_remote_retrieve_response_code($response);
+        if (!in_array($status_code, [200, 404], true)) {
+            return $unknown;
+        }
+
+        $data = json_decode((string) wp_remote_retrieve_body($response), true);
+        if (!is_array($data)) {
+            return $unknown;
+        }
+
+        // The directory listing's display texts, cleaned for direct output.
+        $clean_text = static function ($value): ?string {
+            $text = trim(html_entity_decode(wp_strip_all_tags(wporg_string_from_value($value)), ENT_QUOTES | ENT_HTML5));
+            return $text !== '' ? $text : null;
+        };
+
+        // The API's own contract tells the states apart: closed plugins answer with
+        // error "closed" (plus the closed flag), every other error is a miss, and a
+        // successful listing never carries an error key.
+        if (($data['error'] ?? '') === 'closed' || !empty($data['closed'])) {
+            // Covers closed AND temporarily disabled plugins — the API reports both as closed.
+            $reason = wporg_string_from_value($data['reason_text'] ?? '');
+            $info = [
+                'state' => 'closed',
+                'contributors' => [],
+                'owner' => null,
+                'reason' => $reason !== '' ? $reason : null,
+                'name' => $clean_text($data['name'] ?? ''),
+                'icon' => null,
+                'description' => null,
+                'release_count' => null,
+                'closed_date' => $clean_text($data['closed_date'] ?? ''),
+            ];
+        } elseif (!isset($data['error'])) {
+            // author_profile is the profile URL of the current plugin owner (post author);
+            // its last path segment is the owner's user_nicename.
+            $owner = '';
+            $author_profile = wporg_string_from_value($data['author_profile'] ?? '');
+            if ($author_profile !== '') {
+                $profile_path = trim((string) parse_url($author_profile, PHP_URL_PATH), '/');
+                $owner = $profile_path !== '' ? basename($profile_path) : '';
+            }
+
+            $icon = self::pick_icon_url($data['icons'] ?? null);
+
+            // versions is a default field of plugin_information: the tagged versions
+            // plus one trunk entry (present only when tags exist). The tag count is
+            // what the import will create as releases — one release per SVN tag.
+            $release_count = null;
+            if (is_array($data['versions'] ?? null)) {
+                $release_count = count(array_diff(array_map('strval', array_keys($data['versions'])), [ 'trunk' ]));
+            }
+
+            // contributors is keyed by user_nicename (a requested field, always set
+            // for published plugins — the directory falls back to the post author).
+            $contributors = is_array($data['contributors'] ?? null) ? $data['contributors'] : [];
+
+            $info = [
+                'state' => 'published',
+                'contributors' => array_map('strval', array_keys($contributors)),
+                'owner' => $owner !== '' ? $owner : null,
+                'reason' => null,
+                'name' => $clean_text($data['name'] ?? ''),
+                'icon' => $icon,
+                'description' => $clean_text($data['short_description'] ?? ''),
+                'release_count' => $release_count,
+                'closed_date' => null,
+            ];
+        } else {
+            // "Plugin not found." — callers only ask after the SVN probe confirmed the
+            // repository exists, so this means: approved but not published yet.
+            $info = [
+                'state' => 'unpublished',
+                'contributors' => [],
+                'owner' => null,
+                'reason' => null,
+                'name' => null,
+                'icon' => null,
+                'description' => null,
+                'release_count' => null,
+                'closed_date' => null
+            ];
+        }
+
+        return $info;
+    }
+
+    /**
+     * Reports whether the account appears in the plugin's recent commit history.
+     * False also covers "could not check" — the caller treats it as absence, which
+     * only means the warning stays (upgrade-only escalation).
+     */
+    private static function has_committed_before(string $wporg_slug, string $username): bool {
+        try {
+            // SVN reads are anonymous on wordpress.org — the rescue also works
+            // while no stored account is usable.
+            $authors = self::svn_client()->get_recent_log_authors($wporg_slug);
+        } catch (\Throwable $e) {
+            return false;
+        }
+        return is_array($authors) && self::username_in_list($username, $authors);
+    }
+
+    /**
+     * Extracts owner login and commit time from the repository creation commit,
+     * null when the log is unavailable or does not match the fixed creation-message
+     * format.
+     *
+     * @return array{owner:string, created:string|null}|null
+     */
+    private static function creation_commit_facts(string $wporg_slug): ?array {
+        try {
+            // SVN reads are anonymous on wordpress.org — no credentials needed.
+            $entry = self::svn_client()->get_initial_log_entry($wporg_slug);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $message = trim((string) ($entry['message'] ?? ''));
+        // The same pattern wordpress.org's SVN watcher uses for exactly this message.
+        if ($message === '' || !preg_match('/^Adding (.+) by (.+)\.$/i', $message, $m)) {
+            return null;
+        }
+        $owner = trim($m[2]);
+        if ($owner === '') {
+            return null;
+        }
+
+        // SVN reports the commit time with microseconds (2023-03-24T00:40:23.193847Z);
+        // the client parses 'created' with new Date(), and the ECMAScript date format
+        // only guarantees three fractional digits — normalize at the boundary to
+        // second-precision UTC. An unparseable date is an unknown creation time,
+        // not a failed hint.
+        $created = null;
+        $raw_date = trim((string) ($entry['date'] ?? ''));
+        if ($raw_date !== '') {
+            try {
+                $created = (new \DateTimeImmutable($raw_date))
+                    ->setTimezone(new \DateTimeZone('UTC'))
+                    ->format('Y-m-d\TH:i:s\Z');
+            } catch (\Throwable $e) {
+            }
+        }
+        return [
+            'owner' => $owner,
+            'created' => $created,
+        ];
+    }
+
+    /**
+     * Case-tolerant membership test: the info API keys contributors by user_nicename,
+     * the creation commit carries the raw login — compare against both forms.
+     */
+    private static function username_in_list(string $username, array $list): bool {
+        $candidates = array_unique(array_filter([
+            strtolower($username),
+            sanitize_title($username),
+        ]));
+        foreach ($list as $entry) {
+            if (in_array(strtolower((string) $entry), $candidates, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Picks the preferred icon URL from a wordpress.org icons map (or null). */
+    private static function pick_icon_url($icons): ?string {
+        if (!is_array($icons)) {
+            return null;
+        }
+        foreach ([ 'svg', '2x', '1x', 'default' ] as $icon_key) {
+            if (!empty($icons[$icon_key]) && is_string($icons[$icon_key])) {
+                return $icons[$icon_key];
+            }
+        }
+        return null;
     }
 
     public static function discover_plugins_by_author(string $username): array {
@@ -414,6 +720,8 @@ class SvnDeployWorkflow {
                     'author' => $normalized_username,
                     'per_page' => $per_page,
                     'page' => $page,
+                    // icons are an opt-in field of the 1.2 API.
+                    'fields' => [ 'icons' => true ],
                 ],
             ], 'https://api.wordpress.org/plugins/info/1.2/');
 
@@ -452,6 +760,7 @@ class SvnDeployWorkflow {
                 $plugins[] = [
                     'slug' => $slug,
                     'name' => $name !== '' ? $name : $slug,
+                    'icon' => self::pick_icon_url($plugin['icons'] ?? null),
                 ];
             }
 

@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [currentPluginId, setCurrentPluginId] = useState(null);
         const [initialTab, setInitialTab] = useState(null);
+        const [additionInitial, setAdditionInitial] = useState(null); // deep-link seed for the addition process
         const [activeUploadContext, setActiveUploadContext] = useState({});
         const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);
         const hasLoadedList = useSelect((select) => {
@@ -80,6 +81,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     plugin: params.get('plugin'),
                     view: params.get('view'),
                     tab: params.get('tab'),
+                    channel: params.get('channel'),
+                    import: params.get('import'),
                 };
             } catch (e) {
                 return { plugin: null, view: null };
@@ -88,15 +91,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const setQuery = (next) => {
             try {
                 const params = new URLSearchParams(window.location.search);
-                if ('plugin' in next) {
-                    if (next.plugin) { params.set('plugin', String(next.plugin)); } else { params.delete('plugin'); }
-                }
-                if ('view' in next) {
-                    if (next.view) { params.set('view', String(next.view)); } else { params.delete('view'); }
-                }
-                if ('tab' in next) {
-                    if (next.tab) { params.set('tab', String(next.tab)); } else { params.delete('tab'); }
-                }
+                ['plugin', 'view', 'tab', 'channel', 'import'].forEach((key) => {
+                    if (key in next) {
+                        if (next[key]) { params.set(key, String(next[key])); } else { params.delete(key); }
+                    }
+                });
                 const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
                 window.history.replaceState({}, '', newUrl);
             } catch (e) {}
@@ -117,7 +116,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
                 if (q && q.view === 'addition') {
-                    handleAddNewPlugin();
+                    // Deep link: ?view=addition&channel=wporg&import=open opens the wporg
+                    // import route directly (used by the Settings account card).
+                    handleAddNewPlugin(q.channel || q.import ? { channel: q.channel, importOpen: q.import === 'open' } : null);
                     return;
                 }
             })();
@@ -142,12 +143,31 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
 
-        const handleAddNewPlugin = () => {
+        const handleAddNewPlugin = (initial = null) => {
             // keep local draft for UI only
             setIsNew(true);
             setActiveUploadContext({});
+            setAdditionInitial(initial && typeof initial === 'object' ? initial : null);
             setView('addition-process');
-            setQuery({ view: 'addition', plugin: null });
+            setQuery({
+                view: 'addition',
+                plugin: null,
+                channel: initial?.channel || null,
+                import: initial?.importOpen ? 'open' : null,
+            });
+        };
+
+        const handleAdditionStateChange = ({ channel = null, importOpen = false } = {}) => {
+            // The wizard reports its route; the URL mirrors it so reloads and
+            // copied links land where the user actually is.
+            setQuery({ channel: channel || null, import: importOpen ? 'open' : null });
+        };
+
+        const handleOpenWporgImport = () => {
+            // "Import plugins…" from the Settings account card — the import's single home
+            // is the add-new flow's wporg "Add" step.
+            closeSettings();
+            handleAddNewPlugin({ channel: 'wporg', importOpen: true });
         };
 
         const handleEdit = async (id) => {
@@ -156,7 +176,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 setView('editor');
                 setActiveUploadContext({});
                 setCurrentPluginId(id);
-                setQuery({ plugin: id, view: null });
+                setQuery({ plugin: id, view: null, channel: null, import: null });
                 await window.Pblsh.Controllers.Plugins.fetchById(id);
                 try {
                     const sel = wp.data.select('pblsh/releases');
@@ -191,7 +211,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setIsNew(false);
             setInitialTab(null);
             setActiveUploadContext({});
-            setQuery({ plugin: null, view: null, tab: null });
+            setQuery({ plugin: null, view: null, tab: null, channel: null, import: null });
         };
 
 
@@ -231,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     createElement('div', { className: 'pblsh--header__actions' },
                         createElement(Button, {
                             isPrimary: true,
-                            onClick: handleAddNewPlugin,
+                            onClick: () => handleAddNewPlugin(),
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
                         }, __('Add New Plugin', 'peak-publisher')),
@@ -250,7 +270,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     createElement('div', { className: 'pblsh--header__actions' },
                         createElement(Button, {
                             isPrimary: true,
-                            onClick: handleAddNewPlugin,
+                            onClick: () => handleAddNewPlugin(),
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
                         }, __('Add New Plugin', 'peak-publisher')),
@@ -276,7 +296,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 setIsNew(false);
                 setView('editor');
                 setActiveUploadContext({});
-                setQuery({ plugin: pluginId, view: null });
+                setQuery({ plugin: pluginId, view: null, channel: null, import: null });
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -298,8 +318,13 @@ document.addEventListener('DOMContentLoaded', function() {
             if (view === 'addition-process') {
                 return createElement(PluginAdditionProcess, {
                     onCreated: handleCreated,
-                    onOpenSettings: openSettings,
+                    // The flow's affirmative exit lands where Cancel lands —
+                    // back on the plugin list.
+                    onFinished: handleCancel,
+                    onStateChange: handleAdditionStateChange,
                     setActiveUploadContext,
+                    initialChannel: additionInitial?.channel || null,
+                    initialImport: !!additionInitial?.importOpen,
                 });
             }
             else if (view === 'editor') {
@@ -326,7 +351,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     plugins: plugins,
                     onEdit: handleEdit,
                     onDelete: handleDelete,
-                    onCreateNew: handleAddNewPlugin,
+                    onCreateNew: () => handleAddNewPlugin(),
                     onToggleStatus: togglePluginStatus,
                     pendingPluginStatus: pendingPluginStatus,
                 });
@@ -357,6 +382,7 @@ document.addEventListener('DOMContentLoaded', function() {
             createElement('dialog', { className: 'pblsh--modal pblsh--modal--settings', ref: settingsDialogRef, onClick: (e) => { if (e.target === e.currentTarget) { closeSettings(); } } },
                 createElement(Settings, {
                     onClose: closeSettings,
+                    onOpenWporgImport: handleOpenWporgImport,
                 })
             ),
 

@@ -34,6 +34,10 @@
     --border-color-row-outer: color-mix(in srgb, currentColor 30%, transparent);
     --border-color-row-between: color-mix(in srgb, currentColor 15%, transparent);
 
+    /* The gray decision/identity surface: the publish-path row, and the whole
+       result body while the publish destination is still undecided. */
+    --surface-color: #f0f0f1;
+
     --content-padding: var(--content-padding-block) var(--content-padding-inline);
 
     line-height: 1.5;
@@ -159,140 +163,195 @@
     }
 }
 
-/* New Stepper */
+/* Compact wizard stepper — circle + inline label per step, line segments in
+   between; past steps show a check (passed, not verified — every step stays
+   freely clickable). Lives in the wizard panel's header. */
 .pblsh--stepper {
-    position: relative;
-    padding: var(--stepper-padding-top) 0 2rem; /* 20px 0 32px */
-    margin-bottom: 1.25rem; /* 20px */
-    --steps: 3; /* fallback value */
-    --step: 1; /* fallback value */
-    --bar-thickness: 0.25rem; /* 4px */
-    --index-size: 2.25rem; /* 36px */
-    --button-padding: 0.5rem; /* 8px */
-    --stepper-padding-top: 1.25rem; /* 20px */
-}
-
-.pblsh--stepper__bar {
-    position: absolute;
-    top: calc(var(--stepper-padding-top) + var(--button-padding) + ((var(--index-size) - var(--bar-thickness)) / 2)); /* aligns with circle center */
-    left: 0;
-    right: 0;
-    height: var(--bar-thickness);
-    background: #ccd6e0;
-    border-radius: calc(var(--bar-thickness) / 2);
-    z-index: 0;
-    margin-inline: calc(100% / (var(--steps) * 2));
-}
-
-.pblsh--stepper__bar-fill {
-    height: 100%;
-    width: calc((var(--step) - 1) / (var(--steps) - 1) * 100%);
-    background: linear-gradient(90deg, var(--index-color-complete) max(0%, calc((var(--step) - 2) / (var(--steps) - 1) * 100%)), var(--index-color-active) 100%);
-    border-radius: calc(var(--bar-thickness) / 2);
-    transition: width 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+    --index-size: 1.5rem; /* 24px */
 }
 
 .pblsh--stepper__list {
     list-style: none;
-    padding: 0;
     margin: 0;
-    display: grid;
-    grid-template-columns: repeat(var(--steps), 1fr);
-    gap: 1rem; /* 16px */
-    position: relative;
-    z-index: 1;
+    padding: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
 }
 
 .pblsh--stepper__item {
-    position: relative;
+    display: flex;
+    align-items: center;
+    margin: 0;
+}
+
+.pblsh--stepper__item:not(:last-child) {
+    flex: 1;
+}
+
+/* The segment towards the next step — green once this step lies behind. */
+.pblsh--stepper__item:not(:last-child)::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--index-color-upcoming);
+    margin: 0 1rem;
+}
+
+.pblsh--stepper__item.is-complete::after {
+    background: var(--index-color-complete);
 }
 
 .pblsh--stepper__link {
     appearance: none;
     background: transparent;
     border: 0;
-    padding: var(--button-padding);
-    width: 100%;
-    text-align: center;
-    display: grid;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
+    padding: 0.25rem;
+    display: flex;
     align-items: center;
-    justify-items: center;
-    gap: 0.5rem; /* 8px */
+    gap: 0.5rem;
+    font: inherit;
     cursor: pointer;
-    border-radius: 0.5rem; /* 8px */
-    transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
+    border-radius: 0.375rem;
 }
 
 .pblsh--stepper__index {
-    height: var(--index-size);
     width: var(--index-size);
-    border-radius: calc(var(--index-size) / 2);
+    height: var(--index-size);
+    border-radius: 50%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-weight: 700;
-    font-size: 1rem;
-    background: var(--index-color-upcoming);
-    transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    border: 1px solid var(--color-gray);
+    color: #646970;
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
 
 .pblsh--stepper__item.is-active .pblsh--stepper__index {
-    color: #fff;
     background: var(--index-color-active);
+    border-color: var(--index-color-active);
+    color: #fff;
 }
 
 .pblsh--stepper__item.is-complete .pblsh--stepper__index {
-    color: #fff;
-    background: var(--index-color-complete);
-}
-
-.pblsh--stepper__text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    align-items: center;
+    background: color-mix(in srgb, var(--index-color-complete) 15%, #fff);
+    border-color: var(--index-color-complete);
+    color: var(--index-color-complete);
 }
 
 .pblsh--stepper__label {
+    white-space: nowrap;
+}
+
+.pblsh--stepper__item.is-active .pblsh--stepper__label {
     font-weight: 600;
-    color: #23282d;
 }
 
-.pblsh--stepper__desc {
-    color: #666;
-    font-size: 0.875rem; /* 14px */
+.pblsh--stepper__item.is-upcoming .pblsh--stepper__label {
+    color: #646970;
 }
 
-@media (max-width: 48rem) { /* 768px */
-    .pblsh--stepper__list {
-        grid-template-columns: 1fr;
-    }
-    .pblsh--stepper__bar {
-        display: none;
-    }
+.pblsh--stepper__link:hover .pblsh--stepper__label {
+    color: var(--color-blue);
+}
+
+.pblsh--stepper__count {
+    color: #646970;
+    font-size: 0.8125rem;
+    white-space: nowrap;
 }
 
 .pblsh--addition-process {
     --max-content-width: 60rem; /* 960px */
+    /* The wporg situation triage column — options and back control share it. */
+    --situation-width: 34rem;
+    /* The shared base height of every screen (wizard body and free-standing
+       steps) — calibrated to the tallest regular step; longer content grows
+       past it. Deliberately rem, not viewport-based: framed white space reads
+       as "missing content". */
+    --step-height: 26rem; /* 416px */
     /* --max-content-height: 60rem; */
 }
 
-.pblsh--addition-process--protocol-warning {
-    background: #ffd700;
-    color: #000;
-    padding: 0.5rem;
-    border-radius: 0.25rem;
-    margin-bottom: 1rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    text-align: center;
-    border: 1px solid #000;
-    border-radius: 0.25rem;
+/* The wizard panel — stepper header, step body, and navigation footer share
+   one card (the app's dialog anatomy: the body carries both divider lines).
+   Decision screens (channel choice, situation triage, import) render outside
+   of it. */
+.pblsh--wizard {
+    max-width: var(--max-content-width);
+    margin-inline: auto;
+    background: #fff;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem; /* 8px */
+    box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
     overflow: hidden;
+}
+
+.pblsh--wizard__header {
     display: flex;
     align-items: center;
+    padding: 1rem 1.5rem;
+}
+
+/* The step content, card-less — the panel is the card. The height pair keeps
+   the footer stable while stepping AND gives the filling steps a definite
+   height (the PHP snippet's percentage chain collapses without one); longer
+   content grows the body via the fit-content minimum. */
+.pblsh--wizard__body {
+    min-height: fit-content;
+    height: var(--step-height);
+    /* More head room than the compact card padding provides (its block value
+       maxes at 1rem); the inline side keeps the app's fluid padding. */
+    padding: 1.5rem var(--content-padding-inline);
+    border-block: 1px solid var(--border-color-light);
+}
+
+/* The step title — the body's anchor, sized between the app's card titles
+   and the modal page titles. */
+.pblsh--wizard__step-title {
+    margin: 0 0 1rem;
+    font-size: 1.25rem; /* 20px */
+}
+
+/* The two filling steps (dropzone, scrolling PHP snippet) replicate the old
+   upload/bootstrap card modifiers: a flex column so the last block can take
+   the remaining height. */
+.pblsh--wizard__body:has(.pblsh--dropzone),
+.pblsh--wizard__body:has(code[class*="language-php"]) {
+    display: flex;
+    flex-direction: column;
+}
+
+.pblsh--wizard__footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+}
+
+/* Navigation buttons carry a direction arrow — shared between the wizard
+   footer and the free-standing back controls (triage, import). */
+.pblsh--wizard__footer .components-button,
+.pblsh--controls .components-button {
+    gap: 0.375rem;
+}
+
+.pblsh--button-icon {
+    display: inline-flex;
+    line-height: 1;
+}
+
+/* Tip links under the step's action. */
+.pblsh--addition-process__tips {
+    margin-top: 1.5rem;
 }
 
 /* Plugin-header rundown — a two-column definition list shared by the
@@ -345,29 +404,33 @@
 
 .pblsh--addition-process .pblsh--step {
     min-height: fit-content;
-    height: 50vh;
-    /* max-height: var(--max-content-height); */
     display: flex;
     flex-direction: column;
     align-items: stretch;
+}
+
+/* The base height applies only where a white card carries it — free-standing
+   screens without one (channel choice, situation triage) stay content-sized. */
+.pblsh--addition-process .pblsh--step:has(> .pblsh--card) {
+    height: var(--step-height);
 }
 
 .pblsh--addition-process .pblsh--snippet-wrapper:has(code[class*="language-php"]) {
     flex: 1;
 }
 
-.pblsh--addition-process .pblsh--step pre {
+.pblsh--addition-process pre {
     margin: 0;
     padding: 0;
     border-radius: .25rem;
     overflow: hidden;
 }
 
-.pblsh--addition-process .pblsh--step pre code {
+.pblsh--addition-process pre code {
     margin: 0;
 }
 
-.pblsh--addition-process .pblsh--step pre:has(code[class*="language-php"]) {
+.pblsh--addition-process pre:has(code[class*="language-php"]) {
     flex: 1;
     position: relative;
     height: 100%;
@@ -375,14 +438,10 @@
     margin: 0;
 }
 
-.pblsh--addition-process .pblsh--step pre code[class*="language-php"] {
+.pblsh--addition-process pre code[class*="language-php"] {
     overflow: auto;
     position: absolute;
     inset: 0;
-}
-
-.pblsh--addition-process .pblsh--step pre code .highlight-line {
-    min-width: fit-content !important;
 }
 
 .pblsh--addition-process .pblsh--step {
@@ -394,81 +453,390 @@
     flex: 1 0 auto;
 }
 
-.pblsh--choice-grid {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-    align-content: start;
-}
-
-.pblsh--choice-card {
+/* Shared option-card base — the one clearly-owned base for selectable card
+   options (the upload overlay's destination-choice rows, the wporg situation
+   triage). Layout stays in the owning component's own classes; only the card
+   look and radio mechanics live here. */
+.pblsh--option-card {
+    position: relative;
     border: 1px solid var(--border-color-light);
-    border-radius: 0.5rem;
+    border-radius: 0.375rem;
     background: #fff;
-    color: #1d2327;
-    padding: 1rem;
-    min-height: 10rem;
-    text-align: left;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
     cursor: pointer;
-    box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
 }
 
-.pblsh--choice-card:hover,
-.pblsh--choice-card:focus-visible {
-    border-color: #2271b1;
-    box-shadow: 0 0 0 1px #2271b1;
-    outline: none;
+.pblsh--option-card:hover {
+    border-color: color-mix(in srgb, var(--color-blue) 45%, var(--border-color-light));
 }
 
-.pblsh--choice-card.is-selected {
-    border-color: #2271b1;
+/* The radios are visually hidden but stay focusable — selecting a card immediately applies the choice. */
+.pblsh--option-card input[type="radio"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
 }
 
-.pblsh--choice-card.is-disabled {
-    cursor: default;
-    opacity: 0.58;
+.pblsh--option-card:has(input:focus-visible) {
+    outline: 2px solid var(--color-blue);
+    outline-offset: 2px;
 }
 
-.pblsh--choice-card.is-disabled:hover,
-.pblsh--choice-card.is-disabled:focus-visible {
-    border-color: var(--border-color-light);
-    box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
+/* Shared channel cards (upload overlay channel screen, add-new channel step) */
+.pblsh--channel-choice {
+    display: grid;
+    gap: 1rem;
 }
 
-.pblsh--choice-card__icon {
-    color: #2271b1;
-    line-height: 1;
+/* Shared intro for decision screens (channel choice, wporg situation triage):
+   a centered prompt with its stake line, grouped tighter than the screen's
+   section gap. */
+.pblsh--choice-intro {
+    display: grid;
+    gap: 0.25rem;
+    text-align: center;
 }
 
-.pblsh--choice-card__title {
-    font-size: 1rem;
+.pblsh--choice-intro__prompt {
+    margin: 0;
+    font-size: 1.125rem;
     font-weight: 600;
+    line-height: 1.4;
 }
 
-.pblsh--choice-card__text {
+.pblsh--choice-intro__subtitle {
+    margin: 0;
     color: #646970;
 }
 
-.pblsh--wporg-account-step__ready,
-.pblsh--wporg-account-step__missing {
-    margin-top: 1rem;
+.pblsh--channel-choice__cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: stretch;
 }
 
-.pblsh--wporg-account-step__ready {
+.pblsh--channel-choice__option {
     display: flex;
+    flex-direction: column;
+    padding: 1.25rem;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.375rem;
+    background: #fff;
+    box-shadow: 0 .125rem .5rem rgba(0, 0, 0, 0.1);
+}
+
+/* Card header — the app's identity pattern: icon left, text block right,
+   vertically centered against each other. The bottom padding is the section
+   spacing towards the fact list. */
+.pblsh--channel-choice__header {
+    display: flex;
+    align-items: start;
+    gap: 0.75rem;
+    padding-bottom: 1rem;
+}
+
+.pblsh--channel-choice__icon {
+    flex: none;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    color: #008a20;
+    justify-content: center;
+    width: 2.5rem; /* 40px */
+    height: 2.5rem;
+    line-height: 1;
+}
+
+.pblsh--channel-choice__header-text {
+    display: grid;
+    align-content: start;
+    min-width: 0;
+}
+
+.pblsh--channel-choice__label {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.pblsh--channel-choice__desc {
+    margin: 0;
+    color: #646970;
+}
+
+.pblsh--channel-choice__best-for {
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+
+/* Fact list — same five dimensions on both cards, comparable row by row; the
+   label sits inline before the value so the full card width serves the text. */
+.pblsh--channel-choice__facts {
+    list-style: none;
+    margin: 0;
+    /* The bottom padding is the section spacing towards the best-for line. */
+    padding: 0 0 1rem;
+}
+
+.pblsh--channel-choice__fact {
+    display: flex;
+    align-items: start;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0.375rem 0;
+    border-top: 1px solid var(--border-color-row-between);
+}
+
+.pblsh--channel-choice__fact:first-child {
+    border-top: 1px solid var(--border-color-row-outer);
+}
+
+.pblsh--channel-choice__fact:last-child {
+    border-bottom: 1px solid var(--border-color-row-outer);
+}
+
+.pblsh--channel-choice__fact-icon {
+    display: inline-flex;
+    align-items: center;
+    height: 1.25rem; /* one text line — keeps the icon on the first line of wrapped values */
+    flex: none;
+    --size: 1.125rem;
+}
+
+.pblsh--channel-choice__fact-icon > svg {
+    width: var(--size);
+    height: var(--size);
+}
+
+.pblsh--channel-choice__fact-text {
+    min-width: 0;
+}
+
+.pblsh--channel-choice__fact-label {
     font-weight: 600;
 }
 
-.pblsh--wporg-account-step__icon {
-    line-height: 1;
+
+/* Anchored to the bottom, so both cards' buttons align even when the guidance
+   texts differ in length. */
+.pblsh--channel-choice__select {
+    align-self: center;
+    margin-top: auto;
+}
+
+/* Stacked and left-aligned to each other, centered as a group below the cards. */
+.pblsh--channel-choice__faq {
+    justify-self: center;
+}
+
+.pblsh--hosting-choice .pblsh--channel-choice {
+    width: 100%;
+}
+
+/* Shared wordpress.org account form (Settings card, access gate, import empty state) */
+/* The form owns its width and spacing — hosts (Settings card, gate, import
+   expander) embed it without wrappers, so it looks identical everywhere. */
+.pblsh--wporg-account-form {
+    --wporg-color: #3858e9;
+    --account-form-padding: 1.5rem;
+    /* The wordpress logo's rendered size — WporgAccountForm.js requests it via
+       getSvgIcon('wordpress', { size: 48 }); keep both in sync. */
+    --account-form-icon-size: 48px;
+
+    margin-inline: auto;
+    max-width: 31rem;
+}
+
+.pblsh--wporg-account-form__main {
+    display: grid;
+    gap: 1rem;
+    text-align: left;
+    padding: var(--account-form-padding);
+
+    border: 0.125rem solid var(--wporg-color);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--wporg-color) 8%, transparent);
+}
+
+/* The grid gap is the single source of vertical rhythm — neutralizes host spacing
+   like the settings section's base-control margins (.pblsh-app prefix wins the
+   specificity contest against that rule). */
+.pblsh-app .pblsh--wporg-account-form .components-base-control {
+    margin-bottom: 0;
+}
+
+/* Static intro: logo top-aligned next to heading, tagline and storage-FAQ link. */
+.pblsh--wporg-account-form__intro {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.pblsh--wporg-account-form__heading-icon {
+    flex: 0 0 auto;
+    line-height: 0;
+}
+
+.pblsh--wporg-account-form__intro-text {
+    display: grid;
+    justify-items: start;
+}
+
+.pblsh--wporg-account-form__heading {
+    margin: 0;
+    font-size: 1.25rem;
+    line-height: 1.3;
+}
+
+.pblsh--wporg-account-form__intro-line {
+    margin: 0;
+}
+
+/* One notice slot for every form-level problem (storage defect, rejected or
+   undecryptable password) — a NoticeBox; the form grid's gap owns the spacing.
+   (Scoped to the form root: the NoticeBox base rule sits later in this file,
+   so a bare class would lose the margin override to source order.) */
+.pblsh--wporg-account-form .pblsh--wporg-account-form__notice {
+    margin: 0;
+}
+
+/* Label column left (sized to the widest label), inputs right. */
+.pblsh--wporg-account-form__fields {
+    display: grid;
+    /* The label column sizes to the widest label, inputs take the remaining width. */
+    grid-template-columns: max-content 1fr;
+    gap: 0.5rem 1rem;
+    align-items: center;
+    /* Indent past the intro's logo column so fields align with the intro text. */
+    margin-left: calc(var(--account-form-icon-size) + 1rem);
+}
+
+/* Full-width rows (e.g. the credentials intro line) span both columns. */
+.pblsh--wporg-account-form__fields > p {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+/* Subgrid chain through the TextControl wrappers: the base-control and its field
+   wrapper each span both columns and forward them, so every label lands in the
+   shared label column — no markup changes needed. */
+.pblsh--wporg-account-form__fields .components-base-control,
+.pblsh--wporg-account-form__fields .components-base-control__field {
+    display: grid;
+    grid-column: span 2;
+    grid-template-columns: subgrid;
+    align-items: center;
+}
+
+.pblsh--wporg-account-form__fields .components-base-control__label {
+    margin: 0 0 0.125rem;
+    text-transform: none;
+    font-size: inherit;
+    font-weight: bold;
+}
+
+/* A field help (when enabled) belongs under the input, not under the label. */
+.pblsh--wporg-account-form__fields .components-base-control__help {
+    grid-column: 2;
+    margin: 0;
+}
+
+.pblsh--wporg-account-form__actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.pblsh--wporg-account-form__bottom-line {
+    text-align: center;
+}
+
+.pblsh--wporg-account-form__status--success {
+    color: var(--color-green);
+}
+
+/* Errors get their own row (rendered above the actions), successes sit inline. */
+.pblsh--wporg-account-form__status--error {
+    color: var(--color-red);
+}
+
+/* Add-new flow: wporg "Approval" screen — the external-link marker inside the
+   submission button. */
+.pblsh--addition-process__approval-external {
+    display: inline-flex;
+    margin-left: 0.375rem;
+}
+
+/* Add-new flow: wporg situation triage — the plugin's standing dictates the
+   route, so it is asked before any step renders. Prompt and options sit
+   centered. */
+
+/* The same anatomy as the channel choice: the screen's grid gap spaces the
+   shared choice-intro from the options. */
+.pblsh--wporg-situation {
+    display: grid;
+    gap: 1rem;
+}
+
+.pblsh--wporg-situation__options {
+    display: grid;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: var(--situation-width);
+    margin-inline: auto;
+}
+
+/* A button wearing the shared option-card base; the arrow marks it as a way
+   forward. */
+.pblsh--wporg-situation__option {
+    appearance: none;
+    font: inherit;
+    text-align: left;
+    padding: 1rem 1.25rem;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Stage illustration — muted on purpose: it locates, the arrow is the
+   action accent. */
+.pblsh--wporg-situation__option-icon {
+    display: inline-flex;
+    color: #a7aaad;
+}
+
+.pblsh--wporg-situation__option-text {
+    display: grid;
+    gap: 0.25rem;
+}
+
+/* Below the screen prompt (1.125rem), above the body text (13px). */
+.pblsh--wporg-situation__option-label {
+    font-size: 1rem;
+    line-height: 1.4;
+}
+
+.pblsh--wporg-situation__option-desc {
+    color: #646970;
+}
+
+.pblsh--wporg-situation__option-arrow {
+    display: inline-flex;
+    color: #a7aaad;
+}
+
+.pblsh--wporg-situation__option:hover .pblsh--wporg-situation__option-arrow {
+    color: var(--color-blue);
+}
+
+/* The back control under the triage aligns with the decision column. */
+.pblsh--controls.pblsh--controls--situation {
+    max-width: var(--situation-width);
 }
 
 .pblsh--wporg-import {
@@ -478,9 +846,61 @@
     min-height: 0;
 }
 
-.pblsh--wporg-import__header,
-.pblsh--wporg-import__manual-row,
-.pblsh--wporg-import__footer {
+/* Identity cell — icon + name/slug, previewing the plugin list's row anatomy;
+   the channel is a given here, so ChannelPath renders the slug only. */
+.pblsh--wporg-import__plugin-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pblsh--wporg-import__plugin-identity-icon {
+    width: 3rem; /* 48px */
+    height: 3rem;
+    flex-shrink: 0;
+}
+
+.pblsh--wporg-import__plugin-identity-text {
+    display: grid;
+    gap: 0.125rem;
+    min-width: 0;
+}
+
+/* The row's anchor — matches the plugin list's row anchor size. */
+.pblsh--wporg-import__plugin-identity-text strong {
+    font-size: 0.9375rem; /* 15px */
+}
+
+/* The identity links to the live plugin page in the directory — quiet by
+   default, the affordance (underline + external marker) appears on hover and
+   keyboard focus. Rows without a directory page (fresh or unresolved manual
+   slugs) render the same anatomy as a plain div. */
+a.pblsh--wporg-import__plugin-identity {
+    color: inherit;
+    text-decoration: none;
+}
+
+a.pblsh--wporg-import__plugin-identity:hover strong,
+a.pblsh--wporg-import__plugin-identity:focus-visible strong {
+    text-decoration: underline;
+}
+
+/* Atomic inline: keeps the name's underline off the marker; opacity instead of
+   display, so the reserved space never shifts the layout on hover. */
+.pblsh--wporg-import__plugin-identity-external {
+    display: inline-flex;
+    vertical-align: middle;
+    line-height: 1;
+    margin-left: 0.375rem;
+    opacity: 0;
+}
+
+a.pblsh--wporg-import__plugin-identity:hover .pblsh--wporg-import__plugin-identity-external,
+a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugin-identity-external {
+    opacity: 1;
+}
+
+.pblsh--wporg-import__header {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
@@ -492,28 +912,16 @@
     color: #646970;
 }
 
-.pblsh--wporg-import__loading,
-.pblsh--wporg-import__error,
-.pblsh--wporg-import__empty {
-    border: 1px solid var(--border-color-light);
-    border-radius: 0.5rem;
-    padding: 1rem;
-    background: #f6f7f7;
-}
-
+/* The refresh indicator while rows are already on screen. */
 .pblsh--wporg-import__loading {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-}
-
-.pblsh--wporg-import__loading--compact {
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: #f6f7f7;
     margin-bottom: 0.75rem;
-}
-
-.pblsh--wporg-import__empty p:last-child,
-.pblsh--wporg-import__error p:last-child {
-    margin-bottom: 0;
 }
 
 .pblsh--wporg-import__table-wrap {
@@ -522,10 +930,21 @@
     border-radius: 0.5rem;
 }
 
+/* Fixed layout: column widths are a layout decision (taken from the header
+   row), not a content negotiation — the cells' contents change constantly
+   (lookup results, hints, the row action) and must never move the columns. */
 .pblsh--wporg-import__table {
+    table-layout: fixed;
     width: 100%;
     border-collapse: collapse;
     background: #fff;
+}
+
+/* Wide enough for the widest one-line pairing ("Already imported" plus the
+   Open-plugin button) — extra viewport width belongs to the plugin column. */
+.pblsh--wporg-import__status-header {
+    box-sizing: border-box;
+    width: 16rem;
 }
 
 .pblsh--wporg-import__table th,
@@ -536,16 +955,60 @@
     vertical-align: middle;
 }
 
-.pblsh--wporg-import__table tbody tr:last-child td {
+/* The foot's own border-bottom would double the table-wrap edge; the last
+   body row keeps its border as the separator toward the add row. */
+.pblsh--wporg-import__table tfoot td {
     border-bottom: 0;
+    background: #f6f7f7;
 }
 
+/* The list's state (loading, discover error, empty) as one muted table row. */
+.pblsh--wporg-import__table-state {
+    color: #646970;
+}
+
+.pblsh--wporg-import__table-state p {
+    margin: 0 0 0.25rem;
+}
+
+.pblsh--wporg-import__table-state p:last-child {
+    margin-bottom: 0;
+}
+
+.pblsh--wporg-import__table-state .components-spinner {
+    margin: 0 0.5rem 0 0;
+    vertical-align: middle;
+}
+
+.pblsh--wporg-import__table-state .components-button {
+    margin-top: 0.5rem;
+}
+
+.pblsh--wporg-import__add-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pblsh--wporg-import__add-controls .components-base-control {
+    flex: 1;
+}
+
+/* Fixed instead of shrink-to-content: the cell holds a checkbox, a spinner or
+   nothing depending on the row's state — the column must not shift between
+   them. 2.75rem = the checkbox (widest case) plus the cell padding. */
 .pblsh--wporg-import__select-header,
-.pblsh--wporg-import__select-cell,
-.pblsh--wporg-import__action-header,
-.pblsh--wporg-import__action-cell {
-    width: 1%;
-    white-space: nowrap;
+.pblsh--wporg-import__select-cell {
+    box-sizing: border-box;
+    width: 2.75rem;
+}
+
+/* First line of the status cell: the status plus, on imported rows, the
+   inline Open action right after it (WP-row-action style). */
+.pblsh--wporg-import__status-line {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .pblsh--wporg-import__status {
@@ -553,11 +1016,88 @@
     font-weight: 600;
 }
 
+/* The access checks' spinner stands in for the checkbox while selectability
+   is being decided — per row, and in the header for the whole list. Same
+   slot, no component page margins. */
+.pblsh--wporg-import__select-header .components-spinner,
+.pblsh--wporg-import__select-cell .components-spinner {
+    margin: 0;
+    display: block;
+}
+
+/* wp-admin's custom checkbox look has no :indeterminate visual (appearance:
+   none suppresses the native dash, and core forms.css defines none) — draw
+   the dash ourselves, in the core checkmark blue. */
+.pblsh--wporg-import__select-header input[type=checkbox]:indeterminate::before {
+    content: "";
+    display: block;
+    width: 0.5rem;
+    height: 0.125rem;
+    margin: 0.375rem auto 0;
+    background-color: #3582c4;
+}
+
+/* Transitional result body while a slug change re-resolves the destination —
+   replaces the previous slug's facts until the fresh result arrives. */
+.pblsh--upload-result__resolving {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 3rem 1rem;
+    color: #646970;
+}
+
+.pblsh--upload-result__resolving .components-spinner {
+    margin: 0;
+}
+
+/* Shared base: the running wporg import's work unit shows activity as a faint
+   barber-pole drifting leftwards, matching the core button's is-busy stripes
+   (-45deg, leftward travel), which run right next to it. Owned here; used by
+   the import table's running row (there the background sits on the tr, so the
+   pattern runs unbroken across the cells), the overlay's identity card and its
+   celebration box. Hosts must set background-color, not the background
+   shorthand — the shorthand would reset this background-image regardless of
+   rule order. --pblsh-importing-stripe-color is the one tone knob (NoticeBox
+   pattern): hosts with their own palette declare it, and the reduced-motion
+   tint derives from it too. Deliberately only a var() fallback here, no
+   declaration — a host's declaration must win independent of rule order. */
+.pblsh--importing-stripes {
+    background-image: linear-gradient(
+        -45deg,
+        var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 25%,
+        transparent 25%,
+        transparent 50%,
+        var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 50%,
+        var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 75%,
+        transparent 75%,
+        transparent
+    );
+    background-size: 1.5rem 1.5rem;
+    animation: pblsh--importing-stripes 1.2s linear infinite;
+}
+
+@keyframes pblsh--importing-stripes {
+    from { background-position: 1.5rem 0; }
+    to { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pblsh--importing-stripes {
+        animation: none;
+        background-image: none;
+        /* Static tint instead of moving stripes, derived from the stripe tone. */
+        background-color: color-mix(in srgb, var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 40%, transparent);
+    }
+}
+
 .pblsh--wporg-import__row.is-ready .pblsh--wporg-import__status {
     color: #008a20;
 }
 
-.pblsh--wporg-import__row.is-pending .pblsh--wporg-import__status {
+.pblsh--wporg-import__row.is-pending .pblsh--wporg-import__status,
+.pblsh--wporg-import__row.is-importing .pblsh--wporg-import__status {
     color: #646970;
 }
 
@@ -570,10 +1110,15 @@
     color: #50575e;
 }
 
-.pblsh--wporg-import__message {
+.pblsh--wporg-import__message,
+.pblsh--wporg-import__release-count {
     display: block;
     color: #646970;
     margin-top: 0.25rem;
+}
+
+.pblsh--wporg-import__message.is-warning {
+    color: #996800;
 }
 
 .pblsh--wporg-import__execution {
@@ -593,47 +1138,13 @@
     background: #fcf0f1;
 }
 
-.pblsh--wporg-import__execution-head {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.pblsh--wporg-import__progress {
-    align-items: stretch;
-    gap: 0.25rem;
-    margin-top: 0.75rem;
-}
-
-.pblsh--wporg-import__progress .pblsh--progress__bar {
-    width: 100%;
-}
-
-.pblsh--wporg-import__progress .pblsh--progress__label {
-    margin-top: 0;
-    text-align: right;
-}
-
+/* A content list (pblsh--content-list carries bullets and indent). */
 .pblsh--wporg-import__skipped-list {
     margin: 0.75rem 0 0;
-    padding-left: 1.25rem;
 }
 
 .pblsh--wporg-import__skipped-list li {
     margin-bottom: 0.25rem;
-}
-
-.pblsh--wporg-import__manual {
-    border-top: 1px solid var(--border-color-light);
-    padding-top: 1rem;
-}
-
-.pblsh--wporg-import__manual-title {
-    margin: 0 0 0.75rem;
-}
-
-.pblsh--wporg-import__manual-row .components-base-control {
-    flex: 1;
 }
 
 .pblsh--wporg-import__manual-error {
@@ -641,16 +1152,18 @@
 }
 
 .pblsh--wporg-import__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
     padding-top: 0.5rem;
 }
 
 @media (max-width: 48rem) {
-    .pblsh--choice-grid {
+    .pblsh--channel-choice__cards {
         grid-template-columns: 1fr;
     }
 
     .pblsh--wporg-import__header,
-    .pblsh--wporg-import__manual-row,
     .pblsh--wporg-import__footer {
         align-items: stretch;
         flex-direction: column;
@@ -720,13 +1233,6 @@
     border-radius: 0.5rem; /* 8px */
     padding: var(--content-padding);
     box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
-}
-
-.pblsh--card--bootstrap-code,
-.pblsh--card--upload-zip {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
 }
 
 .pblsh--card__title:first-child {
@@ -978,18 +1484,6 @@
     background-color: color-mix(in srgb, var(--release-color) 70%, #000);
 }
 
-.pblsh--upload-result__meta > div {
-    margin-top: 0.25rem; /* 4px */
-}
-
-.pblsh--upload-result__list {
-    margin-top: 0.75rem; /* 12px */
-}
-
-.pblsh--upload-result__list ul {
-    margin: 0.25rem 0 0 1.2rem;
-}
-
 .pblsh--upload-result__actions {
     display: flex;
     padding: 2rem; /* 32px */
@@ -1002,20 +1496,15 @@
     text-transform: uppercase;
 }
 
+/* Assignment/slug screens of the upload result (the channel-cards screen renders
+   the shared channel-choice component instead). */
 .pblsh--destination-choice {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
-    padding: 0 2rem 2rem;
-}
-
-/* Inside the scrollable body (choice screen) the body provides the padding. */
-.pblsh--upload-result__body .pblsh--destination-choice {
-    padding: 0;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
 }
 
 .pblsh--destination-choice__prompt {
-    grid-column: 1 / -1;
     margin: 0;
     font-size: 1.125rem;
     font-weight: 600;
@@ -1023,108 +1512,11 @@
     text-align: center;
 }
 
+/* Card look and radio mechanics come from the shared option-card base. */
 .pblsh--destination-choice__option {
-    position: relative;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0 0.75rem;
-    align-items: start;
-    align-content: start;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 0.375rem;
-    background: #fff;
-    cursor: pointer;
-}
-
-.pblsh--destination-choice__option:hover {
-    border-color: color-mix(in srgb, var(--color-blue) 45%, var(--border-color-light));
-}
-
-.pblsh--destination-choice__option input[type="radio"] {
-    margin-top: initial;
-}
-
-/* The radios are visually hidden but stay focusable — selecting a card immediately applies the destination. */
-.pblsh--destination-choice__option input[type="radio"] {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: 0;
-    opacity: 0;
-    pointer-events: none;
-}
-
-.pblsh--destination-choice__option:has(input:focus-visible) {
-    outline: 2px solid var(--color-blue);
-    outline-offset: 2px;
-}
-
-.pblsh--destination-choice__note {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.75rem;
-    align-items: start;
-    padding: 0.75rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--color-blue) 30%, #fff);
-    border-radius: 0.375rem;
-    background: color-mix(in srgb, var(--color-blue) 8%, #fff);
-    font-size: 0.8125rem;
-    line-height: 1.5;
-}
-
-.pblsh--destination-choice__note-icon {
-    line-height: 1;
-    color: var(--color-blue);
-}
-
-.pblsh--destination-choice__note-text {
-    display: grid;
-    gap: 0.5rem;
-}
-
-.pblsh--destination-choice__note-text p {
-    margin: 0;
-}
-
-.pblsh--destination-choice__note-links {
-    margin: 0;
-    margin-left: initial;
-    padding: 0;
-    padding-inline-start: 1em;
-    list-style: initial;
-}
-
-.pblsh--destination-choice__note-links > li {
-    margin: 0;
-}
-
-.pblsh--destination-choice__label {
-    font-weight: 600;
-    line-height: 1.4;
-}
-
-.pblsh--destination-choice__icon {
-    line-height: 1;
-}
-
-.pblsh--destination-choice__desc {
-    grid-column: 2;
-    color: #666;
-    font-size: 0.8125rem;
-}
-
-/* Assignment mode: at least one existing match — options stack as one vertical list
-   of shared destination-option rows instead of the two-column channel cards. */
-.pblsh--destination-choice--list {
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
-}
-
-.pblsh--destination-choice--list .pblsh--destination-choice__option {
     display: flex;
     padding: 0.5rem 0.75rem;
+    box-shadow: 0 .125rem .5rem rgba(0, 0, 0, 0.1);
 }
 
 /* Custom slug input below the destination cards */
@@ -1140,130 +1532,240 @@
     justify-content: center;
 }
 
-.pblsh--wporg-access-gate {
-    display: grid;
-    gap: 1rem;
-    padding: 1.25rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 0.375rem;
-    background: color-mix(in srgb, var(--color-gray) 15%, #fff);
-}
+/* Pre-import facts of the wporg import screen. */
 
-.pblsh--wporg-access-gate__main {
+/* Header row — title left, FAQ pointer right. The row's small font size reaches
+   the FAQ link via inheritance; the title sets its own. */
+.pblsh--wporg-import-facts__header {
     display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-    padding: 1rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 0.5rem;
-    background: #f6f7f7;
-}
-
-.pblsh--wporg-access-gate__icon {
-    width: 2rem;
-    height: 2rem;
-    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    color: #2271b1;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.8125rem;
 }
 
-.pblsh--wporg-access-gate__copy {
-    min-width: 0;
-}
-
-.pblsh--wporg-access-gate__title {
-    margin: 0 0 0.25rem;
+.pblsh--wporg-import-facts__title {
+    margin: 0;
     font-size: 1rem;
     line-height: 1.4;
 }
 
-.pblsh--wporg-access-gate__description {
-    margin: 0;
-    color: #646970;
-}
-
-.pblsh--wporg-access-gate__details,
-.pblsh--wporg-access-gate__issues {
-    display: grid;
-    gap: 0.5rem;
-}
-
-.pblsh--wporg-access-gate__detail {
-    display: grid;
-    grid-template-columns: 6rem minmax(0, 1fr);
-    gap: 0.75rem;
-    align-items: baseline;
-}
-
-.pblsh--wporg-access-gate__detail-label {
-    color: #646970;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.pblsh--wporg-access-gate__detail-value {
-    overflow-wrap: anywhere;
-}
-
-.pblsh--wporg-access-gate__issue {
+/* Compact positives line — below the identity card (published) or the
+   celebration box (fresh); the hero element owns the spacing above. */
+.pblsh--wporg-import-facts__facts-line {
     display: flex;
-    gap: 0.75rem;
-    align-items: flex-start;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 0.375rem;
-    background: #fff;
+    align-items: start;
+    gap: 0.5rem;
+    margin-block: 0 1rem;
 }
 
-.pblsh--wporg-access-gate__issue.is-error {
-    border-color: #d63638;
-    background: #fcf0f1;
-}
-
-.pblsh--wporg-access-gate__issue-icon {
+.pblsh--wporg-import-facts__facts-line-icon {
+    height: 1.25rem; /* 20px */
+    width: 1.25rem; /* 20px */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
+    color: var(--index-color-complete);
+}
+
+.pblsh--wporg-import-facts__facts-line-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.pblsh--wporg-import-facts__facts-line-text {
+    color: #666666;
+    font-size: 0.875rem; /* 14px */
+    line-height: 1.25rem; /* 20px — aligned with the icon */
+}
+
+/* Identity card of the found directory listing — icon, name, short description.
+   The card is a link to the live directory page; text keeps its own colors, only
+   hover and the external icon signal the click affordance. */
+.pblsh--wporg-import-facts__plugin {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color-medium);
+    border-radius: 0.375rem;
+    background-color: #fff; /* not the shorthand — the importing stripes layer a background-image on top */
+    color: inherit;
+    text-decoration: none;
+}
+
+.pblsh--wporg-import-facts__plugin:hover,
+.pblsh--wporg-import-facts__plugin:focus-visible {
+    border-color: var(--color-blue);
+    color: inherit;
+}
+
+.pblsh--wporg-import-facts__plugin-external {
+    align-self: start;
+    margin-left: auto;
     line-height: 1;
+    color: #787c82;
+    flex: 0 0 auto;
 }
 
-.pblsh--wporg-access-gate__issue.is-error .pblsh--wporg-access-gate__issue-icon {
-    color: #d63638;
+.pblsh--wporg-import-facts__plugin:hover .pblsh--wporg-import-facts__plugin-external {
+    color: var(--color-blue);
 }
 
-.pblsh--wporg-access-gate__issue-text {
+.pblsh--wporg-import-facts__plugin-icon {
+    width: 3rem;
+    height: 3rem;
+    flex: 0 0 auto;
+    /* No border-radius to show the icon as it is */
+}
+
+.pblsh--wporg-import-facts__plugin-text {
     display: grid;
     gap: 0.125rem;
     min-width: 0;
 }
 
-.pblsh--wporg-access-gate__issue-text span {
+.pblsh--wporg-import-facts__plugin-desc {
     color: #646970;
+    font-size: 0.8125rem;
+    /* Short descriptions can run to ~150 characters — keep the card compact. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
-.pblsh--wporg-access-gate__actions {
+/* Celebration box — the fresh states' hero element, sitting where the other
+   states show the identity card (matching outer spacing). A permanent
+   light-gold look, a golden glow and an icon pop when it appears — replayed
+   on hover. */
+.pblsh--wporg-import-facts__celebrate {
+    /* The box's own light gold — resting surface, rim, stripes and glow all derive from it. */
+    --pblsh-celebrate-gold: #f5c518;
+    --pblsh-celebrate-resting-bg: color-mix(in srgb, var(--pblsh-celebrate-gold) 12%, #fff);
+    /* The importing stripes in the box's own gold instead of the signal blue. */
+    --pblsh-importing-stripe-color: color-mix(in srgb, var(--pblsh-celebrate-gold) 30%, transparent);
+    position: relative;
+    isolation: isolate;
     display: flex;
-    justify-content: space-between;
+    align-items: start;
     gap: 1rem;
-    align-items: center;
+    margin-bottom: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--pblsh-celebrate-gold) 45%, #fff);
+    border-radius: 0.375rem;
+    background-color: var(--pblsh-celebrate-resting-bg); /* not the shorthand — the importing stripes layer a background-image on top */
 }
 
-@media (max-width: 40rem) {
-    .pblsh--destination-choice {
-        grid-template-columns: 1fr;
+/* Hover-replay carrier for the glow: exactly the box footprint (incl. the border),
+   behind the content — mount and replay share one visible area. */
+.pblsh--wporg-import-facts__celebrate::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+.pblsh--wporg-import-facts__celebrate-icon {
+    height: 1.75rem; /* 28px */
+    width: 1.75rem; /* 28px */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    color: var(--color-gold);
+}
+
+.pblsh--wporg-import-facts__celebrate-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.pblsh--wporg-import-facts__celebrate-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.pblsh--wporg-import-facts__celebrate-title {
+    font-weight: 600;
+    font-size: 1rem; /* 16px */
+    line-height: 1.75rem; /* 28px */
+}
+
+.pblsh--wporg-import-facts__celebrate-desc {
+    color: #666666;
+    font-size: 0.875rem; /* 14px */
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .pblsh--wporg-import-facts__celebrate {
+        animation: pblsh-celebrate-glow 1.6s ease-out 1;
     }
 
-    .pblsh--wporg-access-gate__main,
-    .pblsh--wporg-access-gate__actions {
-        align-items: stretch;
-        flex-direction: column;
+    /* The stripes share the one animation property with the mount glow —
+       composed here (adding the stripes class restarts the glow, which reads
+       as the import's kickoff pulse). */
+    .pblsh--wporg-import-facts__celebrate.pblsh--importing-stripes {
+        animation: pblsh-celebrate-glow 1.6s ease-out 1, pblsh--importing-stripes 1.2s linear infinite;
     }
 
-    .pblsh--wporg-access-gate__detail {
-        grid-template-columns: 1fr;
-        gap: 0.125rem;
+    .pblsh--wporg-import-facts__celebrate .pblsh--wporg-import-facts__celebrate-icon svg {
+        animation: pblsh-celebrate-pop 1s ease-out 1 both;
     }
+
+    /* Replay on hover — deliberately on OTHER boxes (::after, icon wrapper) than the
+       mount animations: leaving hover would otherwise restart the mount animation.
+       The replay keyframes start and end at the resting state, so the visible icon
+       never jumps when the animation kicks in. */
+    .pblsh--wporg-import-facts__celebrate:hover::after {
+        animation: pblsh-celebrate-glow-replay 1.6s ease-out 1;
+    }
+
+    .pblsh--wporg-import-facts__celebrate:hover .pblsh--wporg-import-facts__celebrate-icon {
+        animation: pblsh-celebrate-pop-replay 0.9s ease-in-out 1;
+    }
+}
+
+/* Ends at the resting background — anything else would snap at animation end.
+   Deliberately no box-shadow halo: the glow stays exactly the box area.
+   background-color, not the shorthand: the importing stripes' background-image
+   must survive the glow. */
+@keyframes pblsh-celebrate-glow {
+    0% { background-color: color-mix(in srgb, var(--pblsh-celebrate-gold) 35%, #fff); }
+    100% { background-color: var(--pblsh-celebrate-resting-bg); }
+}
+
+@keyframes pblsh-celebrate-pop {
+    0% { transform: scale(0.3) rotate(-25deg); opacity: 0; }
+    55% { transform: scale(1.4) rotate(10deg); opacity: 1; }
+    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+@keyframes pblsh-celebrate-glow-replay {
+    0% { background-color: transparent; }
+    25% { background-color: color-mix(in srgb, var(--pblsh-celebrate-gold) 30%, transparent); }
+    100% { background-color: transparent; }
+}
+
+@keyframes pblsh-celebrate-pop-replay {
+    0% { transform: scale(1) rotate(0deg); }
+    35% { transform: scale(0.65) rotate(-18deg); }
+    70% { transform: scale(1.3) rotate(8deg); }
+    100% { transform: scale(1) rotate(0deg); }
+}
+
+
+/* State panels — the NoticeBox brings its own block margins; directly after
+   the header (not_found/error, where no hero renders) the header's own margin
+   suffices. */
+.pblsh--wporg-import-facts__header + .pblsh--wporg-import-facts__panel {
+    margin-top: 0;
 }
 
 /* Shared <time> affordance (Pblsh.Utils.getTimeTooltipProps) — the dotted
@@ -1404,8 +1906,24 @@
     text-decoration: underline;
 }
 
+/* Shared stack for help-link rows (FaqLink/TipLink, also mixed) — the inner
+   anatomy is the same everywhere: spacing between links, links left-aligned at
+   their content width. Position and outer spacing stay with the embedding
+   component via its own context class. */
+.pblsh--help-links {
+    display: grid;
+    gap: 0.375rem;
+    justify-items: start;
+}
+
 /* Check rows — the shared base rendered by the Checklist component: the upload
    result checklist and the wporg import facts use the same anatomy. */
+
+/* While the destination is undecided, the body is the gray decision surface —
+   choosing collapses it into the publish-path row of the same color. */
+.pblsh--upload-result--choosing .pblsh--upload-result__body {
+    background: var(--surface-color);
+}
 
 .pblsh--upload-result__body {
     flex: 1;
@@ -2288,125 +2806,142 @@
     font-size: 0.8125rem; /* 13px */
 }
 
-.pblsh--settings-wporg-encryption-setup {
-    max-width: 42rem;
-    border: 1px solid #d7e4f5;
-    background: #f7fbff;
-    border-radius: 0.375rem;
+/* Settings: wordpress.org account card (view state; the edit state embeds the shared form) */
+/* Account card — one grid: the identity (avatar plus text) on the left across
+   both rows, management icons top right, the import action bottom right.
+   Notices span the full width in an implicit row below (no reserved empty row). */
+.pblsh--wporg-account-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "identity manage"
+        "identity import";
+    gap: 0.5rem 0.75rem;
     padding: 1rem;
-    margin: 1rem 0 1.25rem;
+    border: 1px solid var(--border-color-medium);
+    border-radius: 0.5rem;
+    background: #fff;
 }
 
-.pblsh--settings-wporg-encryption-setup > .pblsh--settings-wporg-encryption-setup__title {
-    display: block;
-    margin: 0;
-    color: #1d2327;
-    font-size: 0.9375rem;
+.pblsh--wporg-account-card__avatar {
+    flex: none;
+    line-height: 1;
 }
 
-.pblsh--settings-wporg-encryption-setup__text {
-    margin: 0.375rem 0 0;
-    color: #50575e;
-}
-
-.pblsh--settings-wporg-encryption-setup__code {
-    display: block;
-    margin-top: 0.75rem;
-    padding: 0.75rem;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    background: #1d2327;
-    color: #fff;
-    border-radius: 0.25rem;
-}
-
-.pblsh--settings-wporg-encryption-setup__status-row {
+/* Placeholder when the Gravatar cannot load (blocked/offline): the avatar's
+   round footprint with a muted person icon inside. */
+.pblsh--wporg-account-card__avatar-fallback {
     display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    width: 4rem; /* 64px — same footprint as the loaded avatar */
+    height: 4rem;
+    border-radius: 50%;
+    background: #f0f0f1;
+    color: #a7aaad;
 }
 
-.pblsh--settings-wporg-encryption-setup__status {
+.pblsh--wporg-account-card__avatar-image {
+    display: block;
+    width: 4rem; /* 64px — same footprint as the logo fallback */
+    height: 4rem;
+    border-radius: 50%;
+}
+
+.pblsh--wporg-account-card__identity {
+    grid-area: identity;
+    align-self: start;
+    display: flex;
+    align-items: center; /* username and state centered against the avatar */
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.pblsh--wporg-account-card__identity-text {
+    display: grid;
+    /* Pack the rows regardless of the height the flex parent hands out — grid's
+       default would stretch the auto rows apart when the item is taller than
+       its content. */
+    align-content: start;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.pblsh--wporg-account-card__manage {
+    grid-area: manage;
+    justify-self: end;
+    align-self: start;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.pblsh--wporg-account-card__import {
+    grid-area: import;
+    justify-self: end;
+    align-self: end;
+}
+
+/* Narrow contexts: the import action moves into its own full-width row. */
+@media (max-width: 480px) {
+    .pblsh--wporg-account-card {
+        grid-template-areas:
+            "identity manage"
+            "import import";
+    }
+
+    .pblsh--wporg-account-card__import {
+        justify-self: stretch;
+        justify-content: center;
+    }
+}
+
+.pblsh--wporg-account-card__username {
+    font-size: 1.125rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+/* Account state badge — one anatomy for every state: the container carries the
+   state modifier (its color as custom property), the icon sits beside a body in
+   which status word and optional <time> can wrap — a wrapped time then aligns
+   flush with the word, not with the icon. */
+.pblsh--wporg-account-card__state {
+    display: flex;
+    align-items: start;
+    gap: 0.375rem;
+}
+
+.pblsh--wporg-account-card__state.is-verified { --pblsh-account-state-color: var(--color-green); }
+.pblsh--wporg-account-card__state.is-blocked { --pblsh-account-state-color: var(--color-red); }
+/* Stored before save-time verification existed — neutral until tested. */
+.pblsh--wporg-account-card__state.is-unknown { --pblsh-account-state-color: #646970; }
+
+.pblsh--wporg-account-card__state-icon {
     display: inline-flex;
     align-items: center;
-    flex: 1 1 0;
-    gap: 0.375rem;
-    min-width: min-content;
-    padding: 0.25rem 0.625rem;
-    background: #fff;
-    border: 1px solid #d7e4f5;
-    border-radius: 0.25rem;
+    height: 1.25rem; /* one text line — keeps the icon on the first line when the body wraps */
+    flex: none;
+    color: var(--pblsh-account-state-color);
 }
 
-.pblsh--settings-wporg-encryption-setup__status > * {
-    min-width: 0;
-    overflow-wrap: break-word;
-}
-
-.pblsh--settings-wporg-encryption-setup__status-label {
-    color: #646970;
-    font-weight: 600;
-    margin-bottom: 0;
-}
-
-.pblsh--settings-wporg-encryption-setup__status--missing,
-.pblsh--settings-wporg-encryption-setup__status--invalid {
-    border-color: #f0c36d;
-    color: #8a5a00;
-}
-
-.pblsh--settings-wporg-encryption-setup__status-check {
-    flex: 0 0 auto;
-}
-
-.pblsh--settings-wporg-account {
-    margin-top: 1.25rem;
-}
-
-.pblsh--settings-wporg-account--key-blocked {
-    padding-top: 0.25rem;
-}
-
-.pblsh--settings-wporg-account__title {
-    margin: 0;
-    color: #646970;
-    font-size: 0.8125rem;
-    font-weight: 600;
-}
-
-.pblsh--settings-wporg-account__row {
+.pblsh--wporg-account-card__state-body {
     display: flex;
-    align-items: stretch;
-    gap: 0.75rem;
     flex-wrap: wrap;
-}
-
-.pblsh--settings-wporg-account__row > .components-button {
-    flex: 0 0 auto;
-}
-
-.pblsh--settings-wporg-account__username {
-    flex: 1 1 auto;
-    display: flex;
-    align-items: center;
+    align-items: baseline;
+    gap: 0.125rem 0.375rem;
     min-width: 0;
-    margin: 0;
-    padding: 0.25rem 0.625rem;
-    background: #fff;
-    border: 1px solid #d7e4f5;
-    border-radius: 0.25rem;
-    color: #1d2327;
-    overflow-wrap: anywhere;
 }
 
-.pblsh--settings-wporg-account__pending-removal {
-    flex: 1 1 auto;
-    max-width: 10rem;
-    margin: 0;
-    color: #8a5a00;
+.pblsh--wporg-account-card__state-status {
     font-weight: 600;
-    display: flex;
-    align-items: center;
+    color: var(--pblsh-account-state-color);
+}
+
+/* A NoticeBox as a full-width card row; the card grid's gap owns the spacing. */
+.pblsh--wporg-account-card__reentry {
+    grid-column: 1 / -1;
+    margin: 0;
 }
 
 body.toplevel_page_pblsh-peak-publisher [data-lastpass-icon-root],
@@ -2424,25 +2959,6 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     width: 0 !important;
     height: 0 !important;
     overflow: hidden !important;
-}
-
-.pblsh--settings-wporg-account__actions {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-}
-
-.pblsh--settings-wporg-account__status {
-    font-weight: 600;
-}
-
-.pblsh--settings-wporg-account__status--success {
-    color: var(--color-green);
-}
-
-.pblsh--settings-wporg-account__status--error {
-    color: var(--color-red);
 }
 
 
@@ -2933,7 +3449,7 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     gap: 0.5rem;
     padding: 0.125rem 2rem;
     border-top: 1px solid var(--border-color-light);
-    background: #f0f0f1;
+    background: var(--surface-color);
 }
 
 .pblsh--upload-result .pblsh--publish-path__value {

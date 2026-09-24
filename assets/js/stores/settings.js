@@ -28,6 +28,14 @@
     }
     var selectors = {
         getServer: function(state) { return state.server; },
+        // "Usable" = the account can publish right now: it has a stored password
+        // and that password still decrypts (mirrors get_usable_wporg_account_usernames()).
+        getUsableWporgAccount: function(state) {
+            var accounts = state.server && Array.isArray(state.server.wporg_accounts) ? state.server.wporg_accounts : [];
+            return accounts.find(function(account) {
+                return account && account.username && account.has_password && account.password_usable;
+            }) || null;
+        },
         isLoading: function(state) { return !!state.isLoading; },
         isSaving: function(state) { return !!state.isSaving; },
         getError: function(state) { return state.error; },

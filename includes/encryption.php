@@ -50,24 +50,109 @@ function wporg_is_encrypted_password(string $password): bool {
 
 
 /**
- * Returns the configured 32-byte base encryption key.
+ * Decodes a "base64:" prefixed key string into exactly 32 raw bytes.
+ *
+ * @return string|null Null when the value is not a valid key string.
+ */
+function decode_prefixed_key($value): ?string {
+    // The prefix makes stored key values self-describing and easy to validate.
+    if (!is_string($value) || !str_starts_with($value, 'base64:')) {
+        return null;
+    }
+
+    // AES-256-GCM requires exactly 32 raw bytes of key material.
+    $decoded = base64_decode(substr($value, 7), true);
+    return is_string($decoded) && strlen($decoded) === 32 ? $decoded : null;
+}
+
+
+function get_encryption_key_file_path(): string {
+    return trailingslashit(peak_publisher_upload_basedir()) . 'encryption-key.php';
+}
+
+
+/**
+ * Returns the automatically managed file-based key (32 raw bytes).
+ *
+ * The key lives as a PHP file inside the secured plugin upload dir, so it is
+ * never served as plain text — Apache is covered by the deny-all .htaccess,
+ * nginx executes the file and hits the ABSPATH guard.
  *
  * @return string|\WP_Error
  */
-function get_encryption_key() {
-    // A missing constant means credentials cannot be safely stored or decrypted.
-    if (!defined('PBLSH_ENCRYPTION_KEY')) {
+function get_file_encryption_key(bool $create) {
+    $path = get_encryption_key_file_path();
+
+    if (!file_exists($path)) {
+        // Decryption must never invent a fresh key: without the original file the ciphertexts are lost anyway.
+        if (!$create) {
+            return wporg_credentials_error(
+                'credential_storage_unavailable',
+                __('The credential encryption key file is missing.', 'peak-publisher'),
+                500,
+                'wporg_credentials.storage'
+            );
+        }
+
+        ensure_upload_dir_is_ready_and_secured();
+        $content = "<?php\n"
+            . "defined('ABSPATH') || exit;\n"
+            . "return 'base64:" . base64_encode(random_bytes(32)) . "';\n";
+        // Exclusive create keeps concurrent first-time saves from overwriting each other's key.
+        $handle = @fopen($path, 'x');
+        if ($handle !== false) {
+            // A partial write (e.g. disk full) must not leave a fragment behind —
+            // it would fail every later read permanently. Removed is only what
+            // this call just created; the next save retries cleanly.
+            $written = fwrite($handle, $content);
+            $closed = fclose($handle);
+            if ($written !== strlen($content) || !$closed) {
+                @unlink($path);
+                return wporg_credentials_error(
+                    'credential_storage_unavailable',
+                    __('The credential encryption key file could not be created.', 'peak-publisher'),
+                    500,
+                    'wporg_credentials.storage'
+                );
+            }
+            @chmod($path, 0600);
+        } elseif (!file_exists($path)) {
+            return wporg_credentials_error(
+                'credential_storage_unavailable',
+                __('The credential encryption key file could not be created.', 'peak-publisher'),
+                500,
+                'wporg_credentials.storage'
+            );
+        }
+    }
+
+    $key = decode_prefixed_key(@include $path);
+    if ($key === null) {
         return wporg_credentials_error(
-            'encryption_key_missing',
-            __('PBLSH_ENCRYPTION_KEY is not defined.', 'peak-publisher'),
-            400,
-            'wporg_credentials.encryption_key'
+            'credential_storage_unavailable',
+            __('The credential encryption key file is unreadable or invalid.', 'peak-publisher'),
+            500,
+            'wporg_credentials.storage'
         );
     }
 
-    // The prefix makes the configured value self-describing and easy to validate.
-    $configured = constant('PBLSH_ENCRYPTION_KEY');
-    if (!is_string($configured) || !str_starts_with($configured, 'base64:')) {
+    return $key;
+}
+
+
+/**
+ * Returns the optional wp-config hardening key (32 raw bytes), null when not configured.
+ *
+ * @return string|null|\WP_Error
+ */
+function get_config_encryption_key() {
+    // The constant is an optional hardening layer, documented in the plugin FAQ.
+    if (!defined('PBLSH_ENCRYPTION_KEY')) {
+        return null;
+    }
+
+    $key = decode_prefixed_key(constant('PBLSH_ENCRYPTION_KEY'));
+    if ($key === null) {
         return wporg_credentials_error(
             'encryption_key_invalid',
             __('PBLSH_ENCRYPTION_KEY is defined but invalid. It must use the base64: format with a 32-byte key.', 'peak-publisher'),
@@ -76,49 +161,68 @@ function get_encryption_key() {
         );
     }
 
-    // AES-256-GCM requires exactly 32 raw bytes of key material.
-    $decoded = base64_decode(substr($configured, 7), true);
-    if (!is_string($decoded) || strlen($decoded) !== 32) {
-        return wporg_credentials_error(
-            'encryption_key_invalid',
-            __('PBLSH_ENCRYPTION_KEY is defined but invalid. It must decode to exactly 32 bytes.', 'peak-publisher'),
-            400,
-            'wporg_credentials.encryption_key'
-        );
+    return $key;
+}
+
+
+/**
+ * Returns the combined base key material: file key, extended by the optional wp-config key.
+ *
+ * There is exactly one scheme — adding or removing the wp-config constant changes the
+ * material, existing ciphertexts fail authentication, and the UI asks for the password again.
+ *
+ * @return string|\WP_Error
+ */
+function get_encryption_key(bool $create) {
+    $file_key = get_file_encryption_key($create);
+    if (is_wp_error($file_key)) {
+        return $file_key;
     }
 
-    return $decoded;
-}
-
-
-function get_encryption_key_status(): array {
-    // Reuse the strict key validator and expose a UI-friendly status shape.
-    $key = get_encryption_key();
-    if (!is_wp_error($key)) {
-        return [
-            'status' => 'valid',
-            'message' => null,
-        ];
+    $config_key = get_config_encryption_key();
+    if (is_wp_error($config_key)) {
+        return $config_key;
     }
 
-    // Missing and invalid are separate states for setup guidance.
-    $code = $key->get_error_code();
-    return [
-        'status' => $code === 'encryption_key_missing' ? 'missing' : 'invalid',
-        'message' => $key->get_error_message(),
-    ];
+    return $file_key . ($config_key ?? '');
 }
 
 
-function encryption_key_is_usable(): bool {
-    // Cheap gate for "is configured" checks: without a usable key, stored credentials cannot be decrypted.
-    return !is_wp_error(get_encryption_key());
+/**
+ * Returns the defect that makes credential storage inoperable, null when storage works.
+ *
+ * A missing key file is not a defect — it is created on the first save. Checking
+ * therefore never creates the file.
+ *
+ * @return \WP_Error|null
+ */
+function get_credential_storage_error(): ?\WP_Error {
+    if (file_exists(get_encryption_key_file_path())) {
+        $file_key = get_file_encryption_key(false);
+        if (is_wp_error($file_key)) {
+            return $file_key;
+        }
+    }
+
+    $config_key = get_config_encryption_key();
+    if (is_wp_error($config_key)) {
+        return $config_key;
+    }
+
+    return null;
 }
 
 
-function generate_encryption_key_snippet(): string {
-    // Generate a fresh 32-byte key for the wp-config.php setup snippet.
-    return "define('PBLSH_ENCRYPTION_KEY', 'base64:" . base64_encode(random_bytes(32)) . "');";
+/**
+ * Reports whether credential storage is operational, for the account form UI.
+ *
+ * @return array{status:'ok'|'error', message:string|null}
+ */
+function get_credential_storage_status(): array {
+    $error = get_credential_storage_error();
+    return $error === null
+        ? ['status' => 'ok', 'message' => null]
+        : ['status' => 'error', 'message' => $error->get_error_message()];
 }
 
 
@@ -189,7 +293,7 @@ function derive_site_encryption_key(string $base_key, string $context_id): strin
  */
 function encrypt_wporg_password(string $plain) {
     // Validate the configured base key before creating any ciphertext.
-    $base_key = get_encryption_key();
+    $base_key = get_encryption_key(true);
     if (is_wp_error($base_key)) {
         return $base_key;
     }
@@ -243,8 +347,8 @@ function encrypt_wporg_password(string $plain) {
  * @return string|\WP_Error
  */
 function decrypt_wporg_password(string $encrypted) {
-    // Validate the configured key before attempting to decrypt.
-    $base_key = get_encryption_key();
+    // Decryption must not create a missing key file behind the user's back.
+    $base_key = get_encryption_key(false);
     if (is_wp_error($base_key)) {
         return $base_key;
     }
@@ -338,6 +442,26 @@ function normalize_wporg_username($username, ?string $field = null) {
 
 
 /**
+ * Finds the stored account row matching an already-normalized username.
+ *
+ * @return int|string|null Key of the matching row, null when absent.
+ */
+function find_wporg_account_index(array $accounts, string $normalized_username) {
+    foreach ($accounts as $index => $account) {
+        // Skip malformed stored rows.
+        if (!is_array($account)) {
+            continue;
+        }
+        $stored_username = normalize_wporg_username($account['username'] ?? null);
+        if (!is_wp_error($stored_username) && $stored_username === $normalized_username) {
+            return $index;
+        }
+    }
+    return null;
+}
+
+
+/**
  * Resolves API masking/preserve signals against the currently stored option.
  *
  * @return array|\WP_Error
@@ -349,21 +473,7 @@ function resolve_masked_wporg_passwords(array $incoming, array $current) {
         return $incoming;
     }
 
-    // Index current accounts by normalized username for mask resolution.
     $current_accounts = is_array($current['wporg_accounts'] ?? null) ? $current['wporg_accounts'] : [];
-    $current_by_username = [];
-    foreach ($current_accounts as $account) {
-        // Ignore malformed stored rows instead of breaking the settings page.
-        if (!is_array($account)) {
-            continue;
-        }
-        // Skip stored rows with invalid usernames; they cannot resolve a mask.
-        $normalized = normalize_wporg_username($account['username'] ?? null);
-        if (is_wp_error($normalized)) {
-            continue;
-        }
-        $current_by_username[$normalized] = $account;
-    }
 
     // Normalize incoming account rows to a sequential list for field paths.
     $resolved_accounts = [];
@@ -394,10 +504,10 @@ function resolve_masked_wporg_passwords(array $incoming, array $current) {
             }
 
             // Look up the stored encrypted password for this normalized user.
-            $stored_password = '';
-            if (isset($current_by_username[$normalized])) {
-                $stored_password = wporg_string_from_value($current_by_username[$normalized]['password'] ?? '');
-            }
+            $stored_index = find_wporg_account_index($current_accounts, $normalized);
+            $stored_password = $stored_index !== null
+                ? wporg_string_from_value($current_accounts[$stored_index]['password'] ?? '')
+                : '';
 
             // Replace the UI mask with the stored encrypted password.
             if ($password === WPORG_PASSWORD_MASKED) {
@@ -436,11 +546,13 @@ function resolve_masked_wporg_passwords(array $incoming, array $current) {
 
 
 /**
- * Validates and encrypts already mask-resolved wporg accounts.
+ * Validates, verifies and encrypts already mask-resolved wporg accounts.
+ * $current_accounts (the stored rows) carries the credential-verdict stamps of
+ * unchanged accounts through the save.
  *
  * @return array|\WP_Error
  */
-function sanitize_wporg_accounts(array $resolved_accounts) {
+function sanitize_wporg_accounts(array $resolved_accounts, array $current_accounts = []) {
     // Validate all rows before encrypting so storage is updated atomically.
     $validated = [];
     $seen_usernames = [];
@@ -499,6 +611,45 @@ function sanitize_wporg_accounts(array $resolved_accounts) {
         ];
     }
 
+    // New plaintext passwords are verified against wordpress.org before anything
+    // is stored — the account card's "Verified" state must rest on a real verdict.
+    // Deliberate last gate before persisting credentials that would otherwise only
+    // fail much later at deploy time.
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgPluginSvnClient.php';
+    foreach ($validated as &$account) {
+        if (empty($account['encrypt'])) {
+            continue;
+        }
+        try {
+            $client = new WporgPluginSvnClient($account['username'], $account['password']);
+            $client->test_credentials();
+        } catch (WporgSvnException $e) {
+            if ($e->get_error_code() === 'invalid_credentials') {
+                return wporg_credentials_error(
+                    'invalid_credentials',
+                    __('wordpress.org rejected these SVN credentials. The account was not saved.', 'peak-publisher'),
+                    401,
+                    $account['password_field']
+                );
+            }
+            return wporg_credentials_error(
+                'credentials_check_failed',
+                __('Could not verify the credentials with wordpress.org. The account was not saved — please try again.', 'peak-publisher'),
+                502,
+                $account['password_field']
+            );
+        } catch (\Throwable $e) {
+            return wporg_credentials_error(
+                'credentials_check_failed',
+                __('Could not verify the credentials with wordpress.org. The account was not saved — please try again.', 'peak-publisher'),
+                502,
+                $account['password_field']
+            );
+        }
+        $account['verified_at'] = time();
+    }
+    unset($account);
+
     // Encrypt new plaintext passwords and preserve existing ciphertexts.
     $out = [];
     foreach ($validated as $account) {
@@ -515,11 +666,28 @@ function sanitize_wporg_accounts(array $resolved_accounts) {
             $password = $encrypted;
         }
 
-        // Store only the normalized username and encrypted password.
-        $out[] = [
+        // Store only the normalized username, encrypted password and verdict stamps.
+        $row = [
             'username' => $account['username'],
             'password' => $password,
         ];
+        if (!empty($account['verified_at'])) {
+            // Freshly verified in this save — starts with a clean slate.
+            $row['verified_at'] = $account['verified_at'];
+        } else {
+            // Stored verdict stamps of unchanged accounts survive the save.
+            $stored_index = find_wporg_account_index($current_accounts, $account['username']);
+            if ($stored_index !== null) {
+                $stored = $current_accounts[$stored_index];
+                if (!empty($stored['verified_at'])) {
+                    $row['verified_at'] = (int) $stored['verified_at'];
+                }
+                if (!empty($stored['rejected_at'])) {
+                    $row['rejected_at'] = (int) $stored['rejected_at'];
+                }
+            }
+        }
+        $out[] = $row;
     }
 
     return $out;
@@ -539,44 +707,44 @@ function get_wporg_credentials(string $username) {
     // Load stored accounts directly to avoid the masked settings API output.
     $settings = get_option('pblsh_settings');
     $accounts = is_array($settings) && is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
-    foreach ($accounts as $account) {
-        // Skip malformed stored rows.
-        if (!is_array($account)) {
-            continue;
-        }
-        // Match only the exact normalized wordpress.org username.
-        $stored_username = normalize_wporg_username($account['username'] ?? null);
-        if (is_wp_error($stored_username) || $stored_username !== $normalized) {
-            continue;
-        }
-
-        // Decrypt only the selected account's password.
-        $password = decrypt_wporg_password(wporg_string_from_value($account['password'] ?? ''));
-        if (is_wp_error($password)) {
-            return $password;
-        }
-
-        // Return plaintext only to internal backend callers.
-        return [
-            'username' => $normalized,
-            'password' => $password,
-        ];
+    $index = find_wporg_account_index($accounts, $normalized);
+    if ($index === null) {
+        // No account exists for this username.
+        return null;
     }
 
-    // No account exists for this username.
-    return null;
+    // Decrypt only the selected account's password.
+    $password = decrypt_wporg_password(wporg_string_from_value($accounts[$index]['password'] ?? ''));
+    if (is_wp_error($password)) {
+        return $password;
+    }
+
+    // Return plaintext only to internal backend callers.
+    return [
+        'username' => $normalized,
+        'password' => $password,
+    ];
 }
 
 
 /**
- * @return string[] Normalized usernames of all stored wordpress.org accounts with an encrypted password.
+ * Reports whether a stored password actually decrypts with the current key material.
+ * Re-validation when reading back from persistence: the key file or the wp-config
+ * constant may have changed since the ciphertext was written.
+ */
+function wporg_password_is_usable($stored_password): bool {
+    $password = wporg_string_from_value($stored_password);
+    if (!wporg_is_encrypted_password($password)) {
+        return false;
+    }
+    return !is_wp_error(decrypt_wporg_password($password));
+}
+
+
+/**
+ * @return string[] Normalized usernames of all stored wordpress.org accounts whose password decrypts.
  */
 function get_usable_wporg_account_usernames(): array {
-    // Without a usable encryption key, stored accounts cannot be decrypted — treat them as not configured.
-    if (!encryption_key_is_usable()) {
-        return [];
-    }
-
     $settings = get_option('pblsh_settings');
     $accounts = is_array($settings) && is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
     $usernames = [];
@@ -588,13 +756,71 @@ function get_usable_wporg_account_usernames(): array {
         if (is_wp_error($username) || isset($usernames[$username])) {
             continue;
         }
-        if (!wporg_is_encrypted_password(wporg_string_from_value($account['password'] ?? ''))) {
+        if (!wporg_password_is_usable($account['password'] ?? '')) {
             continue;
         }
         $usernames[$username] = true;
     }
 
     return array_keys($usernames);
+}
+
+
+/**
+ * The one place that picks the stored account for a wordpress.org operation:
+ * the preferred account (the marker's last-deploy account, or the add-new
+ * flow's intent) when it is usable, else the first usable account, else null.
+ */
+function select_wporg_account_username(?string $preferred_username = null): ?string {
+    $usable = get_usable_wporg_account_usernames();
+    if ($preferred_username !== null && trim($preferred_username) !== '') {
+        $preferred = normalize_wporg_username($preferred_username, 'username');
+        if (!is_wp_error($preferred) && in_array($preferred, $usable, true)) {
+            return $preferred;
+        }
+    }
+    return $usable[0] ?? null;
+}
+
+
+/**
+ * Records wordpress.org's latest verdict about a stored account's credentials —
+ * called at the places the verdict actually happens (save/test probes, upload
+ * access checks, deploys; MKACTIVITY/MERGE responses). Reads never validate
+ * credentials and must not call this. Positive verdicts are throttled so
+ * upload-dialog refreshes do not write the option over and over; explicit
+ * user-requested probes pass $force to always refresh the timestamp — the
+ * badge jump is their visible success feedback.
+ */
+function record_wporg_credentials_verdict(string $username, bool $verified, bool $force = false): void {
+    $normalized = normalize_wporg_username($username);
+    if (is_wp_error($normalized)) {
+        return;
+    }
+
+    $settings = get_option('pblsh_settings');
+    if (!is_array($settings) || !is_array($settings['wporg_accounts'] ?? null)) {
+        return;
+    }
+
+    $index = find_wporg_account_index($settings['wporg_accounts'], $normalized);
+    if ($index === null) {
+        return;
+    }
+    $account = $settings['wporg_accounts'][$index];
+
+    if ($verified) {
+        $recently_verified = (int) ($account['verified_at'] ?? 0) > time() - 15 * MINUTE_IN_SECONDS;
+        if (!$force && $recently_verified && empty($account['rejected_at'])) {
+            return;
+        }
+        $settings['wporg_accounts'][$index]['verified_at'] = time();
+        unset($settings['wporg_accounts'][$index]['rejected_at']);
+    } else {
+        $settings['wporg_accounts'][$index]['rejected_at'] = time();
+    }
+
+    update_option('pblsh_settings', $settings, false);
 }
 
 
@@ -612,11 +838,21 @@ function get_wporg_accounts_for_api(array $stored_accounts): array {
         $password = wporg_string_from_value($account['password'] ?? '');
         $has_password = wporg_is_encrypted_password($password);
 
+        $verified_at = (int) ($account['verified_at'] ?? 0);
+        $rejected_at = (int) ($account['rejected_at'] ?? 0);
+
         // Use the mask token only when a real encrypted password exists.
         $out[] = [
             'username' => $username,
             'password' => $has_password ? WPORG_PASSWORD_MASKED : '',
             'has_password' => $has_password,
+            // False after a key-material change (wp-config constant added/removed, key file lost):
+            // the UI then asks for the password again instead of failing at deploy time.
+            'password_usable' => $has_password && wporg_password_is_usable($password),
+            // wordpress.org's latest credential verdict: when it last accepted the
+            // stored credentials, and whether a rejection happened since then.
+            'verified_at' => $verified_at > 0 ? $verified_at : null,
+            'credentials_rejected' => $rejected_at > 0 && $rejected_at >= $verified_at,
         ];
     }
 

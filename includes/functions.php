@@ -42,6 +42,8 @@ function get_peak_publisher_faq_urls(): array {
     $questions = [
         'bothChannels' => 'Can I use both distribution channels for one plugin?',
         'switchLater' => 'Can I switch the distribution channel later?',
+        'credentialStorage' => 'How are my wordpress.org credentials stored?',
+        'whyImport' => 'Why is an import needed to manage a wordpress.org plugin?',
     ];
     return array_map(
         fn($question) => 'https://wordpress.org/plugins/peak-publisher/#' . rawurlencode(strtolower(trim($question))),

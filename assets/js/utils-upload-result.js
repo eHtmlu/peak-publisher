@@ -63,10 +63,20 @@ lodash.set(window, 'Pblsh.UploadResultUtils', (() => {
         };
     }
 
-    function getReleasePresentation(meta, releaseContext, isWporg) {
+    function getReleasePresentation(meta, releaseContext, isWporg, isClosedWporg = false) {
         const existingRelease = releaseContext.existingRelease || false;
         const releaseKind = releaseContext.releaseKind || {};
         let state = 'invalid';
+
+        // Closed plugins take the honest verb: the commit still works, but
+        // wordpress.org distributes nothing while closed — "publish"/"replace"
+        // would overpromise (same register exception as the closed warnings).
+        const wporgPublishLabel = isClosedWporg
+            ? __('Commit to wordpress.org SVN', 'peak-publisher')
+            : __('Publish on wordpress.org', 'peak-publisher');
+        const wporgReplaceLabel = isClosedWporg
+            ? __('Commit to wordpress.org SVN', 'peak-publisher')
+            : __('Replace on wordpress.org', 'peak-publisher');
 
         if (meta.plugin_ok) {
             // Both identity moments share the solid green — the color carries
@@ -100,37 +110,37 @@ lodash.set(window, 'Pblsh.UploadResultUtils', (() => {
             new_plugin: {
                 classNames: ['pblsh--upload-result--newplugin'],
                 type: __('New Plugin', 'peak-publisher'),
-                submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add Plugin', 'peak-publisher'),
+                submitLabel: isWporg ? wporgPublishLabel : __('Add Plugin', 'peak-publisher'),
             },
             first_release: {
                 classNames: ['pblsh--upload-result--firstrelease'],
                 type: __('First Release', 'peak-publisher'),
-                submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add First Release', 'peak-publisher'),
+                submitLabel: isWporg ? wporgPublishLabel : __('Add First Release', 'peak-publisher'),
             },
             replace_release: {
                 classNames: ['pblsh--upload-result--releasereplacement'],
                 type: __('Replace Existing Release', 'peak-publisher'),
-                submitLabel: isWporg ? __('Replace on wordpress.org', 'peak-publisher') : __('Replace Existing Release', 'peak-publisher'),
+                submitLabel: isWporg ? wporgReplaceLabel : __('Replace Existing Release', 'peak-publisher'),
             },
             new_major_release: {
                 classNames: ['pblsh--upload-result--newrelease', 'pblsh--upload-result--newmajor'],
                 type: __('New Major Release', 'peak-publisher'),
-                submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add Major Release', 'peak-publisher'),
+                submitLabel: isWporg ? wporgPublishLabel : __('Add Major Release', 'peak-publisher'),
             },
             new_minor_release: {
                 classNames: ['pblsh--upload-result--newrelease', 'pblsh--upload-result--newminor'],
                 type: __('New Minor Release', 'peak-publisher'),
-                submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add Minor Release', 'peak-publisher'),
+                submitLabel: isWporg ? wporgPublishLabel : __('Add Minor Release', 'peak-publisher'),
             },
             new_patch_release: {
                 classNames: ['pblsh--upload-result--newrelease', 'pblsh--upload-result--newpatch'],
                 type: __('New Patch Release', 'peak-publisher'),
-                submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add Patch Release', 'peak-publisher'),
+                submitLabel: isWporg ? wporgPublishLabel : __('Add Patch Release', 'peak-publisher'),
             },
             new_release: {
                 classNames: ['pblsh--upload-result--newrelease', 'pblsh--upload-result--newunknown'],
                 type: __('New Release', 'peak-publisher'),
-                submitLabel: isWporg ? __('Deploy to wordpress.org', 'peak-publisher') : __('Add Release', 'peak-publisher'),
+                submitLabel: isWporg ? wporgPublishLabel : __('Add Release', 'peak-publisher'),
             },
         };
         return presentations[state];

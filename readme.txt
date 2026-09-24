@@ -135,6 +135,16 @@ Switching from self-hosted to wordpress.org, however, is possible, **provided th
 
 **Warning:** In theory, a migration under a different slug might also work, but it can result in installed copies no longer receiving updates or even being deactivated unintentionally. In short: Only do this if you enjoy taking big risks — even if you plan to test it extensively.
 
+= How are my wordpress.org credentials stored? =
+Your wordpress.org SVN password is encrypted with AES-256-GCM before it is saved to the WordPress database. The encryption key is generated automatically and stored as a protected file inside `wp-content/uploads/` — so a database dump alone does not expose your password. Note that key and encrypted data still live on the same server, which is the common approach for WordPress plugins.
+
+You can optionally harden this: define a `PBLSH_ENCRYPTION_KEY` constant in your `wp-config.php` and its key material is used in addition to the key file — an attacker then needs both locations. Generate a value with `php -r "echo 'base64:' . base64_encode(random_bytes(32));"` and add it as `define('PBLSH_ENCRYPTION_KEY', 'base64:...');`. Since this changes the key material, you will be asked to re-enter your password once afterwards. The same applies when you remove the constant again.
+
+= Why is an import needed to manage a wordpress.org plugin? =
+Peak Publisher caches information about plugins, releases, and assets to ensure fast and smooth operation. To minimize the load on the wordpress.org SVN server, the data is permanently cached and only updated selectively when changes are made to the SVN repository. Therefore, the cache needs to be built once for each new plugin.
+
+Of course, WordPress.org remains the update server and the primary data source. You can even manage the same plugin from multiple Peak Publisher instances and directly via SVN at the same time. Peak Publisher always retrieves the latest data automatically to display up-to-date information.
+
 == Changelog ==
 
 = 1.3.1 - 2026-04-04 =

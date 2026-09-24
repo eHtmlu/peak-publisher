@@ -495,11 +495,7 @@ class UploadWorkflow {
                 'plugin_readme_txt' => $readme_info,
             ];
 
-            $hosting_state = $this->build_hosting_type_analysis_state($data);
-            if (is_wp_error($hosting_state)) {
-                return $this->upload_error($hosting_state->get_error_code(), $hosting_state->get_error_message(), $upload_id, $data);
-            }
-            $data = $hosting_state;
+            $data = $this->build_hosting_type_analysis_state($data);
 
             // Update cache
             $cache['data'] = $data;
@@ -533,22 +529,9 @@ class UploadWorkflow {
                 return $this->upload_error('wporg_deploy_state_invalid', __('This upload has no wordpress.org destination.', 'peak-publisher'), $upload_id);
             }
 
-            if (empty($target['pre_deploy_import']['required'])) {
-                // Return existing state when no pre-deploy import is pending
-                return [
-                    'status' => 'ok',
-                    'upload_id' => $upload_id,
-                    'data' => $data,
-                ];
-            }
-
-            // Refresh the target after the required wordpress.org import
-            $refreshed = $this->refresh_wporg_target_context($data);
-            if (is_wp_error($refreshed)) {
-                return $this->upload_error($refreshed->get_error_code(), $refreshed->get_error_message(), $upload_id, $data);
-            }
-
-            $cache['data'] = $refreshed;
+            // The gate advanced the world outside this upload (account saved, wporg state
+            // imported) — re-run the one authoritative target resolution, same as set_slug.
+            $cache['data'] = $this->build_hosting_type_analysis_state($data);
             $cache['data']['phases'][$phase] = $this->get_time_log();
             @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
 
@@ -588,12 +571,7 @@ class UploadWorkflow {
             // Re-run the hosting analysis — the original upload intent is part of the state:
             // lookups, targets, and choice follow the new slug — hitting an existing plugin
             // IS the intended association.
-            $hosting_state = $this->build_hosting_type_analysis_state($data);
-            if (is_wp_error($hosting_state)) {
-                return $this->upload_error($hosting_state->get_error_code(), $hosting_state->get_error_message(), $upload_id, $data);
-            }
-
-            $cache['data'] = $hosting_state;
+            $cache['data'] = $this->build_hosting_type_analysis_state($data);
             $cache['data']['phases'][$phase] = $this->get_time_log();
             @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
 
@@ -661,8 +639,6 @@ class UploadWorkflow {
      * facts live with the channel decision, never in parallel top-level fields. slug_locked
      * marks a settled fact — exactly one existing match, no override, no declared "add new
      * plugin" intent — where the UI shows the slug as static text instead of a control.
-     * Target rebuilds that must not change the identity use carry_target_identity() —
-     * its key list mirrors the facts stamped here.
      */
     private function apply_target_identity(array $target, array $identity, string $main_file_name, string $intent): array {
         $target['slug'] = (string) $identity['slug'];
@@ -670,16 +646,6 @@ class UploadWorkflow {
         $target['slug_locked'] = $identity['existing_matches'] === 1 && $intent === '';
         $target['plugin_basename'] = $target['slug'] !== '' && $main_file_name !== '' ? $target['slug'] . '/' . $main_file_name : '';
         return $target;
-    }
-
-    /**
-     * Carries a settled channel identity from one built target onto a rebuilt one — the
-     * counterpart to apply_target_identity() for rebuilds that must not change the identity.
-     * The key list is the set of facts apply_target_identity() stamps.
-     */
-    private function carry_target_identity(array $from, array $onto): array {
-        $identity_keys = [ 'slug', 'slug_source', 'slug_locked', 'plugin_basename' ];
-        return array_merge($onto, array_intersect_key($from, array_flip($identity_keys)));
     }
 
     /**
@@ -708,7 +674,7 @@ class UploadWorkflow {
         return [ 'wporg', 'self_hosted' ];
     }
 
-    private function build_hosting_type_analysis_state(array $data) {
+    private function build_hosting_type_analysis_state(array $data): array {
         $intent = (string) ($data['hosting_type_intended'] ?? '');
         $request_username = (string) ($data['wporg_username_intended'] ?? '');
 
@@ -735,20 +701,6 @@ class UploadWorkflow {
         $included = $this->included_channels($intent, $has_self_hosted_signal, $wporg_evidence, $self_evidence);
         $include_wporg = in_array('wporg', $included, true);
         $include_self_hosted = in_array('self_hosted', $included, true);
-        $choice = $include_wporg && $include_self_hosted;
-        if ($intent === 'self_hosted') {
-            $default = 'self_hosted';
-        } elseif ($intent === 'wporg') {
-            $default = 'wporg';
-        } elseif ($has_self_hosted_signal) {
-            $default = 'self_hosted';
-        } elseif ($wporg_evidence) {
-            $default = 'wporg';
-        } elseif ($self_evidence) {
-            $default = 'self_hosted';
-        } else {
-            $default = null;
-        }
 
         $wporg_target = null;
         if ($include_wporg) {
@@ -758,13 +710,6 @@ class UploadWorkflow {
                     $preferred_username = $request_username;
                 }
                 $wporg_target = $this->build_wporg_target_for_marker($data, $wporg_marker, $preferred_username);
-                if (is_wp_error($wporg_target)) {
-                    if ($intent === 'wporg' || (!$has_self_hosted_signal && !$include_self_hosted)) {
-                        return $wporg_target;
-                    }
-                    $include_wporg = false;
-                    $choice = false;
-                }
             } else {
                 $wporg_target = $this->build_wporg_pre_deploy_target($data, $identities['wporg']['slug']);
             }
@@ -773,7 +718,7 @@ class UploadWorkflow {
         // wporg before self_hosted: the insertion order is both the display order and,
         // via the array_key_first() fallbacks below, the priority order.
         $targets = [];
-        if ($include_wporg && is_array($wporg_target)) {
+        if ($wporg_target !== null) {
             $targets['wporg'] = $this->apply_target_identity($wporg_target, $identities['wporg'], $main_file_name, $intent);
         }
         if ($include_self_hosted) {
@@ -797,6 +742,41 @@ class UploadWorkflow {
         }
         $data['candidate_channels'] = $candidate_channels;
 
+        // The channel decision, in three steps: local evidence (intent, self-hosted
+        // signal, existing plugins), then remote evidence resolving an otherwise open
+        // choice, then normalization to a target that actually exists.
+        $choice = $include_wporg && $include_self_hosted;
+        if ($intent === 'self_hosted') {
+            $default = 'self_hosted';
+        } elseif ($intent === 'wporg') {
+            $default = 'wporg';
+        } elseif ($has_self_hosted_signal) {
+            $default = 'self_hosted';
+        } elseif ($wporg_evidence) {
+            $default = 'wporg';
+        } elseif ($self_evidence) {
+            $default = 'self_hosted';
+        } else {
+            $default = null;
+        }
+
+        // Remote ownership evidence resolves an otherwise open channel choice: when the
+        // wordpress.org directory attributes the slug to the user's account — owner of a
+        // fresh or published plugin, or proven committer — wporg is as settled as local
+        // evidence would make it (a mere contributor listing is deliberately too weak).
+        // Applies only where the choice screen would appear: an intent, a self-hosted
+        // signal or local evidence always wins, so a migration ZIP that still carries
+        // Update URI/bootstrap stays on its self-hosted lineage. Costs nothing extra —
+        // the directory hint was already computed for the wporg target.
+        if ($choice && $intent === '' && !$has_self_hosted_signal && !$self_evidence) {
+            $hint = $targets['wporg']['wporg_directory_hint'] ?? null;
+            $relation = is_array($hint) ? (string) ($hint['relation'] ?? '') : '';
+            if (in_array($relation, ['owner', 'committer'], true)) {
+                $choice = false;
+                $default = 'wporg';
+            }
+        }
+
         if ($default !== null && !isset($targets[$default])) {
             $default = array_key_first($targets);
         }
@@ -817,42 +797,6 @@ class UploadWorkflow {
         }
 
         return $data;
-    }
-
-    private function refresh_wporg_target_context(array $data) {
-        // Resolve the slug and account from persisted upload state
-        $target = is_array($data['hosting_type_targets']['wporg'] ?? null) ? $data['hosting_type_targets']['wporg'] : [];
-        $slug = normalize_plugin_slug($target['slug'] ?? null, 'slug');
-        if (is_wp_error($slug)) {
-            return $slug;
-        }
-
-        $pre_deploy = is_array($target['pre_deploy_import'] ?? null) ? $target['pre_deploy_import'] : [];
-        $username = normalize_wporg_username($pre_deploy['username'] ?? null, 'username');
-        if (is_wp_error($username)) {
-            return $username;
-        }
-
-        // Require the marker created by the pre-deploy import
-        $marker = get_plugin_post_by_slug('pblsh_wporg_plugin', $slug);
-        if (!$marker instanceof \WP_Post) {
-            return new \WP_Error(
-                'wporg_pre_deploy_import_required',
-                __('Import the current wordpress.org state before deploying this ZIP.', 'peak-publisher'),
-                [ 'status' => 409 ]
-            );
-        }
-
-        // Rebuild the target with current marker and access data; the channel identity
-        // (slug and derived facts) is unchanged by the import and carried over.
-        $next_target = $this->build_wporg_target_for_marker($data, $marker, $username);
-        if (is_wp_error($next_target)) {
-            return $next_target;
-        }
-        $next_target = $this->carry_target_identity($target, $next_target);
-
-        $data['hosting_type_targets']['wporg'] = $next_target;
-        return $this->apply_target_release_context($data, $next_target);
     }
 
     private function apply_target_release_context(array $data, array $target): array {
@@ -877,26 +821,31 @@ class UploadWorkflow {
     }
 
     private function build_wporg_pre_deploy_target(array $data, string $slug): array {
-        $usable_usernames = get_usable_wporg_account_usernames();
-        $username = '';
+        // The target reports its account even without a slug (no probe possible then),
+        // so the account is selected up front; the probe below resolves to the same one.
         $intended_username = (string) ($data['wporg_username_intended'] ?? '');
-        if ($intended_username !== '') {
-            $normalized = normalize_wporg_username($intended_username, 'username');
-            if (!is_wp_error($normalized) && in_array($normalized, $usable_usernames, true)) {
-                $username = $normalized;
-            }
-        }
-        if ($username === '') {
-            $username = $usable_usernames[0] ?? '';
-        }
+        $username = (string) (select_wporg_account_username($intended_username !== '' ? $intended_username : null) ?? '');
 
         $blockers = $this->wporg_marker_independent_blockers($data);
         // Without a resolved slug there is nothing to import — the destination screen collects the decision first.
         $slug_available = $slug !== '';
 
+        // Probe wordpress.org before the import, so the gate can say upfront whether the
+        // slug exists on SVN and whether the credentials work (mirrors the marker path's
+        // check). A failed probe must not block the target — the import station shows
+        // the outcome and the import itself surfaces real errors.
+        $access_status = 'not_checked';
+        $access_message = null;
+        if ($slug_available && $username !== '') {
+            require_once __DIR__ . '/SvnDeployWorkflow.php';
+            $access = SvnDeployWorkflow::resolve_wporg_account_access($slug, $username);
+            $access_status = (string) ($access['status'] ?? 'error');
+            $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
+        }
+
         return [
             'existing_plugin_id' => null,
-            'available' => $username !== '',
+            'available' => $this->wporg_target_available($access_status, $username),
             'blocking_reason' => $username !== '' ? null : 'wporg_no_credentials',
             'pre_deploy_import' => [
                 'required' => $slug_available,
@@ -904,8 +853,9 @@ class UploadWorkflow {
                 'action' => 'import_and_continue',
                 'username' => $username !== '' ? $username : null,
             ],
-            'wporg_access_status' => 'not_checked',
-            'wporg_access_username' => null,
+            'wporg_access_status' => $access_status,
+            'wporg_access_message' => $access_message,
+            'wporg_directory_hint' => $this->wporg_directory_hint($access_status, $slug, $username),
             'account_username' => $username !== '' ? $username : null,
             'target_validation' => [
                 'finalizable' => false,
@@ -915,35 +865,59 @@ class UploadWorkflow {
         ];
     }
 
-    private function build_wporg_target_for_marker(array $data, \WP_Post $marker, ?string $preferred_username = null) {
-        // Refresh the local wporg cache before validating the deploy target
+    /**
+     * Whether a wporg target can be acted on with its account as far as the probe
+     * knows: an account is resolved and no hard fact speaks against it. 'error'
+     * and 'not_checked' keep the target available — probe failures are warn-only
+     * (a checklist warning), the publish itself surfaces real errors, the MERGE
+     * is the hard gate. not_found and credentials_rejected are hard facts.
+     */
+    private function wporg_target_available(string $access_status, string $username): bool {
+        return $username !== '' && in_array($access_status, [ 'ok', 'error', 'not_checked' ], true);
+    }
+
+    /**
+     * Directory/ownership hint for the target (wordpress.org stopped enforcing write
+     * access on probe requests, 2026-08 — this is the remaining upfront signal).
+     * Heuristic, so it feeds warnings only — never a blocker.
+     *
+     * @return array|null Null when there is nothing to check; shape and semantics in
+     *         SvnDeployWorkflow::directory_hint() (state/relation plus the directory
+     *         listing's identity: name, icon, description).
+     */
+    private function wporg_directory_hint(string $access_status, string $slug, string $username): ?array {
+        if ($access_status !== 'ok' || $slug === '' || $username === '') {
+            return null;
+        }
+        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        return SvnDeployWorkflow::directory_hint($slug, $username);
+    }
+
+    private function build_wporg_target_for_marker(array $data, \WP_Post $marker, ?string $preferred_username = null): array {
+        // Refresh the local wporg cache before validating the deploy target.
+        // A failed refresh must not block the target — stale data is guarded by
+        // the deploy's own concurrent-change detection; the failure travels as
+        // its own warn-only fact (wporg_refresh_error), separate from the
+        // credentials probe's verdict.
+        $refresh_error = null;
         try {
             get_wporg_plugin_data($marker);
         } catch (\Throwable $e) {
             // get_wporg_plugin_data() throws RuntimeExceptions with user-facing messages (wporg_cache.php).
-            return new \WP_Error(
-                'wporg_access_check_failed',
-                $e instanceof \RuntimeException && $e->getMessage() !== '' ? $e->getMessage() : __('Could not refresh wordpress.org SVN cache.', 'peak-publisher'),
-                [ 'status' => 502 ]
-            );
+            $refresh_error = $e instanceof \RuntimeException && $e->getMessage() !== ''
+                ? $e->getMessage()
+                : __('Could not refresh wordpress.org SVN cache.', 'peak-publisher');
         }
 
         require_once __DIR__ . '/SvnDeployWorkflow.php';
-        $access = SvnDeployWorkflow::find_author_account_result($marker->post_name, $preferred_username);
+        $access = SvnDeployWorkflow::resolve_wporg_account_access($marker->post_name, $preferred_username);
         $access_status = (string) ($access['status'] ?? 'error');
-        if ($access_status === 'error') {
-            return new \WP_Error(
-                'wporg_access_check_failed',
-                isset($access['message']) && is_string($access['message']) ? $access['message'] : __('Could not verify wordpress.org SVN access.', 'peak-publisher'),
-                [ 'status' => 502 ]
-            );
-        }
-
+        $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
+        // The resolved account travels with every status except no_credentials.
         $username = (string) ($access['username'] ?? '');
-        $available = $access_status === 'ok' && $username !== '';
+        $available = $this->wporg_target_available($access_status, $username);
         $blocking_reason = match ($access_status) {
             'no_credentials' => 'wporg_no_credentials',
-            'no_write_access' => 'wporg_no_write_access',
             'not_found' => 'wporg_not_found',
             default => null,
         };
@@ -973,7 +947,9 @@ class UploadWorkflow {
             'blocking_reason' => $blocking_reason,
             'pre_deploy_import' => [ 'required' => false, 'status' => 'complete' ],
             'wporg_access_status' => $access_status,
-            'wporg_access_username' => $available ? $username : null,
+            'wporg_access_message' => $access_message,
+            'wporg_refresh_error' => $refresh_error,
+            'wporg_directory_hint' => $this->wporg_directory_hint($access_status, $marker->post_name, $username),
             'account_username' => $available ? $username : null,
             'deploy_mode' => $deploy_mode,
             'target_validation' => [
@@ -1095,8 +1071,10 @@ class UploadWorkflow {
             return $this->upload_error($slug->get_error_code(), $slug->get_error_message());
         }
 
-        $username = normalize_wporg_username($target['wporg_access_username'] ?? null, 'username');
-        if (is_wp_error($username) || (string) ($target['wporg_access_status'] ?? '') !== 'ok') {
+        $username = normalize_wporg_username($target['account_username'] ?? null, 'username');
+        // 'error' is deliberately permitted: probe failures are warn-only — the
+        // deploy below is the authoritative access test (the MERGE decides).
+        if (is_wp_error($username) || !in_array((string) ($target['wporg_access_status'] ?? ''), [ 'ok', 'error' ], true)) {
             return $this->upload_error('wporg_access_check_failed', __('Could not verify wordpress.org SVN access.', 'peak-publisher'));
         }
 

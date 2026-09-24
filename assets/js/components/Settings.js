@@ -1,20 +1,12 @@
 // Settings Component
-lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
+lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } = {}) => {
     const { __ } = wp.i18n;
     const { useState, useEffect, createElement, createInterpolateElement } = wp.element;
     const { useSelect } = wp.data;
-    const { Button, ToggleControl, TextControl, TextareaControl } = wp.components;
-    const { showAlert } = Pblsh.Utils;
-    const settingsController = window.Pblsh.Controllers && window.Pblsh.Controllers.Settings ? window.Pblsh.Controllers.Settings : null;
-    const PASSWORD_MASKED = '__MASKED__';
-    const PASSWORD_MANAGER_IGNORE_PROPS = {
-        autoComplete: 'off',
-        'data-lpignore': 'true',
-        'data-1p-ignore': 'true',
-        'data-bwignore': 'true',
-        'data-dashlane-disabled-on-field': 'true',
-        'data-form-type': 'other',
-    };
+    const { Button, DropdownMenu, MenuItem, ToggleControl, TextControl, TextareaControl } = wp.components;
+    const { showAlert, getSvgIcon } = Pblsh.Utils;
+    const { WporgAccountForm, NoticeBox } = Pblsh.Components;
+    const settingsController = window.Pblsh.Controllers.Settings;
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const loading = useSelect((select) => select('pblsh/settings').isLoading(), []);
@@ -27,27 +19,25 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         ip_whitelist: [],
         count_plugin_installations: false,
         standalone_redirect_url: '',
-        wporg_username: '',
-        wporg_password: '',
-        wporg_original_username: '',
     });
     const [currentSection, setCurrentSection] = useState('general');
-    const [testingCredentials, setTestingCredentials] = useState(false);
-    const [checkingEncryptionKey, setCheckingEncryptionKey] = useState(false);
-    const [credentialTestStatus, setCredentialTestStatus] = useState(null);
+    const [wporgAccountEditing, setWporgAccountEditing] = useState(false);
+    // Avatar loading can fail (Gravatar blocked, offline admin) — an empty-avatar
+    // placeholder (person icon in the avatar's round footprint) steps in then.
+    const [wporgAvatarFailed, setWporgAvatarFailed] = useState(false);
+
+    const storedAccount = (Array.isArray(serverSettings?.wporg_accounts) ? serverSettings.wporg_accounts : [])[0] || null;
+    // A different stored account gets a fresh avatar attempt.
+    useEffect(() => {
+        setWporgAvatarFailed(false);
+    }, [storedAccount?.username || '']);
 
     useEffect(() => {
-        try {
-            if (settingsController) settingsController.fetch();
-        } catch (e) {}
+        settingsController.fetch();
     }, []);
 
     useEffect(() => {
         if (serverSettings) {
-            const accounts = Array.isArray(serverSettings.wporg_accounts) ? serverSettings.wporg_accounts : [];
-            const firstAccount = accounts[0] || {};
-            const firstUsername = firstAccount.username || '';
-            const firstHasPassword = !!firstAccount.has_password;
             setSettings({
                 standalone_mode: !!serverSettings.standalone_mode,
                 auto_remove_workspace_artifacts: !!serverSettings.auto_remove_workspace_artifacts,
@@ -56,11 +46,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 ip_whitelist: getTextareaFromList(Array.isArray(serverSettings.ip_whitelist) ? serverSettings.ip_whitelist : []),
                 count_plugin_installations: !!serverSettings.count_plugin_installations,
                 standalone_redirect_url: serverSettings.standalone_redirect_url || '',
-                wporg_username: firstUsername,
-                wporg_password: firstHasPassword ? PASSWORD_MASKED : '',
-                wporg_original_username: firstUsername,
             });
-            setCredentialTestStatus(null);
         }
     }, [serverSettings && JSON.stringify(serverSettings)]);
 
@@ -87,29 +73,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         }
     };
 
-    const setWporgUsername = (value) => {
-        setSettings(prev => {
-            const next = { ...prev, wporg_username: value };
-            if (prev.wporg_password === PASSWORD_MASKED && value !== prev.wporg_original_username) {
-                next.wporg_password = '';
-            }
-            return next;
-        });
-        setCredentialTestStatus(null);
-    };
-
-    const setWporgPassword = (value) => {
-        setSettings(prev => ({ ...prev, wporg_password: value }));
-        setCredentialTestStatus(null);
-    };
-
-    const getEncryptionKeyStatus = () => {
-        return serverSettings && serverSettings.wporg_credentials
-            ? (serverSettings.wporg_credentials.encryption_key_status || 'missing')
-            : 'missing';
-    };
-
     const buildSavePayload = () => {
+        // The account card saves itself through the shared form — this payload only
+        // carries the plain settings and passes the stored (masked) accounts through.
         const payload = cloneServerSettings();
         delete payload.wporg_credentials;
 
@@ -121,73 +87,31 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         payload.count_plugin_installations = !!settings.count_plugin_installations;
         payload.standalone_redirect_url = settings.standalone_redirect_url || '';
 
-        const accounts = Array.isArray(payload.wporg_accounts) ? payload.wporg_accounts : [];
-        const firstAccount = {
-            ...(accounts[0] && typeof accounts[0] === 'object' ? accounts[0] : {}),
-            username: settings.wporg_username || '',
-            password: settings.wporg_password || '',
-        };
-
-        if (accounts.length > 0 || firstAccount.username !== '' || firstAccount.password !== '') {
-            accounts[0] = firstAccount;
-            payload.wporg_accounts = accounts;
-        } else {
-            payload.wporg_accounts = [];
-        }
-
         return payload;
     };
 
     const handleSave = async () => {
         try {
             const payload = buildSavePayload();
-            if (settingsController) {
-                await settingsController.save(payload);
-            } else {
-                await window.Pblsh.API.saveSettings(payload);
-            }
+            await settingsController.save(payload);
             if (typeof onClose === 'function') onClose();
         } catch (e) {
             showAlert(e.message, 'error');
         }
     };
 
-    const handleTestCredentials = async () => {
-        try {
-            setTestingCredentials(true);
-            setCredentialTestStatus(null);
-            const result = await window.Pblsh.API.testSvnCredentials(settings.wporg_username || '', settings.wporg_password || '');
-            if (result && result.status === 'ok') {
-                setCredentialTestStatus({ type: 'success', message: __('Connection successful.', 'peak-publisher') });
-            } else {
-                setCredentialTestStatus({ type: 'error', message: __('Connection test failed.', 'peak-publisher') });
-            }
-        } catch (e) {
-            setCredentialTestStatus({ type: 'error', message: e && e.message ? e.message : __('Connection test failed.', 'peak-publisher') });
-        } finally {
-            setTestingCredentials(false);
+    const handleDisconnectWporgAccount = async () => {
+        if (!confirm(__('Disconnect the wordpress.org account? The stored SVN credentials will be deleted — publishing to wordpress.org will require connecting the account again.', 'peak-publisher'))) {
+            return;
         }
-    };
-
-    const handleCheckEncryptionKey = async () => {
         try {
-            setCheckingEncryptionKey(true);
-            const nextSettings = await window.Pblsh.API.getSettings();
-            wp.data.dispatch('pblsh/settings').setServer(nextSettings);
+            const payload = cloneServerSettings();
+            delete payload.wporg_credentials;
+            payload.wporg_accounts = [];
+            await settingsController.save(payload);
         } catch (e) {
-            showAlert(e && e.message ? e.message : __('Could not check the encryption key status.', 'peak-publisher'), 'error');
-        } finally {
-            setCheckingEncryptionKey(false);
+            showAlert(e.message, 'error');
         }
-    };
-
-    const handleRemoveWporgAccount = () => {
-        setSettings(prev => ({
-            ...prev,
-            wporg_username: '',
-            wporg_password: '',
-        }));
-        setCredentialTestStatus(null);
     };
 
     if (loading) {
@@ -203,18 +127,142 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         { id: 'wordpress-org', title: __('wordpress.org', 'peak-publisher'), icon: 'wordpress', separatorBefore: true },
     ];
 
-    const renderSection = () => {
-        const encryptionKeyStatus = getEncryptionKeyStatus();
-        const encryptionKeyIsValid = encryptionKeyStatus === 'valid';
-        const encryptionKeyMessage = serverSettings && serverSettings.wporg_credentials
-            ? (serverSettings.wporg_credentials.encryption_key_message || '')
-            : '';
-        const encryptionKeySnippet = serverSettings && serverSettings.wporg_credentials
-            ? (serverSettings.wporg_credentials.wp_config_snippet || '')
-            : '';
-        const hasStoredWporgAccount = !!settings.wporg_original_username;
-        const wporgAccountMarkedForRemoval = hasStoredWporgAccount && settings.wporg_username === '' && settings.wporg_password === '';
+    // Tests the stored (masked) credentials against wordpress.org — the endpoint
+    // records the verdict on the account. Success feedback is the badge jumping
+    // to a fresh "Verified" time after the reload; failures alert their message.
+    const handleTestStoredCredentials = async (accountUsername) => {
+        try {
+            const result = await window.Pblsh.API.testSvnCredentials(accountUsername, Pblsh.Utils.WPORG_PASSWORD_MASKED);
+            if (!result || result.status !== 'ok') {
+                showAlert(__('Connection test failed.', 'peak-publisher'), 'error');
+            }
+        } catch (e) {
+            showAlert(e && e.message ? e.message : __('Connection test failed.', 'peak-publisher'), 'error');
+        } finally {
+            // Reload the masked accounts so verified_at / rejection state update.
+            await settingsController.fetch();
+        }
+    };
 
+    // The badge states what we actually know, most severe first: an unusable
+    // stored password (key material changed), a rejection by wordpress.org, the
+    // last verified moment — or, for accounts saved before verification existed,
+    // an honest "not verified yet". One anatomy for every state: container with
+    // state modifier, icon, and a body in which status word and optional time
+    // element can wrap.
+    const renderWporgAccountState = (storedAccount, passwordUsable) => {
+        const stateBadge = (modifier, icon, label, time = null) => createElement('span', {
+            className: 'pblsh--wporg-account-card__state ' + modifier,
+        },
+            createElement('span', { className: 'pblsh--wporg-account-card__state-icon', 'aria-hidden': 'true' },
+                getSvgIcon(icon, { size: 16 })),
+            createElement('span', { className: 'pblsh--wporg-account-card__state-body' },
+                createElement('span', { className: 'pblsh--wporg-account-card__state-status' }, label),
+                time,
+            ),
+        );
+
+        if (!passwordUsable || storedAccount.credentials_rejected) {
+            return stateBadge('is-blocked', 'close_circle', __('Password re-entry required', 'peak-publisher'));
+        }
+        if (storedAccount.verified_at) {
+            const verifiedDate = new Date(storedAccount.verified_at * 1000);
+            return stateBadge('is-verified', 'check_circle', __('Verified', 'peak-publisher'),
+                createElement('time', Pblsh.Utils.getTimeTooltipProps(verifiedDate),
+                    Pblsh.Utils.formatRelativeTime(verifiedDate)));
+        }
+        return stateBadge('is-unknown', 'help_circle_outline', __('Not verified yet', 'peak-publisher'));
+    };
+
+    const renderWporgAccountCard = () => {
+        const hasStoredAccount = !!(storedAccount && storedAccount.username);
+        const passwordUsable = !!storedAccount?.password_usable;
+
+        if (wporgAccountEditing || !hasStoredAccount) {
+            // The form carries its own prominent frame — it replaces the card
+            // instead of nesting inside it (one frame at a time).
+            return createElement(WporgAccountForm, {
+                onSaved: () => setWporgAccountEditing(false),
+                onCancel: hasStoredAccount ? () => setWporgAccountEditing(false) : null,
+            });
+        }
+
+        // Flat grid children — the card's CSS grid places them (identity left,
+        // management icons top right, import bottom right, notices across the
+        // full width).
+        return createElement('div', { className: 'pblsh--wporg-account-card' },
+            createElement('div', { className: 'pblsh--wporg-account-card__identity' },
+                createElement('span', { className: 'pblsh--wporg-account-card__avatar' },
+                    wporgAvatarFailed
+                        ? createElement('span', { className: 'pblsh--wporg-account-card__avatar-fallback' },
+                            getSvgIcon('account', { size: 40 }))
+                        : createElement('img', {
+                            className: 'pblsh--wporg-account-card__avatar-image',
+                            // Official wordpress.org avatar redirect — resolves the
+                            // account's Gravatar by username alone (s=128 for retina).
+                            src: 'https://wordpress.org/grav-redirect.php?user=' + encodeURIComponent(storedAccount.username) + '&s=128',
+                            alt: '',
+                            onError: () => setWporgAvatarFailed(true),
+                        }),
+                ),
+                createElement('div', { className: 'pblsh--wporg-account-card__identity-text' },
+                    createElement('span', { className: 'pblsh--wporg-account-card__username' }, storedAccount.username),
+                    renderWporgAccountState(storedAccount, passwordUsable),
+                ),
+            ),
+            // Management actions — the same icon language as the plugin list:
+            // pencil to edit, destructive removal behind the menu (which is also
+            // the future home of multi-account actions).
+            createElement('div', { className: 'pblsh--wporg-account-card__manage' },
+                createElement(Button, {
+                    isTertiary: true,
+                    onClick: () => setWporgAccountEditing(true),
+                    label: __('Edit account', 'peak-publisher'),
+                    icon: getSvgIcon('pencil', { size: 24 }),
+                }),
+                createElement(DropdownMenu, {
+                    icon: getSvgIcon('dots_horizontal', { size: 24 }),
+                    label: __('More options', 'peak-publisher'),
+                    // The settings live in a native <dialog> top layer — a
+                    // portaled popover would land behind it, so render inline.
+                    popoverProps: { inline: true },
+                    children: ({ onClose }) => [
+                        createElement(MenuItem, {
+                            key: 'test',
+                            disabled: !passwordUsable,
+                            onClick: () => { handleTestStoredCredentials(storedAccount.username); onClose(); },
+                        },
+                            getSvgIcon('check_circle', { size: 24 }),
+                            __('Test connection', 'peak-publisher'),
+                        ),
+                        createElement(MenuItem, {
+                            key: 'remove',
+                            isDestructive: true,
+                            disabled: saving,
+                            onClick: () => { handleDisconnectWporgAccount(); onClose(); },
+                        },
+                            getSvgIcon('delete_forever', { size: 24 }),
+                            __('Disconnect account', 'peak-publisher'),
+                        ),
+                    ],
+                }),
+            ),
+            !passwordUsable ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-card__reentry' },
+                __('The stored password can no longer be decrypted because the encryption key material changed. Edit the account and re-enter it.', 'peak-publisher'),
+            ) : (storedAccount.credentials_rejected ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-card__reentry' },
+                __('wordpress.org rejected the stored password. Edit the account and re-enter it.', 'peak-publisher'),
+            ) : null),
+            createElement(Button, {
+                className: 'pblsh--wporg-account-card__import',
+                isSecondary: true,
+                onClick: () => { if (typeof onOpenWporgImport === 'function') onOpenWporgImport(); },
+                icon: getSvgIcon('download', { size: 24 }),
+                __next40pxDefaultSize: true,
+            }, __('Import plugins…', 'peak-publisher')),
+        );
+    };
+
+    const renderSection = () => {
         if (currentSection === 'general') {
             return createElement(wp.element.Fragment, null,
                 createElement('section', { className: 'pblsh--settings--main__section' },
@@ -349,87 +397,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
                 createElement('section', { className: 'pblsh--settings--main__section' },
                     createElement('h2', null, __('wordpress.org', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        !encryptionKeyIsValid ? createElement('div', { className: 'pblsh--settings-wporg-encryption-setup' },
-                            createElement('h3', { className: 'pblsh--settings-wporg-encryption-setup__title' }, __('First step:', 'peak-publisher')),
-                            createElement('p', { className: 'pblsh--settings-wporg-encryption-setup__text' }, __('Before adding your WordPress.org credentials, you need to configure encrypted storage of those credentials.', 'peak-publisher')),
-                            createElement('p', { className: 'pblsh--settings-wporg-encryption-setup__text' }, __('Please add the following line to your wp-config.php file:', 'peak-publisher')),
-                            encryptionKeySnippet ? createElement('code', { className: 'pblsh--settings-wporg-encryption-setup__code' }, encryptionKeySnippet) : null,
-                            createElement('h4', { className: 'pblsh--settings-wporg-encryption-setup__status-label' }, __('Status', 'peak-publisher')),
-                            createElement('div', { className: 'pblsh--settings-wporg-encryption-setup__status-row' },
-                                createElement('span', { className: `pblsh--settings-wporg-encryption-setup__status pblsh--settings-wporg-encryption-setup__status--${encryptionKeyStatus}` },
-                                    createElement('span', null, encryptionKeyMessage)
-                                ),
-                                createElement(Button, {
-                                    className: 'pblsh--settings-wporg-encryption-setup__status-check',
-                                    isSecondary: true,
-                                    onClick: handleCheckEncryptionKey,
-                                    isBusy: checkingEncryptionKey,
-                                    disabled: checkingEncryptionKey,
-                                    __next40pxDefaultSize: true,
-                                }, __('Check again', 'peak-publisher'))
-                            ),
-                        ) : null,
-                        !encryptionKeyIsValid && hasStoredWporgAccount ? createElement('div', { className: 'pblsh--settings-wporg-account pblsh--settings-wporg-account--key-blocked' },
-                            createElement('h4', { className: 'pblsh--settings-wporg-account__title' }, __('Saved account', 'peak-publisher')),
-                            createElement('div', { className: 'pblsh--settings-wporg-account__row' },
-                                createElement('p', { className: 'pblsh--settings-wporg-account__username' }, createElement(wporgAccountMarkedForRemoval ? 'del' : 'span', null,
-                                    __('Username: ', 'peak-publisher'),
-                                    settings.wporg_original_username
-                                )),
-                                wporgAccountMarkedForRemoval
-                                    ? createElement('p', { className: 'pblsh--settings-wporg-account__pending-removal' }, __('Save settings now to complete the removal.', 'peak-publisher'))
-                                    : createElement(Button, {
-                                        isSecondary: true,
-                                        isDestructive: true,
-                                        onClick: handleRemoveWporgAccount,
-                                        __next40pxDefaultSize: true,
-                                    }, __('Remove saved account', 'peak-publisher'))
-                            )
-                        ) : null,
-                        encryptionKeyIsValid && [
-                            createElement('p', null, __('Connect your wordpress.org account to manage your plugins in the wordpress.org SVN repository.', 'peak-publisher')),
-                            createElement('div', { className: 'pblsh--settings-wporg-account' },
-                                createElement(TextControl, {
-                                    label: __('WordPress.org username', 'peak-publisher'),
-                                    value: settings.wporg_username,
-                                    onChange: setWporgUsername,
-                                    ...PASSWORD_MANAGER_IGNORE_PROPS,
-                                    help: __('Use your case-sensitive WordPress.org username, not your email address.', 'peak-publisher'),
-                                    __next40pxDefaultSize: true,
-                                }),
-                                createElement(TextControl, {
-                                    type: 'password',
-                                    label: __('SVN Password', 'peak-publisher'),
-                                    value: settings.wporg_password,
-                                    onChange: setWporgPassword,
-                                    disabled: !encryptionKeyIsValid,
-                                    ...PASSWORD_MANAGER_IGNORE_PROPS,
-                                    help: createInterpolateElement(
-                                        __('Use your WordPress.org <profileLink>SVN password</profileLink>, not your regular login password.', 'peak-publisher'),
-                                        {
-                                            profileLink: createElement('a', {
-                                                href: 'https://profiles.wordpress.org/me/profile/edit/group/3/?screen=svn-password',
-                                                target: '_blank',
-                                                rel: 'noreferrer',
-                                            }),
-                                        }
-                                    ),
-                                    __next40pxDefaultSize: true,
-                                }),
-                                createElement('div', { className: 'pblsh--settings-wporg-account__actions' },
-                                    createElement(Button, {
-                                        isSecondary: true,
-                                        onClick: handleTestCredentials,
-                                        isBusy: testingCredentials,
-                                        disabled: !encryptionKeyIsValid || testingCredentials || !settings.wporg_username || !settings.wporg_password,
-                                        __next40pxDefaultSize: true,
-                                    }, __('Test connection', 'peak-publisher')),
-                                    credentialTestStatus ? createElement('span', {
-                                        className: `pblsh--settings-wporg-account__status pblsh--settings-wporg-account__status--${credentialTestStatus.type}`,
-                                    }, credentialTestStatus.message) : null
-                                )
-                            )
-                        ]
+                        renderWporgAccountCard(),
                     )
                 )
             );

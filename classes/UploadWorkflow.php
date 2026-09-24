@@ -361,7 +361,7 @@ class UploadWorkflow {
 
             // Measure size before cleanup
             $size_before_cleanup = $this->get_path_size($root);
-            $entry_count_before_cleanup = $this->get_path_entry_count($root);
+            $entry_count_before_cleanup = $this->count_directory_entries($root);
 
             // Get plugin data
             require_once ABSPATH . 'wp-admin/includes/plugin.php'; // For WordPress before version 6.8 we need to include this file to ensure the function get_plugin_data() is available.
@@ -417,7 +417,7 @@ class UploadWorkflow {
 
             // Measure size after cleanup
             $size_after_cleanup = $this->get_path_size($root);
-            $entry_count_after_cleanup = $this->get_path_entry_count($root);
+            $entry_count_after_cleanup = $this->count_directory_entries($root);
 
             // Process readme.txt (root-level, case-sensitive), normalize encoding/BOM if configured, and parse
             $readme_info = default_plugin_readme_txt_data();
@@ -1326,7 +1326,7 @@ class UploadWorkflow {
                 'path' => $this->rel_path($dirAbs, $root),
                 'type' => 'dir',
                 'bytes' => $this->get_path_size($dirAbs),
-                'count' => $this->get_path_entry_count($dirAbs),
+                'count' => 1 + $this->count_directory_entries($dirAbs), // the artifact directory itself is deleted as well
                 'deleted' => false,
             ];
         }
@@ -1427,26 +1427,18 @@ class UploadWorkflow {
     }
 
     /**
-     * Calculates the number of entries represented by a path.
-     * Files count as 1. Directories count as 1 (the directory itself) plus all contained files and directories.
+     * Counts the files and directories contained in a directory (recursively, without the directory itself).
      *
-     * @param string $path Absolute path to the file or directory.
-     * @return int Count of entries.
+     * @param string $dir Absolute path to the directory.
+     * @return int Count of contained entries.
      */
-    private function get_path_entry_count(string $path): int {
-        if (is_file($path)) {
-            return 1;
-        }
-        if (!is_dir($path)) {
+    private function count_directory_entries(string $dir): int {
+        if (!is_dir($dir)) {
             return 0;
         }
-        $count = 1; // the directory itself
-        $dirIt = new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS);
+        $dirIt = new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS);
         $it = new \RecursiveIteratorIterator($dirIt, \RecursiveIteratorIterator::SELF_FIRST);
-        foreach ($it as $entry) {
-            $count += 1; // count both files and directories
-        }
-        return $count;
+        return iterator_count($it);
     }
 
     /**

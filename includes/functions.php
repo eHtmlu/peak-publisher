@@ -98,13 +98,16 @@ function record_plugin_installation(int $plugin_post_id, string $user_agent, str
     if (empty($settings['count_plugin_installations'])) {
         return;
     }
-    $expected_user_agent_pattern = '#^PeakPublisherBootstrapCode/[^;]+; WordPress/[^;]+; https?://[^;]+(;.*)?$#';
-    if (empty($user_agent) || !preg_match($expected_user_agent_pattern, $user_agent)) {
+    // Only pings from the bootstrap code count; the home URL in the user agent identifies the site.
+    $expected_user_agent_pattern = '#^PeakPublisherBootstrapCode/[^;]+; WordPress/[^;]+; https?://([^;]+)(;.*)?$#';
+    if (empty($user_agent) || !preg_match($expected_user_agent_pattern, $user_agent, $matches)) {
         return;
     }
 
-    // Generate a short key based on the user agent and the secret salt.
-    $key = substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|' . $user_agent, true))), 0, 14);
+    // The key hashes only the home URL (without scheme, lowercased) so that it survives WordPress and
+    // bootstrap updates and the switch to https. The secret salt keeps the stored keys non-reversible.
+    $site_identity = strtolower($matches[1]);
+    $key = substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|' . $site_identity, true))), 0, 14);
 
     // Update the installations list.
     $list = get_plugin_installations_list($plugin_post_id);

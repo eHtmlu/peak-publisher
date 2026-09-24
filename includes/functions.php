@@ -53,6 +53,14 @@ function get_peak_publisher_faq_urls(): array {
 
 
 /**
+ * Returns the installed Peak Publisher version. The plugin header is the only place it is declared.
+ */
+function get_peak_publisher_version(): string {
+    return (string) (get_file_data(PBLSH_PLUGIN_FILE, [ 'Version' => 'Version' ])['Version'] ?? '');
+}
+
+
+/**
  * Gets the embed code.
  */
 function get_bootstrap_code(string $version = 'basicV2'): string {

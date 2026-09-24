@@ -304,6 +304,9 @@ class UploadWorkflow {
                 'zip_path' => $zip_path,
                 'data' => [
                     'phases' => [],
+                    // The upload session starts here — snapshot of the code, runtime and actor that will
+                    // produce the release, so the stored state tells afterwards what it was made with.
+                    'environment' => $this->capture_environment(),
                     // name/size/mime_type are the client-declared boundary facts; sha256 is
                     // measured from the received file — its only fingerprint that survives
                     // the tmp cleanup.
@@ -1745,6 +1748,43 @@ class UploadWorkflow {
         }
 
         return [ 'path' => $zip_path, 'generated_with' => $generated_with ];
+    }
+
+    /**
+     * Captures the environment an upload runs in: versions of Peak Publisher, WordPress and PHP,
+     * the PHP extensions that decide between ZipArchive/PclZip and the readme conversion paths,
+     * the WordPress filesystem method, debug mode, the publisher instance, the browser that built
+     * the original ZIP and the uploading user.
+     *
+     * @return array The environment snapshot.
+     */
+    private function capture_environment(): array {
+        if (!function_exists('get_filesystem_method')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+        $user = wp_get_current_user();
+        return [
+            'peak_publisher_version' => get_peak_publisher_version(),
+            // wp_get_wp_version() (WordPress 6.7+) returns the real version even if a plugin hides it.
+            'wordpress_version' => function_exists('wp_get_wp_version') ? wp_get_wp_version() : get_bloginfo('version'),
+            'php_version' => PHP_VERSION,
+            'php_os_family' => PHP_OS_FAMILY,
+            // version string, or false when the extension is missing
+            'php_extensions' => [
+                'zip' => phpversion('zip'),
+                'mbstring' => phpversion('mbstring'),
+                'iconv' => phpversion('iconv'),
+            ],
+            'libzip_version' => defined('ZipArchive::LIBZIP_VERSION') ? \ZipArchive::LIBZIP_VERSION : false,
+            'wp_filesystem_method' => get_filesystem_method(),
+            'wp_debug' => defined('WP_DEBUG') && WP_DEBUG,
+            'home_url' => home_url('/'),
+            'client_user_agent' => isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '',
+            'user' => [
+                'id' => (int) $user->ID,
+                'login' => (string) $user->user_login,
+            ],
+        ];
     }
 
     /**

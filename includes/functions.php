@@ -44,6 +44,7 @@ function get_peak_publisher_faq_urls(): array {
         'switchLater' => 'Can I switch the distribution channel later?',
         'credentialStorage' => 'How are my wordpress.org credentials stored?',
         'whyImport' => 'Why is an import needed to manage a wordpress.org plugin?',
+        'versionFormat' => 'Which version numbers can I publish?',
     ];
     return array_map(
         fn($question) => 'https://wordpress.org/plugins/peak-publisher/#' . rawurlencode(strtolower(trim($question))),
@@ -204,6 +205,22 @@ function raise_wporg_time_limit(): void {
     if (function_exists('set_time_limit')) {
         @set_time_limit(300);
     }
+}
+
+
+/**
+ * Whether a plugin version can be published: digits and dots, optionally followed by
+ * -rc, -beta or -alpha with an optional number (1.2.0, 1.2.0-beta1, 2.0-RC.2).
+ *
+ * This is the format the wordpress.org import warns about when violated, and the vocabulary
+ * PHP's version_compare() — which WordPress uses to decide whether to offer an update — orders
+ * the way authors expect. Any other letter segment sorts below the numeric release (only
+ * segments starting with a lowercase "p" sort above it), so "1.0.1a" is never offered to sites
+ * on 1.0.1. Within this format the string is usable verbatim as the release ZIP's version part
+ * and as the wordpress.org SVN tag.
+ */
+function is_publishable_version(string $version): bool {
+    return preg_match('/^\d+(?:\.\d+)*(?:-(?:rc|beta|alpha)(?:\.?\d+)?)?$/i', $version) === 1;
 }
 
 

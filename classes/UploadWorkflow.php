@@ -120,13 +120,14 @@ class UploadWorkflow {
 
         // Build the final release ZIP — the only place the slug materializes in the
         // filesystem: {slug}/ as the ZIP's logical root folder, named {slug}.{version}.zip
-        // like the wordpress.org builder (raw normalized version, dots kept).
-        $normalized_version = (string) $data['plugin_info']['normalized_version'];
+        // like the wordpress.org builder. The version is the plugin header verbatim — the same
+        // string a wporg deploy uses as its SVN tag (analyze guarantees the publishable format).
+        $version = (string) $data['plugin_data']['Version'];
         $content_root = $this->detect_root_dir($this->tmp_root . 'data/');
         if (!is_dir($content_root)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'upload_workdir_invalid', 'message' => 'Upload work directory is missing.' ] ] ];
         }
-        $built_zip = $this->build_release_zip($content_root, $plugin_slug, $normalized_version);
+        $built_zip = $this->build_release_zip($content_root, $plugin_slug, $version);
         if ($built_zip === false) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'build_zip_failed', 'message' => 'Failed to build the release ZIP.' ] ] ];
         }
@@ -438,7 +439,7 @@ class UploadWorkflow {
 
             // Determine if the plugin is valid
             $plugin_ok = $main_file && !empty($plugin_data['Name']);
-            $version_ok = $plugin_ok && !empty($plugin_data['Version']);
+            $version_ok = $plugin_ok && is_publishable_version((string) ($plugin_data['Version'] ?? ''));
 
             /* if (!$update_uri) {
                 // Check if there is a plugin with same slug on wordpress.org
@@ -1695,7 +1696,7 @@ class UploadWorkflow {
      *
      * @param string $content_root Absolute path to the workspace content root.
      * @param string $slug Plugin slug used as the ZIP root folder and filename base.
-     * @param string $version Normalized version used in the filename (dots kept, wordpress.org parity).
+     * @param string $version Plugin header version, used in the filename verbatim (wordpress.org parity).
      * @return array|false Array with 'path' (absolute path to the built ZIP) and
      *                     'generated_with' ('ziparchive'|'pclzip'), or false on failure.
      */

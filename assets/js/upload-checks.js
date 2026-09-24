@@ -106,6 +106,21 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
             };
         }
 
+        // Server fact: the version format is a hard boundary (release ZIP name, wporg SVN tag).
+        if (!meta.version_ok) {
+            return {
+                title: __('Unsupported version number', 'peak-publisher'),
+                type: 'error',
+                desc: [
+                    __('Use digits and dots, optionally followed by -alpha, -beta or -RC and a number, e.g. 1.2.0 or 1.2.0-beta1.', 'peak-publisher'),
+                    ' ',
+                    createInterpolateElement(__('For more information check out the <a>FAQ</a>.', 'peak-publisher'), {
+                        a: createElement('a', { href: Pblsh.Utils.getFaqUrl('versionFormat'), target: '_blank', rel: 'noreferrer' }),
+                    }),
+                ],
+            };
+        }
+
         if (existingRelease) {
             return {
                 title: __('Version number already exists', 'peak-publisher'),
@@ -390,7 +405,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                     ? __('wordpress.org plugins require a readme.txt file.', 'peak-publisher')
                     : [
                         createInterpolateElement(__('A readme.txt is not required but would allow you to provide a description, changelog, and more to your users. Check out the <a>example on wordpress.org</a>.', 'peak-publisher'), {
-                            a: createElement('a', { href: 'https://wordpress.org/plugins/readme.txt', target: '_blank' }),
+                            a: createElement('a', { href: 'https://wordpress.org/plugins/readme.txt', target: '_blank', rel: 'noreferrer' }),
                         }),
                     ],
             };

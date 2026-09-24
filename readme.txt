@@ -116,6 +116,13 @@ Yes. You can optionally configure an IP/domain whitelist for the public endpoint
 = Do you support semantic versioning? =
 Yes. The validator recognizes major/minor/patch increments and warns on unexpected jumps.
 
+= Which version numbers can I publish? =
+Digits and dots, optionally followed by -alpha, -beta or -RC and a number, for example 1.2.0 or 1.2.0-beta1.
+
+While wordpress.org does accept other arbitrary strings, it issues a warning if the format deviates from the one specified above.
+
+WordPress compares versions with PHP's version_compare(). Its documentation lists the order dev < alpha < beta < RC < number < pl, but not that every word is matched by its first letters: 1.0.anton counts as 1.0.alpha, 1.0.banana as 1.0.beta, and 1.0.patch sorts above 1.0.1, while words matching nothing sort even below dev. Since such results cannot be anticipated from the documentation, and wordpress.org has adopted the stricter format as well, Peak Publisher applies it to both channels.
+
 = Which distribution channel should I choose? =
 Choose wordpress.org if your plugin is free and open-source and you want it listed in the official WordPress plugin directory so that it can be easily found and installed by everyone — however, your plugin must first be [reviewed and approved](https://developer.wordpress.org/plugins/wordpress-org/) by the WordPress.org plugin team.
 

@@ -841,8 +841,8 @@ class UploadWorkflow {
         $access_status = 'not_checked';
         $access_message = null;
         if ($slug_available && $username !== '') {
-            require_once __DIR__ . '/SvnDeployWorkflow.php';
-            $access = SvnDeployWorkflow::resolve_wporg_account_access($slug, $username);
+            require_once __DIR__ . '/WporgOperations.php';
+            $access = WporgOperations::resolve_wporg_account_access($slug, $username);
             $access_status = (string) ($access['status'] ?? 'error');
             $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
         }
@@ -886,15 +886,15 @@ class UploadWorkflow {
      * Heuristic, so it feeds warnings only — never a blocker.
      *
      * @return array|null Null when there is nothing to check; shape and semantics in
-     *         SvnDeployWorkflow::directory_hint() (state/relation plus the directory
+     *         WporgOperations::directory_hint() (state/relation plus the directory
      *         listing's identity: name, icon, description).
      */
     private function wporg_directory_hint(string $access_status, string $slug, string $username): ?array {
         if ($access_status !== 'ok' || $slug === '' || $username === '') {
             return null;
         }
-        require_once __DIR__ . '/SvnDeployWorkflow.php';
-        return SvnDeployWorkflow::directory_hint($slug, $username);
+        require_once __DIR__ . '/WporgOperations.php';
+        return WporgOperations::directory_hint($slug, $username);
     }
 
     private function build_wporg_target_for_marker(array $data, \WP_Post $marker, ?string $preferred_username = null): array {
@@ -913,8 +913,8 @@ class UploadWorkflow {
                 : __('Could not refresh wordpress.org SVN cache.', 'peak-publisher');
         }
 
-        require_once __DIR__ . '/SvnDeployWorkflow.php';
-        $access = SvnDeployWorkflow::resolve_wporg_account_access($marker->post_name, $preferred_username);
+        require_once __DIR__ . '/WporgOperations.php';
+        $access = WporgOperations::resolve_wporg_account_access($marker->post_name, $preferred_username);
         $access_status = (string) ($access['status'] ?? 'error');
         $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
         // The resolved account travels with every status except no_credentials.
@@ -1108,10 +1108,10 @@ class UploadWorkflow {
         update_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', $username);
 
         // Deploy the prepared directory to wordpress.org SVN
-        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        require_once __DIR__ . '/WporgOperations.php';
         try {
             $touch_trunk = (string) ($target['deploy_mode'] ?? '') !== 'tag_only';
-            $deploy_result = SvnDeployWorkflow::deploy_directory($deploy_root, $version, $slug, $username, $touch_trunk);
+            $deploy_result = WporgOperations::deploy_directory($deploy_root, $version, $slug, $username, $touch_trunk);
         } catch (WporgSvnException $e) {
             return $this->upload_error($e->get_error_code(), $e->getMessage());
         } catch (\Throwable $e) {

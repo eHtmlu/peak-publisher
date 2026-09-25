@@ -7,7 +7,14 @@ defined('ABSPATH') || exit;
 require_once __DIR__ . '/WporgSvnException.php';
 
 
-class SvnDeployWorkflow {
+/**
+ * The operations layer for everything Peak Publisher does against wordpress.org:
+ * SVN deploys and tag deletes (under a per-slug lock), tag and revision reads,
+ * the account/access probe and the directory hint. It owns the fixed error
+ * catalog of these operations (exception()); the HTTP transport lives in
+ * WporgPluginSvnClient.
+ */
+class WporgOperations {
     public static function deploy_directory(
         string $root,
         string $version,

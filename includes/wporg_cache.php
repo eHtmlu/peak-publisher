@@ -14,11 +14,11 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
         return [];
     }
 
-    require_once PBLSH_PLUGIN_DIR . 'classes/SvnDeployWorkflow.php';
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
 
     $cached = wporg_decode_json_object((string) $plugin_post->post_content);
     try {
-        $current_revision = SvnDeployWorkflow::get_plugin_revision($plugin_post->post_name);
+        $current_revision = WporgOperations::get_plugin_revision($plugin_post->post_name);
     } catch (\Throwable $e) {
         wporg_log_cache_error($plugin_post, 'root_revision', $e);
         if (!wporg_has_cached_revision($cached)) {
@@ -76,7 +76,7 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
         ];
     }
 
-    require_once PBLSH_PLUGIN_DIR . 'classes/SvnDeployWorkflow.php';
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
 
     $summary = [
         'created' => 0,
@@ -84,7 +84,7 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
         'deleted' => 0,
         'unchanged' => 0,
     ];
-    $tags = SvnDeployWorkflow::list_tags($plugin_post->post_name);
+    $tags = WporgOperations::list_tags($plugin_post->post_name);
     $tags_by_version = [];
     foreach ($tags as $tag) {
         $version = (string) ($tag['version'] ?? '');
@@ -121,7 +121,7 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
             continue;
         }
 
-        $tag_data = SvnDeployWorkflow::fetch_tag_data($plugin_post->post_name, $version);
+        $tag_data = WporgOperations::fetch_tag_data($plugin_post->post_name, $version);
         $result = wporg_upsert_release_post_from_wporg_tag($plugin_post, $version, $tag, $tag_data, $existing);
         if (is_wp_error($result)) {
             throw new \RuntimeException($result->get_error_message());
@@ -159,10 +159,10 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
         return $wporg_slug;
     }
 
-    require_once PBLSH_PLUGIN_DIR . 'classes/SvnDeployWorkflow.php';
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
 
     try {
-        $root_revision = SvnDeployWorkflow::get_plugin_revision($wporg_slug);
+        $root_revision = WporgOperations::get_plugin_revision($wporg_slug);
         if ($root_revision === null) {
             return new \WP_Error(
                 'not_found',
@@ -171,7 +171,7 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
             );
         }
 
-        $tags = SvnDeployWorkflow::list_tags($wporg_slug);
+        $tags = WporgOperations::list_tags($wporg_slug);
         $versions = [];
         foreach ($tags as $tag) {
             if (!is_array($tag)) {
@@ -182,7 +182,7 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
                 $versions[] = $version;
             }
         }
-        $tag_data_by_version = SvnDeployWorkflow::fetch_tags_data_batch($wporg_slug, $versions);
+        $tag_data_by_version = WporgOperations::fetch_tags_data_batch($wporg_slug, $versions);
     } catch (\Throwable $e) {
         return new \WP_Error(
             'access_check_failed',
@@ -383,11 +383,11 @@ function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version
         );
     }
 
-    require_once PBLSH_PLUGIN_DIR . 'classes/SvnDeployWorkflow.php';
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
 
     try {
         // Read the committed tag from SVN
-        $tags = SvnDeployWorkflow::list_tags($plugin_post->post_name);
+        $tags = WporgOperations::list_tags($plugin_post->post_name);
         $tag = null;
         foreach ($tags as $candidate) {
             if ((string) ($candidate['version'] ?? '') === $version) {
@@ -405,7 +405,7 @@ function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version
         }
 
         // Upsert the local release mirror for that tag
-        $tag_data = SvnDeployWorkflow::fetch_tag_data($plugin_post->post_name, $version);
+        $tag_data = WporgOperations::fetch_tag_data($plugin_post->post_name, $version);
         $existing = wporg_find_release_post_by_version((int) $plugin_post->ID, $version);
         $release_id = wporg_upsert_release_post_from_wporg_tag($plugin_post, $version, $tag, $tag_data, $existing);
 

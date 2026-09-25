@@ -409,9 +409,9 @@ class AdminAPI {
 
         $preferred_username = wporg_string_from_value(get_post_meta((int) $parent->ID, '_pblsh_wporg_account_username', true));
 
-        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        require_once __DIR__ . '/WporgOperations.php';
         try {
-            $account = SvnDeployWorkflow::resolve_wporg_account_access((string) $parent->post_name, $preferred_username !== '' ? $preferred_username : null);
+            $account = WporgOperations::resolve_wporg_account_access((string) $parent->post_name, $preferred_username !== '' ? $preferred_username : null);
         } catch (\Throwable $e) {
             return $this->rest_error_response($this->make_rest_error(
                 'wporg_access_check_failed',
@@ -439,7 +439,7 @@ class AdminAPI {
         }
 
         try {
-            $delete_result = SvnDeployWorkflow::delete_tag((string) $parent->post_name, $version, $username);
+            $delete_result = WporgOperations::delete_tag((string) $parent->post_name, $version, $username);
         } catch (\Throwable $e) {
             $code = $e instanceof \RuntimeException && $e->getMessage() !== '' ? $e->getMessage() : 'wporg_tag_delete_failed';
             if ($code === '0' || $code === '') {
@@ -1050,9 +1050,9 @@ class AdminAPI {
             ));
         }
 
-        require_once __DIR__ . '/SvnDeployWorkflow.php';
+        require_once __DIR__ . '/WporgOperations.php';
         try {
-            $plugins = SvnDeployWorkflow::discover_plugins_by_author($username);
+            $plugins = WporgOperations::discover_plugins_by_author($username);
         } catch (WporgSvnException $e) {
             return $this->rest_error_response($this->make_rest_error(
                 $e->get_error_code(),
@@ -1178,8 +1178,8 @@ class AdminAPI {
         // warn-only); write access itself is only decided at MERGE time.
         $directory_hint = null;
         if ($access_status === 'ok') {
-            require_once __DIR__ . '/SvnDeployWorkflow.php';
-            $directory_hint = SvnDeployWorkflow::directory_hint($slug, $username);
+            require_once __DIR__ . '/WporgOperations.php';
+            $directory_hint = WporgOperations::directory_hint($slug, $username);
         }
 
         return [

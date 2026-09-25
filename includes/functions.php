@@ -62,6 +62,20 @@ function get_peak_publisher_version(): string {
 
 
 /**
+ * The one User-Agent for every request Peak Publisher sends to wordpress.org
+ * (info API, download check, SVN client). Only the plugin identifies itself —
+ * never the site.
+ */
+function wporg_user_agent(): string {
+    static $user_agent = null;
+    if ($user_agent === null) {
+        $user_agent = 'PeakPublisher/' . get_peak_publisher_version() . ' (+https://www.wppeak.com/)';
+    }
+    return $user_agent;
+}
+
+
+/**
  * Gets the embed code.
  */
 function get_bootstrap_code(string $version = 'basicV2'): string {

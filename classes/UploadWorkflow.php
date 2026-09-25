@@ -441,17 +441,6 @@ class UploadWorkflow {
             $plugin_ok = $main_file && !empty($plugin_data['Name']);
             $version_ok = $plugin_ok && is_publishable_version((string) ($plugin_data['Version'] ?? ''));
 
-            /* if (!$update_uri) {
-                // Check if there is a plugin with same slug on wordpress.org
-                wp_remote_get('https://api.wordpress.org/plugins/info/1.0/' . $plugin_slug . '.json');
-                if ($response['response']['code'] === 200) {
-                    $response_data = json_decode($response['body'], true);
-                    if ($response_data['update_uri']) {
-                        $update_uri = $response_data['update_uri'];
-                    }
-                }
-            } */
-
             // Search for bootstrap code
             $bootstrap = $this->search_bootstrap_code($root);
 

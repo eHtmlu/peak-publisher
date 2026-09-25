@@ -552,7 +552,7 @@ class AdminAPI {
             'method' => 'HEAD',
             'timeout' => 15,
             'redirection' => 3,
-            'user-agent' => 'Peak Publisher wordpress.org Download Check',
+            'user-agent' => wporg_user_agent(),
         ]);
 
         if (is_wp_error($response)) {
@@ -1050,20 +1050,16 @@ class AdminAPI {
             ));
         }
 
-        require_once __DIR__ . '/WporgOperations.php';
         try {
-            $plugins = WporgOperations::discover_plugins_by_author($username);
-        } catch (WporgSvnException $e) {
-            return $this->rest_error_response($this->make_rest_error(
-                $e->get_error_code(),
-                $e->getMessage(),
-                $e->get_http_status()
-            ));
+            $plugins = wporg_api_query_plugins_by_author($username);
         } catch (\Throwable $e) {
+            // Expected failures arrive as WporgSvnException from the API module; anything
+            // else is an unexpected failure of the same remote operation.
+            $error = $e instanceof WporgSvnException ? $e : wporg_api_unavailable();
             return $this->rest_error_response($this->make_rest_error(
-                'wporg_api_unavailable',
-                __('wordpress.org API unavailable, try again later.', 'peak-publisher'),
-                503
+                $error->get_error_code(),
+                $error->getMessage(),
+                $error->get_http_status()
             ));
         }
 

@@ -571,7 +571,7 @@ class WporgPluginSvnClient {
         }
 
         $headers = [
-            'User-Agent: Peak Publisher SVN Client',
+            'User-Agent: ' . wporg_user_agent(),
             'Content-Type: application/octet-stream',
         ];
         if ($this->username !== null && $this->password !== null) {
@@ -995,7 +995,7 @@ class WporgPluginSvnClient {
 
     private function request_url(string $method, string $url, array $headers = [], ?string $body = null): array {
         $request_headers = array_merge([
-            'User-Agent' => 'Peak Publisher SVN Client',
+            'User-Agent' => wporg_user_agent(),
         ], $headers);
 
         if ($this->username !== null && $this->password !== null) {
@@ -1059,7 +1059,7 @@ class WporgPluginSvnClient {
 
         $add_handle = function(string $path) use ($multi, $method, $headers, $body, &$handles): void {
             $request_headers = array_merge([
-                'User-Agent' => 'Peak Publisher SVN Client',
+                'User-Agent' => wporg_user_agent(),
             ], $headers);
 
             if ($this->username !== null && $this->password !== null) {

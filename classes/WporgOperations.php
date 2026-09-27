@@ -201,6 +201,45 @@ class WporgOperations {
         ];
     }
 
+    /**
+     * Reads trunk/readme.txt — the file that carries the plugin's pointer (the Stable tag
+     * wordpress.org distributes) and the screenshot captions. Returns the marker cache's
+     * `trunk_readme` structure (wporg_cache.php).
+     *
+     * @return array{stable_tag:string, file_name:string|null, screenshots:array<int,string>}
+     *         file_name null = trunk has no readme (stable_tag '' then); stable_tag '' = no
+     *         header; otherwise the parser's sanitized value, 'trunk' included.
+     * @throws WporgSvnException When trunk cannot be listed or the readme not read.
+     */
+    public static function fetch_trunk_readme(string $wporg_slug): array {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $client = self::svn_client();
+        $base_path = $wporg_slug . '/trunk';
+        $none = [ 'stable_tag' => '', 'file_name' => null, 'screenshots' => [] ];
+
+        try {
+            $entries = $client->list_directory($base_path . '/', 1);
+        } catch (WporgSvnException $e) {
+            if ($e->get_error_code() === 'not_found') {
+                // No trunk at all — nothing carries a pointer.
+                return $none;
+            }
+            throw $e;
+        }
+
+        $readme = self::find_readme_entry(self::direct_children($entries, $base_path));
+        if ($readme === null) {
+            return $none;
+        }
+
+        $parsed = parse_readme_txt(self::normalize_readme_content($client->read_file((string) $readme['path'])));
+        return [
+            'stable_tag' => (string) ($parsed['stable_tag'] ?? ''),
+            'file_name' => (string) ($readme['name'] ?? 'readme.txt'),
+            'screenshots' => is_array($parsed['screenshots'] ?? null) ? $parsed['screenshots'] : [],
+        ];
+    }
+
     public static function fetch_tags_data_batch(string $wporg_slug, array $versions): array {
         $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
         $normalized_versions = [];

@@ -85,15 +85,15 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
-        register_rest_route(self::NAMESPACE, '/releases/(?P<id>\d+)', [
-            'methods' => 'PUT',
-            'callback' => [$this, 'update_release'],
-            'permission_callback' => [$this, 'check_permission'],
-        ]);
-
         register_rest_route(self::NAMESPACE, '/releases/(?P<id>\d+)/download', [
             'methods' => 'GET',
             'callback' => [$this, 'download_release'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/admin/upgrade-notice', [
+            'methods' => 'DELETE',
+            'callback' => [$this, 'dismiss_upgrade_notice'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
@@ -231,64 +231,49 @@ class AdminAPI {
     }
 
     /**
-     * Serialize a plugin post for admin REST responses.
+     * Serialize a plugin post for admin REST responses. `version` is the current release —
+     * the one sites receive — `latest_version` the highest; both null when absent.
      *
-     * @param \WP_Post[] $releases
+     * @param \WP_Post[] $releases The plugin's release posts.
      */
     private function serialize_plugin_post(\WP_Post $post, bool $detail, array $releases = []): array {
         $hosting_type = get_plugin_hosting_type($post);
-        [$latest_version, $count_of_releases] = $this->derive_release_info($releases);
         $is_self_hosted = $hosting_type === 'self_hosted';
+        $current = resolve_current_release($post, $releases);
 
-        return [
+        $out = [
             'id' => $post->ID,
             'name' => $post->post_title,
             'slug' => $post->post_name,
             'hosting_type' => $hosting_type,
             'icon_url' => $is_self_hosted ? $this->assets()->get_best_icon_url($post->post_name) : null,
-            'version' => $latest_version,
+            'version' => $current['release'] instanceof \WP_Post ? (string) $current['release']->post_title : null,
+            'latest_version' => $current['latest'] instanceof \WP_Post ? (string) $current['latest']->post_title : null,
+            'current_release_state' => $current['state'],
+            // The raw pointer (wporg: the sanitized Stable tag, also 'trunk' or ''; self-hosted:
+            // the meta value) — shown as the mechanics line and sent back as the expected
+            // value of a flip.
+            'pointer' => $current['pointer'],
             'status' => $post->post_status,
-            'count_of_releases' => $count_of_releases,
+            'count_of_releases' => count($releases),
             'installations_count' => $is_self_hosted ? get_plugin_installations_count((int) $post->ID) : 0,
         ];
-    }
 
-    /**
-     * Derive the latest version and release count from release posts.
-     *
-     * @param \WP_Post[] $releases
-     * @return array{0:string,1:int}
-     */
-    private function derive_release_info(array $releases): array {
-        $latest_version = '';
-        $latest_normalized = '';
-
-        foreach ($releases as $release) {
-            if (!$release instanceof \WP_Post) {
-                continue;
-            }
-
-            $rel_data = json_decode((string) ($release->post_content ?? ''), true);
-            if (!is_array($rel_data)) {
-                $rel_data = [];
-            }
-
-            $version = (string) (($release->post_title ?? '') !== '' ? $release->post_title : ($rel_data['plugin_data']['Version'] ?? ''));
-            $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-            if ($normalized === '' && $version !== '') {
-                $normalized = normalize_version_number($version);
-            }
-            if ($normalized === '') {
-                continue;
-            }
-
-            if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
-                $latest_normalized = $normalized;
-                $latest_version = $version;
-            }
+        if ($detail) {
+            // The one gate for every wporg write action in the editor: the account the
+            // operations would run with, and whether one is usable at all (a stored
+            // account whose password decrypts; write access itself is decided by
+            // wordpress.org at commit time).
+            $username = $is_self_hosted ? null : select_wporg_account_username(
+                wporg_string_from_value(get_post_meta((int) $post->ID, '_pblsh_wporg_account_username', true)) ?: null
+            );
+            $out['wporg_account'] = $is_self_hosted ? null : [
+                'username' => $username,
+                'can_write' => $username !== null,
+            ];
         }
 
-        return [$latest_version, count($releases)];
+        return $out;
     }
 
     /**
@@ -314,13 +299,14 @@ class AdminAPI {
 
         $releases_query = new \WP_Query([
             'post_type' => 'pblsh_release',
-            'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
+            'post_status' => 'any',
             'posts_per_page' => -1,
             'no_found_rows' => true,
             'orderby' => 'date',
             'order' => 'DESC',
             'post_parent' => $post->ID,
         ]);
+        $current_release = resolve_current_release($post, $releases_query->posts)['release'];
 
         $releases = [];
         foreach ($releases_query->posts as $release) {
@@ -330,7 +316,7 @@ class AdminAPI {
             $releases[] = [
                 'id' => $release->ID,
                 'version' => $version,
-                'status' => $release->post_status,
+                'is_current' => $current_release instanceof \WP_Post && (int) $current_release->ID === (int) $release->ID,
                 'date' => $release->post_date,
                 'download_url' => $is_wporg ? '' : rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
                 'installations_count' => (!$is_wporg && $normalized !== '') ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0,
@@ -461,7 +447,7 @@ class AdminAPI {
         }
 
         wp_delete_post((int) $release->ID, true);
-        invalidate_wporg_plugin_cache((int) $parent->ID);
+        mark_wporg_plugin_cache_stale((int) $parent->ID);
 
         return [
             'status' => 'ok',
@@ -686,35 +672,11 @@ class AdminAPI {
     }
 
     /**
-     * Update a release.
+     * Dismisses the one-time notice about the schema upgrade (includes/upgrade.php).
      */
-    public function update_release(\WP_REST_Request $request): array|\WP_REST_Response {
-        $id = (int) $request->get_param('id');
-        $release = get_post($id);
-        if (!$release || $release->post_type !== 'pblsh_release') {
-            return [ 'status' => 'error', 'message' => 'Release not found.' ];
-        }
-        $parent = get_post((int) $release->post_parent);
-        if (is_wporg_plugin($parent)) {
-            return $this->rest_error_response($this->make_rest_error(
-                'wporg_release_immutable',
-                __('wporg releases are SVN tags and cannot be drafted.', 'peak-publisher'),
-                400
-            ));
-        }
-        $params = $request->get_json_params();
-        $status = isset($params['status']) ? (string) $params['status'] : '';
-        if ($status !== 'publish' && $status !== 'draft') {
-            return [ 'status' => 'error', 'message' => 'Invalid status.' ];
-        }
-        $res = wp_update_post([
-            'ID' => $release->ID,
-            'post_status' => $status,
-        ], true);
-        if (is_wp_error($res)) {
-            return [ 'status' => 'error', 'message' => $res->get_error_message() ];
-        }
-        return [ 'status' => 'ok', 'id' => $release->ID, 'new_status' => $status ];
+    public function dismiss_upgrade_notice(): array {
+        delete_option('pblsh_upgrade_notice');
+        return [ 'status' => 'ok' ];
     }
 
     /**

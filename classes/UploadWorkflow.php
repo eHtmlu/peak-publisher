@@ -1135,8 +1135,8 @@ class UploadWorkflow {
         // mirror post's content is regenerated from SVN by the tag sync and must stay that way.
         update_post_meta((int) $release_id, '_pblsh_upload_state', wp_slash(json_encode($data)));
 
-        // Invalidate the marker cache and remove upload temp files
-        invalidate_wporg_plugin_cache((int) $marker->ID);
+        // Mark the marker cache stale and remove upload temp files
+        mark_wporg_plugin_cache_stale((int) $marker->ID);
         delete_directory_with_race_protection($this->tmp_root);
 
         return [

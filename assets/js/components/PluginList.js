@@ -5,7 +5,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
     const { showAlert, getSvgIcon } = Pblsh.Utils;
-    const { ChannelPath } = Pblsh.Components;
+    const { ChannelPath, CurrentVersion } = Pblsh.Components;
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
@@ -49,7 +49,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                             createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__icon-header' }),
                             createElement('th', { className: 'pblsh--table__name-header' }, __('Plugin Name', 'peak-publisher')),
-                            createElement('th', { className: 'pblsh--table__version-header' }, __('Latest Version', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
                             showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher'))
                         )
@@ -88,7 +88,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                     )
                                 ),
                                 createElement('td', { className: 'pblsh--table__version-cell' },
-                                    plugin.version
+                                    createElement(CurrentVersion, { plugin })
                                 ),
                                 showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' },
                                     String(plugin.installations_count || 0)

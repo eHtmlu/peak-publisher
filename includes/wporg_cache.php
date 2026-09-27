@@ -34,8 +34,22 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
         return $cached;
     }
 
-    if ((int) ($cached['revision'] ?? 0) === (int) $current_revision && array_key_exists('release_count', $cached)) {
+    // A cache from before a key existed is refreshed like a stale one (release_count,
+    // trunk_readme) — the convention for every new cache key.
+    if ((int) ($cached['revision'] ?? 0) === (int) $current_revision
+        && array_key_exists('release_count', $cached)
+        && array_key_exists('trunk_readme', $cached)) {
         return $cached;
+    }
+
+    // trunk/readme.txt carries the pointer (Stable tag) and the screenshot captions.
+    // Not readable → null: warn-only, the cache is written anyway and the current
+    // release reads as 'unknown' until the next refresh.
+    try {
+        $trunk_readme = WporgOperations::fetch_trunk_readme($plugin_post->post_name);
+    } catch (\Throwable $e) {
+        wporg_log_cache_error($plugin_post, 'trunk_readme', $e);
+        $trunk_readme = null;
     }
 
     try {
@@ -51,6 +65,7 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
     $next_cache = [
         'revision' => (int) $current_revision,
         'release_count' => (int) ($sync_summary['release_count'] ?? 0),
+        'trunk_readme' => $trunk_readme,
         'fetched_at' => time(),
     ];
 
@@ -58,6 +73,9 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
         'ID' => (int) $plugin_post->ID,
         'post_content' => wp_slash(wp_json_encode($next_cache)),
     ]);
+
+    // After the cache write, so the title follows the pointer just read.
+    refresh_plugin_title_from_reference((int) $plugin_post->ID);
 
     return $next_cache;
 }
@@ -141,8 +159,6 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
         }
     }
 
-    wporg_refresh_plugin_title_from_reference_release((int) $plugin_post->ID);
-
     return [
         ...$summary,
         'root_revision' => $root_revision,
@@ -191,6 +207,13 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
         );
     }
 
+    // The pointer for the marker cache — warn-only like in the refresh: null = not readable.
+    try {
+        $trunk_readme = WporgOperations::fetch_trunk_readme($wporg_slug);
+    } catch (\Throwable $e) {
+        $trunk_readme = null;
+    }
+
     $releases = [];
     foreach ($tags as $tag) {
         if (!is_array($tag)) {
@@ -217,20 +240,10 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
         return version_compare((string) ($b['version'] ?? ''), (string) ($a['version'] ?? ''));
     });
 
-    $reference_version = '';
-    $reference_name = null;
-    if (!empty($releases)) {
-        $reference = $releases[0];
-        $reference_version = (string) ($reference['version'] ?? '');
-        $name = (string) ($reference['plugin_data']['Name'] ?? '');
-        $reference_name = $name !== '' ? $name : null;
-    }
-
     return [
         'root_revision' => (int) $root_revision,
         'release_count' => count($releases),
-        'reference_version' => $reference_version,
-        'reference_name' => $reference_name,
+        'trunk_readme' => $trunk_readme,
         'releases' => $releases,
     ];
 }
@@ -266,17 +279,20 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
         $post_content = wp_json_encode([
             'revision' => (int) ($bundle['root_revision'] ?? 0),
             'release_count' => (int) ($bundle['release_count'] ?? 0),
+            'trunk_readme' => $bundle['trunk_readme'] ?? null,
             'fetched_at' => time(),
         ]);
         if (!is_string($post_content)) {
             throw new \RuntimeException('wporg_import_cache_encode_failed');
         }
 
+        // The slug names the marker until its releases exist; the title then follows the
+        // reference release like on every later refresh.
         $marker_id = wp_insert_post([
             'post_type' => 'pblsh_wporg_plugin',
             'post_status' => 'publish',
             'post_name' => $wporg_slug,
-            'post_title' => (string) (($bundle['reference_name'] ?? '') ?: $wporg_slug),
+            'post_title' => $wporg_slug,
             'post_content' => wp_slash($post_content),
         ], true);
         if (is_wp_error($marker_id)) {
@@ -346,6 +362,8 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
             $created_release_ids[] = (int) $release_id;
         }
 
+        refresh_plugin_title_from_reference($created_marker_id);
+
         return $created_marker_id;
     } catch (\Throwable $e) {
         foreach (array_reverse($created_release_ids) as $release_id) {
@@ -413,8 +431,8 @@ function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version
             return $release_id;
         }
 
-        // Refresh the marker title from the reference release
-        wporg_refresh_plugin_title_from_reference_release((int) $plugin_post->ID);
+        // The title follows the reference release (current per the cached pointer, else latest).
+        refresh_plugin_title_from_reference((int) $plugin_post->ID);
 
         return (int) $release_id;
     } catch (\Throwable $e) {
@@ -428,15 +446,24 @@ function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version
 }
 
 
-function invalidate_wporg_plugin_cache(int $plugin_id): void {
+/**
+ * Drops the revision-driven keys of the marker cache (revision, release_count) so the next
+ * read refreshes from SVN, keeping every other fact. $known carries facts the caller has
+ * just established on SVN — a deploy's written trunk readme, a flip's new Stable tag — so
+ * they are served until that refresh instead of the stale ones.
+ */
+function mark_wporg_plugin_cache_stale(int $plugin_id, array $known = []): void {
     $post = get_post($plugin_id);
     if (!$post instanceof \WP_Post || !is_wporg_plugin($post)) {
         return;
     }
 
+    $cached = wporg_decode_json_object((string) $post->post_content);
+    unset($cached['revision'], $cached['release_count']);
+
     wp_update_post([
         'ID' => $plugin_id,
-        'post_content' => wp_slash('{}'),
+        'post_content' => wp_slash(wp_json_encode((object) array_merge($cached, $known))),
     ]);
 }
 
@@ -535,7 +562,7 @@ function fetch_releases_grouped_by_parent(array $plugin_ids): array {
     $grouped = array_fill_keys($plugin_ids, []);
     $releases = get_posts([
         'post_type' => 'pblsh_release',
-        'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
+        'post_status' => 'any',
         'post_parent__in' => $plugin_ids,
         'posts_per_page' => -1,
         'orderby' => 'date',
@@ -587,60 +614,4 @@ function wporg_svn_date_to_post_dates(string $last_modified): array {
     $post_date_gmt = gmdate('Y-m-d H:i:s', $timestamp);
     $post_date = get_date_from_gmt($post_date_gmt);
     return [$post_date, $post_date_gmt];
-}
-
-
-function wporg_refresh_plugin_title_from_reference_release(int $plugin_id): void {
-    $reference = wporg_get_reference_release($plugin_id);
-    if (!$reference instanceof \WP_Post) {
-        return;
-    }
-
-    $content = wporg_decode_json_object((string) $reference->post_content);
-    $name = (string) ($content['plugin_data']['Name'] ?? '');
-    if ($name === '') {
-        return;
-    }
-
-    $plugin_post = get_post($plugin_id);
-    if (!$plugin_post instanceof \WP_Post || $plugin_post->post_title === $name) {
-        return;
-    }
-
-    wp_update_post([
-        'ID' => $plugin_id,
-        'post_title' => $name,
-    ]);
-}
-
-
-function wporg_get_reference_release(int $plugin_id): ?\WP_Post {
-    $releases = get_posts([
-        'post_type' => 'pblsh_release',
-        'post_status' => 'any',
-        'post_parent' => $plugin_id,
-        'posts_per_page' => -1,
-    ]);
-    $reference = null;
-    $reference_normalized = '';
-
-    foreach ($releases as $release) {
-        if (!$release instanceof \WP_Post) {
-            continue;
-        }
-
-        $content = wporg_decode_json_object((string) $release->post_content);
-        $version = (string) (($release->post_title ?? '') !== '' ? $release->post_title : ($content['plugin_data']['Version'] ?? ''));
-        $normalized = normalize_version_number($version);
-        if ($normalized === '') {
-            continue;
-        }
-
-        if ($reference === null || version_compare($normalized, $reference_normalized, '>')) {
-            $reference = $release;
-            $reference_normalized = $normalized;
-        }
-    }
-
-    return $reference instanceof \WP_Post ? $reference : null;
 }

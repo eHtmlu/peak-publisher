@@ -49,11 +49,10 @@ lodash.set(window, 'Pblsh.API', {
             method: 'DELETE',
         });
     },
-    // Update a release (e.g., status)
-    updateRelease: async (id, data) => {
-        return await window.Pblsh.API.request('releases/' + id, {
-            method: 'PUT',
-            body: data,
+    // Dismiss the one-time notice about the schema upgrade (includes/upgrade.php)
+    dismissUpgradeNotice: async () => {
+        return await window.Pblsh.API.request('admin/upgrade-notice', {
+            method: 'DELETE',
         });
     },
     // Get code to embed

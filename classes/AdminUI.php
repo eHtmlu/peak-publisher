@@ -62,6 +62,7 @@ class AdminUI {
             'tips.js',
             'utils-upload.js',
             'utils-upload-result.js',
+            'utils-current-release.js',
             'upload-checks.js',
             'api.js',
             'stores/plugins.js',
@@ -72,9 +73,11 @@ class AdminUI {
             'components/TipLink.js',
             'components/ChannelPath.js',
             'components/NoticeBox.js',
+            'components/UpgradeNotice.js',
             'components/ChannelChoiceCards.js',
             'components/WporgAccountForm.js',
             'components/WporgImportTable.js',
+            'components/CurrentVersion.js',
             'components/PluginList.js',
             'components/PluginEditor.js',
             'components/Settings.js',
@@ -157,6 +160,8 @@ class AdminUI {
                 'geopatternIconBase' => geopattern_icon_base_url(),
                 'assetSlots' => AssetManager::get_slots(),
                 'channelTexts' => get_channel_texts(),
+                // Facts of the one-time schema upgrade (includes/upgrade.php), null once dismissed.
+                'upgradeNotice' => is_array($upgrade_notice = get_option('pblsh_upgrade_notice')) ? $upgrade_notice : null,
                 'i18n' => [
                     'permalinkPlain'      => __('Plain'),
                     'permalinkDayAndName' => __('Day and name'),

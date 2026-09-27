@@ -125,21 +125,6 @@
                 dispatch.setLoading(pluginId, false);
             }
         },
-        toggleReleaseStatus: async function(pluginId, releaseId, nextStatus) {
-            var dispatch = wp.data.dispatch('pblsh/releases');
-            try {
-                dispatch.setPendingRelease(releaseId, true);
-                await window.Pblsh.API.updateRelease(releaseId, { status: nextStatus });
-                var sel = wp.data.select('pblsh/releases');
-                var list = sel.getForPlugin(pluginId);
-                var current = (list || []).find(function(r){ return r.id === releaseId; });
-                if (current) dispatch.upsert(pluginId, assign({}, current, { status: nextStatus }));
-            } catch (e) {
-                dispatch.setError(e && e.message ? e.message : 'Failed to update release');
-            } finally {
-                dispatch.setPendingRelease(releaseId, false);
-            }
-        },
         deleteRelease: async function(pluginId, releaseId) {
             var dispatch = wp.data.dispatch('pblsh/releases');
             try {

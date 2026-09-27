@@ -1,10 +1,12 @@
 // PluginEditor Component (simplified overview + releases list)
-lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onToggleReleaseStatus, pendingReleaseIds, onTogglePluginStatus, pendingPluginStatus, isLoadingReleases, onBack, initialTab, onTabChange }) => {
+lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onTogglePluginStatus, pendingPluginStatus, isLoadingReleases, onBack, initialTab, onTabChange }) => {
     const { __, sprintf } = wp.i18n;
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip, Button, DropdownMenu, MenuItem } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
+    const { getCurrentReleaseIssue } = Pblsh.CurrentReleaseUtils;
+    const { NoticeBox, CurrentVersion } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
     const formatFilesize = (bytes) => {
@@ -488,8 +490,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 createElement('div', { className: 'pblsh--plugin-grid__value' }, (isLoadingReleases || !(wp.data.select('pblsh/releases').hasLoadedForPlugin && wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null))) ? '—' : String((releasesFromStore || []).length))
                             ),
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Latest Release', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, safe(pluginData?.version) || '—')
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Current Release', 'peak-publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(CurrentVersion, { plugin: pluginData })),
+                                // Second line of a grid item: muted fragments, ' · ' separated, no period.
+                                // Only when the latest release is not the current one.
+                                pluginData?.latest_version && pluginData.latest_version !== pluginData.version && createElement('div', { className: 'pblsh--plugin-grid__hint' },
+                                    sprintf(__('Latest: %s', 'peak-publisher'), pluginData.latest_version)
+                                ),
                             ),
                             showInstallations && createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
@@ -502,13 +509,30 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         ];
     };
 
+    // Notices above the releases table, in this order: transient success → closed
+    // (installations concept) → the pointer state (no current release).
+    const renderReleaseNotices = () => {
+        const issue = getCurrentReleaseIssue(pluginData);
+        if (!issue) return null;
+        // The fact, then the remedy emphasized on its own line — one paragraph, as the box
+        // holds a single thought.
+        return createElement(NoticeBox, { key: 'current-release', variant: issue.variant, className: 'pblsh--releases-notice' },
+            createElement('p', null,
+                issue.fact,
+                ...(issue.remedy ? [ createElement('br'), createElement('strong', null, issue.remedy) ] : []),
+            ),
+        );
+    };
+
     const renderReleasesTable = () => {
         const releases = Array.isArray(releasesFromStore) ? releasesFromStore : [];
         const hasLoaded = wp.data.select('pblsh/releases').hasLoadedForPlugin
             ? wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null)
             : false;
+        const pluginIsDraft = pluginData?.status !== 'publish';
         return [
-            createElement('div', { className: 'pblsh--table-container' },
+            renderReleaseNotices(),
+            createElement('div', { key: 'table', className: 'pblsh--table-container' },
                 (isLoadingReleases || !hasLoaded) ?
                     createElement('div', { className: 'pblsh--loading pblsh--loading--table' },
                         createElement('div', { className: 'pblsh--loading__spinner' })
@@ -516,7 +540,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                 : createElement('table', { className: 'pblsh--table' },
                     createElement('thead', null,
                         createElement('tr', null,
-                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__current-header' }, __('Current', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
                             createElement('th', null, __('Date', 'peak-publisher')),
                             showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
@@ -530,23 +554,24 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             )
                             : releases.map((rel) =>
                                 createElement('tr', { key: String(rel.id) },
-                                    createElement('td', { className: 'pblsh--table__status-cell' },
-                                        createElement(wp.components.Button, {
-                                            isTertiary: true,
-                                            className: 'pblsh--status-btn ' + (rel.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
-                                            label: rel.status === 'publish' ? (pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Public if plugin is public', 'peak-publisher')) : __('Draft', 'peak-publisher'),
-                                            icon: Pblsh.Utils.getSvgIcon('circle'),
-                                            isBusy: Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id),
-                                            disabled: isWporg || (Array.isArray(pendingReleaseIds) && pendingReleaseIds.includes(rel.id)),
-                                            style: {
-                                                opacity: pluginData?.status === 'publish' ? 1 : 0.5,
+                                    // Which release sites receive: a radio-like ring per row, filled on the
+                                    // current one. "Current" is derived from the plugin's pointer, never a
+                                    // release property; a draft plugin distributes nothing, so its dot is muted.
+                                    createElement('td', { className: 'pblsh--table__current-cell' },
+                                        rel.is_current
+                                            ? createElement(Tooltip, {
+                                                text: pluginIsDraft
+                                                    ? __('Current when the plugin is public', 'peak-publisher')
+                                                    : __('Current release — sites receive this version', 'peak-publisher'),
                                             },
-                                            onClick: () => {
-                                                if (isWporg) return;
-                                                const next = rel.status === 'publish' ? 'draft' : 'publish';
-                                                if (typeof onToggleReleaseStatus === 'function') onToggleReleaseStatus(rel.id, next);
-                                            },
-                                        })
+                                                createElement('span', {
+                                                    className: 'pblsh--current-ring pblsh--current-ring--current' + (pluginIsDraft ? ' pblsh--current-ring--muted' : ''),
+                                                    tabIndex: 0,
+                                                    role: 'img',
+                                                    'aria-label': __('Current release', 'peak-publisher'),
+                                                })
+                                            )
+                                            : createElement('span', { className: 'pblsh--current-ring', 'aria-hidden': 'true' }),
                                     ),
                                     createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.version)),
                                     createElement('td', null, safe(rel.date)),

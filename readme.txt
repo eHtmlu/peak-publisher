@@ -18,7 +18,7 @@ Self‑host your plugin repository. Manage releases, serve updates, and streamli
 
 Peak Publisher turns your WordPress site into your own plugin update server. It’s built for agencies, product teams, and developers who want to create and ship their own custom plugins and want full control over distribution, versioning, and updates — without relying on third‑party services.
 
-With a modern, task‑focused admin UI, you can add new plugins and releases via drag & drop, validate packages automatically, and publish or draft releases with one click. Your client plugins point to your Peak Publisher site via a standard `Update URI`, so WordPress will discover and install updates directly from you.
+With a modern, task‑focused admin UI, you can add new plugins and releases via drag & drop, validate packages automatically, and decide with one click which release your sites receive. Your client plugins point to your Peak Publisher site via a standard `Update URI`, so WordPress will discover and install updates directly from you.
 
 **With this solution, you can have your own self-hosted plugin update server in just 5 minutes, allowing you to centrally manage your plugins and publish updates with incredible ease.**
 

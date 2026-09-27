@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const { useState, useEffect, useRef, createElement, render } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
-    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog } = window.Pblsh.Components;
+    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog, UpgradeNotice } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
 
     // Permalink check — shown instead of the app when permalinks are set to "Plain"
@@ -69,7 +69,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const [isNew, setIsNew] = useState(false);
         const settingsDialogRef = useRef(null);
-        const pendingReleaseStatus = useSelect((select) => select('pblsh/releases').getPendingReleaseIds(), []);
         const isLoadingReleases = useSelect((select) => currentPluginId ? select('pblsh/releases').isLoadingForPlugin(currentPluginId) : false, [currentPluginId]);
         const currentPlugin = useSelect((select) => currentPluginId ? select('pblsh/plugins').getById(currentPluginId) : null, [currentPluginId]);
 
@@ -133,14 +132,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
 
-        const toggleReleaseStatus = async (releaseId, nextStatus) => {
-            try {
-                if (!currentPluginId) return;
-                await window.Pblsh.Controllers.Releases.toggleReleaseStatus(currentPluginId, releaseId, nextStatus);
-            } catch (error) {
-                showAlert(error.message, 'error');
-            }
-        };
 
 
         const handleAddNewPlugin = (initial = null) => {
@@ -332,8 +323,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     pluginData: currentPlugin,
                     isNew,
                     refreshPlugin: refreshCurrentPlugin,
-                    onToggleReleaseStatus: toggleReleaseStatus,
-                    pendingReleaseIds: pendingReleaseStatus,
                     onTogglePluginStatus: togglePluginStatus,
                     pendingPluginStatus: pendingPluginStatus,
                     isLoadingReleases: isLoadingReleases,
@@ -347,14 +336,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         createElement('div', { className: 'pblsh--loading__spinner' })
                     );
                 }
-                return createElement(PluginList, {
-                    plugins: plugins,
-                    onEdit: handleEdit,
-                    onDelete: handleDelete,
-                    onCreateNew: () => handleAddNewPlugin(),
-                    onToggleStatus: togglePluginStatus,
-                    pendingPluginStatus: pendingPluginStatus,
-                });
+                return createElement(wp.element.Fragment, null,
+                    createElement(UpgradeNotice, { onOpenPlugin: handleEdit }),
+                    createElement(PluginList, {
+                        plugins: plugins,
+                        onEdit: handleEdit,
+                        onDelete: handleDelete,
+                        onCreateNew: () => handleAddNewPlugin(),
+                        onToggleStatus: togglePluginStatus,
+                        pendingPluginStatus: pendingPluginStatus,
+                    }),
+                );
             }
         };
 

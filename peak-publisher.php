@@ -33,6 +33,7 @@ require_once __DIR__ . '/includes/hosting.php';
 require_once __DIR__ . '/includes/wporg_cache.php';
 require_once __DIR__ . '/includes/wporg_api.php';
 require_once __DIR__ . '/includes/functions.php';
+require_once __DIR__ . '/includes/upgrade.php';
 
 
 // Initialize general setup.

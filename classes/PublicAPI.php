@@ -244,19 +244,19 @@ class PublicAPI {
         }
         $plugin = $plugin_infos['plugin'];
         $releases = $plugin_infos['releases'];
-        $latest_release = $plugin_infos['release'];
-        $latest_release_content = json_decode((string) $latest_release->post_content, true);
-        $latest_version = $latest_release->post_title;
+        $current_release = $plugin_infos['release'];
+        $current_release_content = json_decode((string) $current_release->post_content, true);
+        $current_version = $current_release->post_title;
         $plugin_data = $plugin_infos['release_data']['plugin_data'];
 
 
         // Based on the original code from WordPress.org  ( https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php )
-        $post = $latest_release;
+        $post = $current_release;
 
 		$result            = array();
 		$result['name']    = $plugin_data['Name'];
 		$result['slug']    = $plugin->post_name;
-		$result['version'] = $latest_version ?: '0.0';
+		$result['version'] = $current_version ?: '0.0';
 
         $author = (string) ($plugin_data['Author'] ?? '');
         $author_uri = (string) ($plugin_data['AuthorURI'] ?? '');
@@ -272,7 +272,7 @@ class PublicAPI {
 		$result['contributors']   = array();
 
 		$result['requires']         = empty($plugin_data['RequiresWP']) ? false : $plugin_data['RequiresWP'];
-		$result['tested']           = empty($latest_release_content['plugin_readme_txt']['content']['tested']) ? false : $latest_release_content['plugin_readme_txt']['content']['tested'];
+		$result['tested']           = empty($current_release_content['plugin_readme_txt']['content']['tested']) ? false : $current_release_content['plugin_readme_txt']['content']['tested'];
 		$result['requires_php']     = empty($plugin_data['RequiresPHP']) ? false : $plugin_data['RequiresPHP'];
 		$result['requires_plugins'] = empty($plugin_data['RequiresPlugins']) ? [] : array_map('trim', explode(',', $plugin_data['RequiresPlugins']));
 		$result['compatibility']    = array();
@@ -288,7 +288,7 @@ class PublicAPI {
 		$result['homepage']                 = empty($plugin_data['PluginURI']) ? '' : $plugin_data['PluginURI'];
 		$result['sections']                 = array();
 
-        $sections = $latest_release_content['plugin_readme_txt']['content']['sections'] ?? [];
+        $sections = $current_release_content['plugin_readme_txt']['content']['sections'] ?? [];
 
         foreach ($sections as $section_key => $section_content) {
             $result['sections'][$section_key] = apply_filters( 'the_content', $section_content, $section_key);
@@ -299,10 +299,10 @@ class PublicAPI {
 			$result['sections']['faq'] = $this->get_simplified_faq_markup( $result['sections']['faq'] );
 		}
 
-		$result['short_description'] = $latest_release_content['plugin_readme_txt']['content']['short_description'] ?? $plugin_data['Description'] ?? '';
+		$result['short_description'] = $current_release_content['plugin_readme_txt']['content']['short_description'] ?? $plugin_data['Description'] ?? '';
 		$result['description']       = $result['sections']['description'] ?? $result['short_description'];
-		$result['download_link']     = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $latest_release->post_title);
-		$result['upgrade_notice']    = $latest_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';
+		$result['download_link']     = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $current_release->post_title);
+		$result['upgrade_notice']    = $current_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';
 
         require_once __DIR__ . '/AssetManager.php';
         $asset_manager = AssetManager::init();
@@ -315,7 +315,7 @@ class PublicAPI {
 					'caption' => $image['caption'],
 				];
 			},
-			$asset_manager->get_api_screenshots($plugin->post_name, $latest_release_content['plugin_readme_txt']['content']['screenshots'] ?? [])
+			$asset_manager->get_api_screenshots($plugin->post_name, $current_release_content['plugin_readme_txt']['content']['screenshots'] ?? [])
 		);
 
 		if ( $result['screenshots'] ) {
@@ -327,7 +327,7 @@ class PublicAPI {
         $terms = array_map(fn($term) => (object) [
             'slug' => sanitize_title($term),
             'name' => $term
-        ], $latest_release_content['plugin_readme_txt']['content']['tags'] ?? []);
+        ], $current_release_content['plugin_readme_txt']['content']['tags'] ?? []);
 
 		$result['tags'] = array();
 		if ( $terms ) {
@@ -336,19 +336,19 @@ class PublicAPI {
 			}
 		}
 
-		$result['stable_tag'] = $latest_version ?: 'trunk';
+		// The current release is what sites receive — the Stable tag of this plugin.
+		$result['stable_tag'] = $current_version;
 
+		// Every release is downloadable by version, as every tag on wordpress.org;
+		// 'trunk' is the alias for the current release (the version-less download URL).
 		$result['versions'] = array();
-		if ( $versions = array_keys($releases) ) {
-			if ( 'trunk' != $result['stable_tag'] ) {
-				array_push( $versions, 'trunk' );
-			}
-			foreach ( $versions as $version ) {
-				$result['versions'][ $version ] = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . ($version === 'trunk' ? '' : '/' . $version));
-			}
+		$versions = array_keys($releases);
+		array_push( $versions, 'trunk' );
+		foreach ( $versions as $version ) {
+			$result['versions'][ $version ] = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . ($version === 'trunk' ? '' : '/' . $version));
 		}
 
-		$result['donate_link'] = $latest_release_content['plugin_readme_txt']['content']['donate_link'] ?? '';
+		$result['donate_link'] = $current_release_content['plugin_readme_txt']['content']['donate_link'] ?? '';
 
 		// Banners & icons — mirrors the wordpress.org API structure.
 		// @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
@@ -461,7 +461,7 @@ class PublicAPI {
             $plugin = $plugin_infos['plugin'];
             $release = $plugin_infos['release'];
             $release_data = $plugin_infos['release_data'];
-            $latest_version = $release->post_title;
+            $current_version = $release->post_title;
             $plugin_data = $release_data['plugin_data'];
 
             $requires_plugins = (array) ($plugin_data['RequiresPlugins'] ? array_map('trim', explode(',', $plugin_data['RequiresPlugins'])) : []);
@@ -503,8 +503,8 @@ class PublicAPI {
             $results['plugins'][$plugin_basename] = array_merge(
                 ['slug' => $plugin->post_name],
                 ['plugin' => $plugin_basename],
-                ['version' => $latest_version],
-                ['package' => rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $latest_version)],
+                ['version' => $current_version],
+                ['package' => rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $current_version)],
                 empty($result['icons']) ? [] : [ 'icons' => $result['icons'] ],
                 empty($result['banners']) ? [] : [ 'banners' => $result['banners'] ],
                 empty($plugin_data['RequiresWP']) ? [] : [ 'requires' => $plugin_data['RequiresWP'] ],
@@ -516,6 +516,13 @@ class PublicAPI {
         return $results;
     }
 
+    /**
+     * The plugin and the release a public request refers to. Releases are every release
+     * post of the plugin — none is hidden, each is downloadable by version, as every tag on
+     * wordpress.org; the plugin status stays the distribution switch (a draft plugin serves
+     * nothing). Without a version the request means the current release; null when the
+     * plugin has none: no update, "Plugin not found", download 404.
+     */
     private function get_plugin_infos(string $slug, ?string $version = ''): ?array {
         $plugins = get_posts([
             'post_type' => 'pblsh_plugin',
@@ -528,15 +535,16 @@ class PublicAPI {
         }
         $plugin = $plugins[0];
 
-        $releases_query = new \WP_Query([
+        $release_posts = get_posts([
             'post_type' => 'pblsh_release',
-            'post_status' => 'publish',
+            'post_status' => 'any',
             'post_parent' => $plugin->ID,
             'posts_per_page' => -1,
         ]);
+        $current = resolve_current_release($plugin, $release_posts);
 
         $releases = [];
-        foreach ($releases_query->posts as $release) {
+        foreach ($release_posts as $release) {
             $releases[$release->post_title] = $release;
         }
 
@@ -544,7 +552,7 @@ class PublicAPI {
             return null;
         }
 
-        // order releases by version (ascending); latest will be array_key_last
+        // order releases by version (ascending)
         uksort($releases, function($a, $b) {
             return version_compare($a, $b);
         });
@@ -560,7 +568,7 @@ class PublicAPI {
             }
         }
         else {
-            $requested_release = $releases[array_key_last($releases)];
+            $requested_release = $current['release'];
         }
 
         if (!$requested_release) {

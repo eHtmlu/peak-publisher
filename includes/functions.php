@@ -253,6 +253,141 @@ function normalize_version_number(string $version): string {
 
 
 /**
+ * The one selection behind "current release" on both channels: the entry whose version
+ * the plugin's pointer names. Pure — null for an empty pointer, for 'trunk' (wordpress.org
+ * distributes trunk then) and for a pointer no entry matches. Entries are keyed by their
+ * version string (release post_title, tag name, import bundle version), so the import can
+ * select before any post exists.
+ *
+ * @template T
+ * @param array<string, T> $releases_by_version
+ * @return T|null
+ */
+function select_current_release(array $releases_by_version, ?string $pointer) {
+    if ($pointer === null || $pointer === '' || $pointer === 'trunk') {
+        return null;
+    }
+    return $releases_by_version[$pointer] ?? null;
+}
+
+
+/**
+ * Resolves a plugin's current release — the release sites receive — from the plugin's
+ * pointer. The channels differ only in the pointer's source: wporg the Stable tag of
+ * trunk/readme.txt (marker cache `trunk_readme`, SVN is authoritative), self-hosted the
+ * plugin meta `_pblsh_current_release`. "current" is derived here and never stored per
+ * release.
+ *
+ * @param \WP_Post[]|null $release_posts The plugin's release posts when the caller already
+ *        loaded them (list views load every parent in one query); loaded here otherwise.
+ * @return array{state:string, pointer:string|null, release:?\WP_Post, latest:?\WP_Post, reference:?\WP_Post}
+ *         state: current | none (empty pointer) | tag_missing (the pointer names a version
+ *         without release) | trunk (wporg: the pointer is trunk) | unknown (wporg: the trunk
+ *         readme was not readable at the last refresh; pointer null). latest = the highest
+ *         version of all releases; reference = release ?? latest — the one fallback for the
+ *         plugin name and readme-derived data.
+ */
+function resolve_current_release(\WP_Post $plugin, ?array $release_posts = null): array {
+    if ($release_posts === null) {
+        $release_posts = get_posts([
+            'post_type' => 'pblsh_release',
+            'post_status' => 'any',
+            'post_parent' => (int) $plugin->ID,
+            'posts_per_page' => -1,
+        ]);
+    }
+
+    $by_version = [];
+    $latest = null;
+    $latest_normalized = '';
+    foreach ($release_posts as $release) {
+        if (!$release instanceof \WP_Post) {
+            continue;
+        }
+        $version = (string) $release->post_title;
+        $normalized = normalize_version_number($version);
+        if ($normalized === '') {
+            continue;
+        }
+        $by_version[$version] = $release;
+        if ($latest === null || version_compare($normalized, $latest_normalized, '>')) {
+            $latest = $release;
+            $latest_normalized = $normalized;
+        }
+    }
+
+    $is_wporg = is_wporg_plugin($plugin);
+    if ($is_wporg) {
+        $cache = wporg_decode_json_object((string) $plugin->post_content);
+        // A cache without the key predates the trunk readme in the cache (re-validation
+        // when reading back from persistence): the next revision-driven refresh fills
+        // it — until then the pointer is unknown.
+        $trunk_readme = $cache['trunk_readme'] ?? null;
+        $pointer = is_array($trunk_readme) ? (string) ($trunk_readme['stable_tag'] ?? '') : null;
+    } else {
+        // A plugin without the meta (created before the pointer existed, migration not run
+        // yet) reads as '' — no current release.
+        $pointer = (string) get_post_meta((int) $plugin->ID, '_pblsh_current_release', true);
+    }
+
+    $release = select_current_release($by_version, $pointer);
+    if ($pointer === null) {
+        $state = 'unknown';
+    } elseif ($release instanceof \WP_Post) {
+        $state = 'current';
+    } elseif ($pointer === '') {
+        $state = 'none';
+    } elseif ($is_wporg && $pointer === 'trunk') {
+        $state = 'trunk';
+    } else {
+        $state = 'tag_missing';
+    }
+
+    return [
+        'state' => $state,
+        'pointer' => $pointer,
+        'release' => $release,
+        'latest' => $latest,
+        'reference' => $release ?? $latest,
+    ];
+}
+
+
+/**
+ * The release sites receive, or null when the plugin has none (state none/tag_missing/unknown).
+ */
+function get_current_release(\WP_Post $plugin): ?\WP_Post {
+    return resolve_current_release($plugin)['release'];
+}
+
+
+/**
+ * Sets the plugin's title from its reference release (current, else latest): the plugin
+ * name follows what sites receive. Both channels; called after every change of the
+ * pointer or of the release set.
+ */
+function refresh_plugin_title_from_reference(int $plugin_id): void {
+    $plugin = get_post($plugin_id);
+    if (!is_plugin_post($plugin)) {
+        return;
+    }
+    $reference = resolve_current_release($plugin)['reference'];
+    if (!$reference instanceof \WP_Post) {
+        return;
+    }
+    $content = wporg_decode_json_object((string) $reference->post_content);
+    $name = (string) ($content['plugin_data']['Name'] ?? '');
+    if ($name === '' || $plugin->post_title === $name) {
+        return;
+    }
+    wp_update_post([
+        'ID' => $plugin_id,
+        'post_title' => $name,
+    ]);
+}
+
+
+/**
  * Generates a slug for a release. Both channels share the pblsh_release post
  * type (one slug namespace), and the same plugin slug × version may exist on
  * wporg and self_hosted at once — so wporg releases carry their channel as

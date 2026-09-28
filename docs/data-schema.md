@@ -17,7 +17,8 @@ code in this repository creates today:
   none; written only by finalize, the flip and the migration), the assets manifest
   `assets_icons` / `assets_banners` / `assets_screenshots` (`AssetManager`),
   `_pblsh_installations` (24-hour counting cache, regenerable, not declared); marker
-  `_pblsh_wporg_account_username`; release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
+  `_pblsh_wporg_account_username`, `_pblsh_wporg_stats` (daily cache of the wordpress.org info
+  API figures, regenerable, not declared); release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
   wporg `_pblsh_upload_state` (the deploy's upload state).
 - **Options:** `pblsh_settings` (settings incl. `wporg_accounts` with AES-256-GCM encrypted
   passwords and verdict stamps), `pblsh_secret_salt`, `pblsh_encryption_context_id`,

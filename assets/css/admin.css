@@ -16,6 +16,7 @@
     --color-red: #dc3232;
     --color-orange: #f29309;
     --color-gold: #d4a017;
+    --color-star: #e26f56; /* the rating stars of the wordpress.org plugin directory */
     --color-purple: #7a00df;
 
     --index-color-complete: var(--color-green);
@@ -2471,6 +2472,49 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 
 .pblsh--table__installations-cell {
     width: 6.25rem; /* 100px */
+    white-space: nowrap;
+}
+
+/* A figure whose tooltip says what it is (Figure.js): the installations cell, the
+   editor's Downloads and Rating. While a value is fetched for the first time, a small
+   spinner stands in for it. */
+.pblsh--figure {
+    cursor: help;
+}
+
+.pblsh--figure .pblsh--figure__spinner.components-spinner {
+    margin: 0;
+    width: 1rem;
+    height: 1rem;
+    vertical-align: middle;
+}
+
+/* The wordpress.org figures while the manual stats refresh runs */
+.pblsh--plugin-grid__value .pblsh--plugin-grid__spinner.components-spinner {
+    margin: 0;
+    vertical-align: middle;
+}
+
+/* Rating in the editor header, inside a Figure: five stars in half steps like the
+   directory shows them (getRating() in utils-installations.js). The icons carry
+   whitespace of their own, so the stars overlap their boxes slightly. */
+.pblsh--rating-stars {
+    vertical-align: middle;
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-star);
+    margin-top: -.25rem;
+}
+
+.pblsh--rating-stars__star {
+    display: inline-flex;
+    margin-inline-start: -0.25rem;
+}
+
+/* The number of ratings beside the stars, the plugin installer's "(7,308)" */
+.pblsh--rating-stars__count {
+    color: #666;
+    font-size: 0.8125rem;
 }
 
 /* Status Column */
@@ -2536,6 +2580,22 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 .pblsh--plugin-header__actions {
     display: flex;
     align-items: center;
+    gap: 1rem;
+}
+
+/* The status of the wordpress.org figures beside the plugin's status button: source,
+   fetch age, last failure and the Refresh link, which reads like its neighbouring
+   fragments (renderWporgFiguresStatus() in PluginEditor.js) */
+.pblsh--plugin-header__figures {
+    color: #666;
+    font-size: 0.8125rem;
+    text-align: right;
+}
+
+.pblsh--plugin-header__figures .components-button.is-link {
+    font-size: inherit;
+    line-height: inherit;
+    vertical-align: baseline;
 }
 .pblsh--plugin-header code {
     font-size: 0.75rem;

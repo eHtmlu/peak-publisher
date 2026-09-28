@@ -56,19 +56,11 @@ final class WporgStatsTest extends TestCase {
 
     public function test_the_automatic_path_fetches_once_a_day_after_the_utc_cut_off(): void {
         $noon = 1_800_000_000 - (1_800_000_000 % DAY_IN_SECONDS) + 12 * HOUR_IN_SECONDS;
-        self::assertTrue(is_wporg_stats_refresh_due($this->stats([]), false, $noon), 'never fetched');
-        self::assertTrue(is_wporg_stats_refresh_due($this->stats([ 'fetched_at' => $noon - DAY_IN_SECONDS, 'attempted_at' => $noon - DAY_IN_SECONDS ]), false, $noon), 'fetched yesterday');
-        self::assertFalse(is_wporg_stats_refresh_due($this->stats([ 'fetched_at' => $noon - 11 * HOUR_IN_SECONDS, 'attempted_at' => $noon - 11 * HOUR_IN_SECONDS ]), false, $noon), 'fetched today after 00:00 UTC');
-        self::assertFalse(is_wporg_stats_refresh_due($this->stats([ 'attempted_at' => $noon - 10 * MINUTE_IN_SECONDS ]), false, $noon), 'a claim younger than an hour blocks the automatic path');
-        self::assertTrue(is_wporg_stats_refresh_due($this->stats([ 'attempted_at' => $noon - 2 * HOUR_IN_SECONDS ]), false, $noon), 'an hour after a dead claim the automatic path retries');
-    }
-
-    public function test_the_manual_path_skips_the_cut_off_and_is_blocked_only_after_a_failed_attempt(): void {
-        $now = 1_800_000_000;
-        $error = [ 'code' => 'wporg_api_unavailable', 'message' => 'unavailable', 'at' => $now - 10 * MINUTE_IN_SECONDS ];
-        self::assertTrue(is_wporg_stats_refresh_due($this->stats([ 'fetched_at' => $now - MINUTE_IN_SECONDS, 'attempted_at' => $now - MINUTE_IN_SECONDS ]), true, $now), 'a repeat right after a success is allowed');
-        self::assertFalse(is_wporg_stats_refresh_due($this->stats([ 'last_error' => $error ]), true, $now), 'blocked within an hour after a failure');
-        self::assertTrue(is_wporg_stats_refresh_due($this->stats([ 'last_error' => [ ...$error, 'at' => $now - 2 * HOUR_IN_SECONDS ] ]), true, $now), 'open again an hour after the failure');
+        self::assertTrue(is_wporg_stats_refresh_due($this->stats([]), $noon), 'never fetched');
+        self::assertTrue(is_wporg_stats_refresh_due($this->stats([ 'fetched_at' => $noon - DAY_IN_SECONDS, 'attempted_at' => $noon - DAY_IN_SECONDS ]), $noon), 'fetched yesterday');
+        self::assertFalse(is_wporg_stats_refresh_due($this->stats([ 'fetched_at' => $noon - 11 * HOUR_IN_SECONDS, 'attempted_at' => $noon - 11 * HOUR_IN_SECONDS ]), $noon), 'fetched today after 00:00 UTC');
+        self::assertFalse(is_wporg_stats_refresh_due($this->stats([ 'attempted_at' => $noon - 10 * MINUTE_IN_SECONDS ]), $noon), 'a claim younger than an hour blocks the automatic path');
+        self::assertTrue(is_wporg_stats_refresh_due($this->stats([ 'attempted_at' => $noon - 2 * HOUR_IN_SECONDS ]), $noon), 'an hour after a dead claim the automatic path retries');
     }
 
     public function test_a_foreign_meta_shape_reads_as_never(): void {
@@ -184,7 +176,7 @@ final class WporgStatsTest extends TestCase {
         self::assertSame('wporg_stats_incomplete', $stats['last_error']['code']);
     }
 
-    public function test_force_skips_the_daily_cut_off_but_not_the_failed_attempt_lock(): void {
+    public function test_force_fetches_regardless_of_the_cut_off_and_the_last_attempt(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         $now = time();
         update_post_meta($marker->ID, PBLSH_WPORG_STATS_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'fetched_at' => $now - MINUTE_IN_SECONDS, 'attempted_at' => $now - MINUTE_IN_SECONDS ]));
@@ -193,9 +185,12 @@ final class WporgStatsTest extends TestCase {
         self::assertSame([ $marker->ID ], refresh_wporg_stats($marker->ID, true), 'force right after a success fetches again');
         self::assertSame(100, get_wporg_stats($marker->ID)['active_installs']);
 
-        update_post_meta($marker->ID, PBLSH_WPORG_STATS_META, $this->stats([ 'last_error' => [ 'code' => 'wporg_api_unavailable', 'message' => 'x', 'at' => $now - 10 * MINUTE_IN_SECONDS ] ]));
-        self::assertSame([], refresh_wporg_stats($marker->ID, true), 'locked within an hour after a failure');
-        self::assertCount(1, FakeWordPress::$http_requests);
+        update_post_meta($marker->ID, PBLSH_WPORG_STATS_META, $this->stats([ 'attempted_at' => $now - MINUTE_IN_SECONDS, 'last_error' => [ 'code' => 'wporg_api_unavailable', 'message' => 'x', 'at' => $now - MINUTE_IN_SECONDS ] ]));
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => 200 ]) ]);
+        self::assertSame([ $marker->ID ], refresh_wporg_stats($marker->ID, true), 'force right after a failure fetches again');
+        self::assertSame(200, get_wporg_stats($marker->ID)['active_installs']);
+        self::assertNull(get_wporg_stats($marker->ID)['last_error'], 'the success clears the failure');
+        self::assertCount(2, FakeWordPress::$http_requests);
     }
 
     public function test_a_failing_chunk_marks_only_its_own_markers(): void {

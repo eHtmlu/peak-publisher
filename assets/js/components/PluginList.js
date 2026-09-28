@@ -5,7 +5,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
     const { showAlert, getSvgIcon } = Pblsh.Utils;
-    const { ChannelPath, CurrentVersion } = Pblsh.Components;
+    const { ChannelPath, CurrentVersion, InstallationsCount } = Pblsh.Components;
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
@@ -28,11 +28,12 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
         }
     };
 
-    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const hasLoadedList = useSelect((select) => {
         try { return !!select('pblsh/plugins').hasLoadedList(); } catch (e) { return false; }
     }, []);
-    const showInstallations = !!(serverSettings && serverSettings.count_plugin_installations);
+    // The column shows whenever any row has a figure to show — self-hosted with counting
+    // on, wordpress.org always (its figure is public); the setting is not read here.
+    const showInstallations = plugins.some((plugin) => plugin.installations.state !== 'disabled');
 
     return createElement('div', { className: 'pblsh--list' },
         !hasLoadedList
@@ -91,7 +92,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                     createElement(CurrentVersion, { plugin })
                                 ),
                                 showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' },
-                                    String(plugin.installations.count ?? 0)
+                                    createElement(InstallationsCount, { plugin })
                                 ),
                                 createElement('td', { className: 'pblsh--table__actions-cell' },
                                     createElement('div', { className: 'pblsh--table__actions' },

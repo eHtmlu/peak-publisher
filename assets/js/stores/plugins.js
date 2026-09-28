@@ -12,6 +12,7 @@
         pendingIds: [],
         error: null,
         lastFetch: 0,
+        isRefreshingWporgStats: false,
     };
     var actions = {
         setList: function(items) {
@@ -31,6 +32,15 @@
         },
         setError: function(message) {
             return { type: 'SET_ERROR', message: message };
+        },
+        // Merges fields into a plugin the store already holds; unknown ids are ignored
+        // (a refresh answer may name a plugin deleted meanwhile). `upsert` is for
+        // complete items.
+        patch: function(id, fields) {
+            return { type: 'PATCH', id: id, fields: fields };
+        },
+        setRefreshingWporgStats: function(flag) {
+            return { type: 'SET_REFRESHING_WPORG_STATS', flag: !!flag };
         },
     };
     function reducer(state, action) {
@@ -70,6 +80,14 @@
             }
             case 'SET_ERROR':
                 return assign({}, state, { error: action.message || 'Error' });
+            case 'PATCH': {
+                if (!state.byId[action.id]) return state;
+                var patched = {};
+                patched[action.id] = assign({}, state.byId[action.id], action.fields);
+                return assign({}, state, { byId: assign({}, state.byId, patched) });
+            }
+            case 'SET_REFRESHING_WPORG_STATS':
+                return assign({}, state, { isRefreshingWporgStats: !!action.flag });
             default:
                 return state;
         }
@@ -93,6 +111,9 @@
         getPendingIds: function(state) {
             return state.pendingIds.slice();
         },
+        isRefreshingWporgStats: function(state) {
+            return !!state.isRefreshingWporgStats;
+        },
     };
     registerStore('pblsh/plugins', {
         reducer: reducer,
@@ -108,11 +129,35 @@
             try {
                 dispatch.setLoadingList(true);
                 var list = await window.Pblsh.API.getPlugins();
-                dispatch.setList(Array.isArray(list) ? list : []);
+                var items = Array.isArray(list) ? list : [];
+                dispatch.setList(items);
+                // Stale-while-revalidate: the list renders from the cache, then the server
+                // fetches whatever wordpress.org figures are due (once a day per marker) —
+                // the one trigger for every caller of fetchList. A failed automatic refresh
+                // leaves the cached state in place; the editor's Refresh link reports its
+                // own failures.
+                if (items.some(function(item) { return item.hosting_type === 'wporg'; })) {
+                    window.Pblsh.Controllers.Plugins.refreshWporgStats().catch(function() {});
+                }
             } catch (e) {
                 dispatch.setError(e && e.message ? e.message : 'Failed to load plugins');
             } finally {
                 dispatch.setLoadingList(false);
+            }
+        },
+        // Asks the server for the due wordpress.org figures (every marker, or one; force
+        // skips the daily cut-off) and patches every marker it touched. Resolves to the
+        // answer's stats map so a caller can compare before and after.
+        refreshWporgStats: async function(pluginId, options) {
+            var dispatch = wp.data.dispatch('pblsh/plugins');
+            dispatch.setRefreshingWporgStats(true);
+            try {
+                var response = await window.Pblsh.API.refreshWporgStats(pluginId || null, !!(options && options.force));
+                var stats = response && response.stats ? response.stats : {};
+                Object.keys(stats).forEach(function(id) { dispatch.patch(Number(id), stats[id]); });
+                return stats;
+            } finally {
+                dispatch.setRefreshingWporgStats(false);
             }
         },
         fetchById: async function(id) {

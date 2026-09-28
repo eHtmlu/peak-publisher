@@ -19,7 +19,7 @@ require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
 
 const PBLSH_WPORG_STATS_META = '_pblsh_wporg_stats';
 
-/** A claimed or failed attempt blocks the next one for this long. */
+/** A claimed or failed attempt blocks the next automatic one for this long. */
 const PBLSH_WPORG_STATS_RETRY_INTERVAL = HOUR_IN_SECONDS;
 
 
@@ -53,27 +53,24 @@ function get_wporg_stats(int $plugin_id): array {
 
 
 /**
- * Whether a marker's figures are due, the one rule for both paths. The automatic path
- * fetches once a day: the first time the figures are needed after 00:00 UTC, and not
- * again within an hour of the last attempt (a claim whose request died). The manual
- * path ($force) skips the daily cut-off and is blocked only within an hour after a
- * *failed* attempt — after a success a repeat is fine: a freshly approved plugin turns
- * from not_found to ok with its first commit, and the user wants to see that.
+ * Whether a marker's figures are due on the automatic path, which fetches once a day:
+ * the first time the figures are needed after 00:00 UTC, and not again within an hour
+ * of the last attempt — whether that failed or died as a claim. The manual refresh is
+ * always due (refresh_wporg_stats() with $force): one click is one request, and after a
+ * failure the user wants to try again right away, not in an hour.
  */
-function is_wporg_stats_refresh_due(array $stats, bool $force, int $now): bool {
-    $retry_after = $now - PBLSH_WPORG_STATS_RETRY_INTERVAL;
-    if ($force) {
-        return (int) ($stats['last_error']['at'] ?? 0) <= $retry_after;
-    }
+function is_wporg_stats_refresh_due(array $stats, int $now): bool {
     $day_start = $now - ($now % DAY_IN_SECONDS);
-    return (int) $stats['fetched_at'] < $day_start && (int) $stats['attempted_at'] <= $retry_after;
+    return (int) $stats['fetched_at'] < $day_start
+        && (int) $stats['attempted_at'] <= $now - PBLSH_WPORG_STATS_RETRY_INTERVAL;
 }
 
 
 /**
  * Fetches the due figures of every marker (or of one) in one batched request per 100
- * slugs and writes them. Returns the IDs of every marker touched — successes and
- * failed attempts alike — so the caller can serve their new state.
+ * slugs and writes them; $force — the manual refresh — fetches regardless of the daily
+ * rule. Returns the IDs of every marker touched — successes and failed attempts alike —
+ * so the caller can serve their new state.
  *
  * @return int[]
  */
@@ -87,13 +84,13 @@ function refresh_wporg_stats(?int $plugin_id = null, bool $force = false): array
 
     // The claim: attempted_at is written before the remote call, so a request dying
     // mid-way (fatal, OOM) does not cause a retry storm — the automatic path waits an
-    // hour, the manual one stays open (no failed attempt was recorded). Read-then-write
-    // on post meta, not atomic: a rare second request from a parallel tab is harmless.
+    // hour. Read-then-write on post meta, not atomic: a rare second request from a
+    // parallel tab is harmless.
     $now = time();
     $due = [];
     foreach ($markers as $marker) {
         $stats = get_wporg_stats((int) $marker->ID);
-        if (!is_wporg_stats_refresh_due($stats, $force, $now)) {
+        if (!$force && !is_wporg_stats_refresh_due($stats, $now)) {
             continue;
         }
         $stats['attempted_at'] = $now;

@@ -57,6 +57,14 @@ lodash.set(window, 'Pblsh.API', {
             body: { version, expected_pointer: expectedPointer },
         });
     },
+    // Fetch the due wordpress.org figures (every marker, or one); force skips the daily
+    // cut-off. Answers { stats: { [id]: { installations, wporg_stats } } } for every marker touched.
+    refreshWporgStats: async (pluginId = null, force = false) => {
+        return await window.Pblsh.API.request('admin/wporg/refresh-stats', {
+            method: 'POST',
+            body: { plugin_id: pluginId, force },
+        });
+    },
     // Dismiss the one-time notice about the schema upgrade (includes/upgrade.php)
     dismissUpgradeNotice: async () => {
         return await window.Pblsh.API.request('admin/upgrade-notice', {

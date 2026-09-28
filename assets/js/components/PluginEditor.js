@@ -4,9 +4,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip, Button, DropdownMenu, MenuItem, Spinner } = wp.components;
-    const { getSvgIcon } = Pblsh.Utils;
+    const { getSvgIcon, formatRelativeTime, getTimeTooltipProps } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
-    const { NoticeBox, CurrentVersion } = Pblsh.Components;
+    const { getLastErrorText, getDownloads, getRating } = Pblsh.InstallationsUtils;
+    const { NoticeBox, CurrentVersion, InstallationsCount, Figure } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
     const formatFilesize = (bytes) => {
@@ -15,9 +16,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     };
-    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
-    const showInstallations = !!(serverSettings && serverSettings.count_plugin_installations);
     const isWporg = pluginData && pluginData.hosting_type === 'wporg';
+    // The releases table has per-version figures only self-hosted, and only while the
+    // counting is on — read off the plugin's installations state, never the setting.
+    const showReleaseInstallations = !!pluginData && !isWporg && pluginData.installations.state === 'ok';
 
     // ---- Asset state ----
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
@@ -32,6 +34,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const [flippingReleaseId, setFlippingReleaseId] = useState(null);
     const [flipNotice, setFlipNotice] = useState(null);
     useEffect(() => { setFlipNotice(null); }, [pluginData && pluginData.id]);
+    // The manual stats refresh (wordpress.org): while it runs, the three figures show a
+    // spinner. Its outcome shows through the data — the fetch age becomes "just now", a
+    // failure appears beside it.
+    const [refreshingStats, setRefreshingStats] = useState(false);
+    const isRefreshingAnyStats = useSelect((select) => select('pblsh/plugins').isRefreshingWporgStats(), []);
     const validTabs = isWporg ? ['releases'] : ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
     const [draggingN, setDraggingN] = useState(null);     // screenshot_n being dragged
@@ -441,7 +448,69 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         [pluginData && pluginData.id]
     );
 
+    // The manual refresh of the wordpress.org stats: force skips the daily cut-off. The
+    // patched data says the rest; a failure of the request itself is reported like the
+    // flip's.
+    const refreshStats = async () => {
+        if (!pluginData || refreshingStats) return;
+        setRefreshingStats(true);
+        try {
+            await Pblsh.Controllers.Plugins.refreshWporgStats(pluginData.id, { force: true });
+        } catch (e) {
+            alert((e?.message || __('Could not refresh the wordpress.org figures.', 'peak-publisher'))
+                + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));
+        } finally {
+            setRefreshingStats(false);
+        }
+    };
+
+    // The status of the wordpress.org stats (installations, downloads, rating) in the
+    // card's header row, beside the plugin's status button: the fetch age, the last
+    // failure, and the Refresh link — one line for the three values it covers; every
+    // value names its source in its tooltip. A plugin never fetched because the server
+    // cannot reach wordpress.org gets that as the line itself. Muted fragments, ' · '
+    // separated, no period, sentence case except "wordpress.org".
+    const renderWporgFiguresStatus = () => {
+        const inst = pluginData.installations;
+        const fragments = [];
+        let refreshable = true;
+        if (inst.state === 'never' && inst.last_error) {
+            fragments.push(createElement(Tooltip, { text: getLastErrorText(inst.last_error) },
+                createElement('span', { tabIndex: 0 }, __('wordpress.org could not be reached from this server', 'peak-publisher'))));
+        } else if (inst.state === 'never' && isRefreshingAnyStats) {
+            fragments.push(__('Fetching stats…', 'peak-publisher'));
+            refreshable = false;
+        } else {
+            if (inst.fetched_at) {
+                fragments.push(createElement('span', null, __('Stats updated', 'peak-publisher'), ' ',
+                    createElement('time', getTimeTooltipProps(inst.fetched_at), formatRelativeTime(inst.fetched_at))));
+            } else {
+                fragments.push(__('Stats not fetched yet', 'peak-publisher'));
+            }
+            if (inst.last_error) {
+                fragments.push(createElement(Tooltip, { text: getLastErrorText(inst.last_error) },
+                    createElement('span', { tabIndex: 0 }, __('Could not be reached', 'peak-publisher'))));
+            }
+        }
+        // Locked only while a refresh runs — after a failure the user may try again at once.
+        if (refreshable) {
+            fragments.push(createElement(Button, {
+                isLink: true,
+                isBusy: refreshingStats,
+                disabled: refreshingStats || isRefreshingAnyStats,
+                onClick: refreshStats,
+            }, __('Refresh', 'peak-publisher')));
+        }
+        return fragments.flatMap((fragment, index) => index === 0 ? [ fragment ] : [ ' · ', fragment ]);
+    };
+
     const renderInfoBox = () => {
+        // The wordpress.org dashboard figures beside Installations; each names its source
+        // in the tooltip, the header row carries the age. During the manual stats refresh
+        // a figure gives way to a spinner; the automatic refresh after loading keeps
+        // showing the cached values.
+        const wporgFigures = isWporg ? { downloads: getDownloads(pluginData), rating: getRating(pluginData) } : null;
+        const wporgFigure = (figure) => refreshingStats ? createElement(Spinner, { className: 'pblsh--plugin-grid__spinner' }) : figure;
         return [
                 createElement('div', { className: 'pblsh--card pblsh--card--plugin-info' },
                 createElement('div', { className: 'pblsh--plugin-info__row' },
@@ -472,6 +541,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 ),
                             ),
                             createElement('div', { className: 'pblsh--plugin-header__actions' },
+                                isWporg && createElement('div', { className: 'pblsh--plugin-header__figures' }, ...renderWporgFiguresStatus()),
                                 createElement(Button, {
                                     isTertiary: true,
                                     className: 'pblsh--status-btn ' + (pluginData?.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
@@ -503,9 +573,32 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     sprintf(__('Latest: %s', 'peak-publisher'), pluginData.latest_version)
                                 ),
                             ),
-                            showInstallations && createElement('div', { className: 'pblsh--plugin-grid__item' },
+                            // Not shown while the counting is switched off (a deliberate choice —
+                            // the setting defaults to on); wordpress.org figures are always there.
+                            pluginData && pluginData.installations.state !== 'disabled' && createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String(pluginData?.installations?.count ?? 0))
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, wporgFigure(createElement(InstallationsCount, { plugin: pluginData }))),
+                            ),
+                            wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Downloads', 'peak-publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__value' },
+                                    wporgFigure(createElement(Figure, { title: wporgFigures.downloads.title }, wporgFigures.downloads.text)),
+                                ),
+                            ),
+                            // Stars with the number of ratings beside them, the way the plugin installer
+                            // shows a rating — the count qualifies the stars; the tooltip spells both out.
+                            wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
+                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Rating', 'peak-publisher')),
+                                createElement('div', { className: 'pblsh--plugin-grid__value' },
+                                    wporgFigure(createElement(Figure, { title: wporgFigures.rating.title },
+                                        wporgFigures.rating.stars
+                                            ? createElement('span', { className: 'pblsh--rating-stars', 'aria-hidden': 'true' },
+                                                ...wporgFigures.rating.stars.map((icon, index) => createElement('span', { key: index, className: 'pblsh--rating-stars__star' }, getSvgIcon(icon, { size: 32 }))),
+                                                createElement('span', { className: 'pblsh--rating-stars__count' }, '(' + wporgFigures.rating.count + ')'),
+                                            )
+                                            : wporgFigures.rating.text,
+                                    )),
+                                ),
                             ),
                         )
                     )
@@ -578,14 +671,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             createElement('th', { className: 'pblsh--table__current-header' }, __('Current', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
                             createElement('th', null, __('Date', 'peak-publisher')),
-                            showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
+                            showReleaseInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher')),
                         ),
                     ),
                     createElement('tbody', null,
                         (hasLoaded && releases.length === 0)
                             ? createElement('tr', null,
-                                createElement('td', { colSpan: showInstallations ? 5 : 4 }, __('No releases.', 'peak-publisher')),
+                                createElement('td', { colSpan: showReleaseInstallations ? 5 : 4 }, __('No releases.', 'peak-publisher')),
                             )
                             : releases.map((rel, index) =>
                                 createElement('tr', { key: String(rel.id) },
@@ -625,7 +718,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     ),
                                     createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.version)),
                                     createElement('td', null, safe(rel.date)),
-                                    showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
+                                    showReleaseInstallations && createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
                                     createElement('td', { className: 'pblsh--table__actions-cell' },
                                         createElement('div', { className: 'pblsh--table__actions' },
                                             !isWporg && (() => {

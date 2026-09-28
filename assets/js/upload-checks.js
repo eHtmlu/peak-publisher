@@ -79,8 +79,6 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         const {
             meta,
             pluginData,
-            target,
-            isWporg,
             releaseContext,
         } = context;
         const previousRelease = releaseContext.previousRelease;
@@ -91,12 +89,6 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         const pluginVersion = releaseContext.pluginVersion;
         const naturalSuccessors = releaseContext.naturalSuccessors;
         const isNaturalSuccessor = releaseContext.isNaturalSuccessor;
-        const deployModeText = isWporg && target.deploy_mode === 'trunk_and_tag'
-            ? __('Publish mode: update trunk and tag in one SVN commit.', 'peak-publisher')
-            : (isWporg && target.deploy_mode === 'tag_only'
-                ? __('Publish mode: tag-only. Trunk stays unchanged.', 'peak-publisher')
-                : '');
-        const withDeployMode = (desc) => deployModeText ? [desc, createElement('br'), deployModeText] : desc;
 
         if (!pluginData.Version) {
             return {
@@ -134,7 +126,6 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                         checked: replaceRelease,
                         onChange: (value) => setReplaceRelease(value),
                     }),
-                    deployModeText && [createElement('br'), deployModeText],
                 ],
             };
         }
@@ -143,7 +134,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
             return {
                 title: __('Valid version number', 'peak-publisher'),
                 type: 'ok',
-                desc: withDeployMode(pluginData.Version),
+                desc: pluginData.Version,
             };
         }
 
@@ -151,16 +142,14 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
             return {
                 title: __('Expected version number', 'peak-publisher'),
                 type: 'ok',
-                desc: withDeployMode([
-                    sprintf(__('Version %s, as expected after the latest release (%s).', 'peak-publisher'), pluginData.Version, latestRelease.version),
-                ]),
+                desc: sprintf(__('Version %s, as expected after the latest release (%s).', 'peak-publisher'), pluginData.Version, latestRelease.version),
             };
         }
 
         return {
             title: __('Unexpected version number', 'peak-publisher'),
             type: (!nextRelease || useOlderPluginVersion) && (!previousRelease || isNaturalSuccessor || (previousRelease && !isNaturalSuccessor && useUnexpectedPluginVersion)) ? 'ok' : 'error',
-            desc: withDeployMode([
+            desc: [
                 nextRelease && [
                     latestRelease.normalized_version !== nextRelease.normalized_version && sprintf(__('Releases with higher version numbers (%s to %s) already exist.', 'peak-publisher'), nextRelease.version, latestRelease.version),
                     latestRelease.normalized_version === nextRelease.normalized_version && sprintf(__('A release with a higher version number (%s) already exists.', 'peak-publisher'), latestRelease.version),
@@ -184,7 +173,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                         onChange: (value) => setUseUnexpectedPluginVersion(value),
                     }),
                 ],
-            ]),
+            ],
         };
     }
 

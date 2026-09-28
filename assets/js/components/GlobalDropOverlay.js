@@ -3,10 +3,11 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const { __, _n } = wp.i18n;
     const sprintf = wp.i18n.sprintf ?? window.sprintf;
     const { useState, useEffect, useRef, createElement } = wp.element;
-    const { Button, TextControl, Spinner } = wp.components;
+    const { Button, TextControl, Spinner, ToggleControl } = wp.components;
     const { useSelect } = wp.data;
     const { getSvgIcon, getChannelLabel, getChannelDescription, getChannelIcon } = Pblsh.Utils;
     const { getReleaseContext, getReleasePresentation } = Pblsh.UploadResultUtils;
+    const { getUploadDecisionText } = Pblsh.CurrentReleaseUtils;
     const { useUploadChecks } = Pblsh.Hooks;
     const { WporgImportFacts, WporgAccountForm, ChannelChoiceCards, Checklist, NoticeBox } = Pblsh.Components;
 
@@ -32,6 +33,13 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     // Focus target when a failed slug change reopens the destination panel.
     const slugEditInputRef = useRef(null);
     const [selectedHostingType, setSelectedHostingType] = useState(null);
+    // The current-release decision (decide_current_release() on the server): the server names the
+    // relation between the upload and the plugin's current release plus the default; the
+    // toggle encodes the deviation from that default. The deviation counts only while
+    // relation and pre-release flag still match the target's facts — a re-resolution
+    // (set_slug, refresh_target_context) may change the default, and a surviving deviation
+    // would invert it into an unwanted rollback.
+    const [currentReleaseDecision, setCurrentReleaseDecision] = useState({ relation: null, pre_release: null, deviate: false });
 
     // Owns the per-upload confirmation decisions and builds the checklist items (upload-checks.js).
     const uploadChecks = useUploadChecks();
@@ -78,6 +86,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         setSlugEditValue('');
         setSlugEditError('');
         setSelectedHostingType(null);
+        setCurrentReleaseDecision({ relation: null, pre_release: null, deviate: false });
         uploadChecks.reset();
     }
 
@@ -219,6 +228,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         } else {
             setSelectedHostingType(null);
         }
+        setCurrentReleaseDecision({ relation: null, pre_release: null, deviate: false });
     }, [validationResult?.upload_id]);
 
     async function runUploadWorkflow(file, context, uploadStartOptions = {}) {
@@ -790,7 +800,59 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     function renderPublishPath(meta, uploadId) {
         if (!meta?.plugin_ok) return null;
-        return createElement('div', { className: 'pblsh--publish-path' }, renderDestinationControl(meta, uploadId));
+        return createElement('div', { className: 'pblsh--upload-result__decision pblsh--publish-path' }, renderDestinationControl(meta, uploadId));
+    }
+
+    // The facts of the active target's current-release decision, or null where the row has
+    // nothing to say. Until the wordpress.org deploy executes the decision (build step 2),
+    // the row is self-hosted only — the channel condition step 2 removes.
+    function getCurrentReleaseFacts(context) {
+        const facts = context.target?.current_release;
+        return facts && !context.isWporg && context.meta?.plugin_ok ? facts : null;
+    }
+
+    // make_current = default XOR deviation, the deviation only for the facts it was made on.
+    function resolveMakeCurrent(facts) {
+        const deviates = currentReleaseDecision.deviate
+            && currentReleaseDecision.relation === facts.relation
+            && currentReleaseDecision.pre_release === facts.pre_release;
+        return facts.default_make_current !== deviates;
+    }
+
+    // The second decision row under the publish path: what publishing does to the release
+    // sites receive. A toggle where the facts allow a choice, a settled statement otherwise;
+    // the ring is the same symbol the release list uses for the current release.
+    function renderCurrentReleaseDecision(context) {
+        const facts = getCurrentReleaseFacts(context);
+        if (!facts) return null;
+        const makeCurrent = resolveMakeCurrent(facts);
+        const text = getUploadDecisionText(facts, context.pluginData.Version, makeCurrent, !!context.releaseContext.existingRelease);
+        if (!text) return null;
+        const label = createElement(wp.element.Fragment, null,
+            text.warning && createElement('span', { className: 'pblsh--current-release-decision__warning', 'aria-hidden': 'true' }, getSvgIcon('alert', { size: 18 })),
+            text.title,
+        );
+        return createElement('div', { className: 'pblsh--upload-result__decision pblsh--current-release-decision' },
+            createElement('span', { className: 'pblsh--current-ring' + (makeCurrent ? ' pblsh--current-ring--current' : ''), 'aria-hidden': 'true' }),
+            facts.choice
+                ? createElement(ToggleControl, {
+                    __nextHasNoMarginBottom: true,
+                    className: 'pblsh--current-release-decision__toggle',
+                    label,
+                    checked: makeCurrent,
+                    disabled: isProcessing,
+                    onChange: (value) => setCurrentReleaseDecision({ relation: facts.relation, pre_release: facts.pre_release, deviate: value !== facts.default_make_current }),
+                })
+                : createElement('span', { className: 'pblsh--current-release-decision__label' }, label),
+            createElement('p', { className: 'pblsh--current-release-decision__desc' }, text.desc),
+        );
+    }
+
+    // The decision the finalize request carries — always for a target with facts, so the
+    // server can check even a forced default for contradiction.
+    function getCurrentReleaseFinalizeOptions(context) {
+        const facts = getCurrentReleaseFacts(context);
+        return facts ? { make_current: resolveMakeCurrent(facts) } : {};
     }
 
     async function runSlugSelection(upload_id, slug, selectHostingTypeOnSuccess = null) {
@@ -971,7 +1033,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     // render as pinned flush notices between body and footer, not as checklist
     // rows. Blocker codes are excluded: those have their dedicated checklist
     // items. Message leads, the machine code stays visible for support cases.
-    function renderResultErrorNotices(resultErrors, blockers) {
+    function renderResultErrorNotices(resultErrors, blockers, uploadId, meta) {
         const blockerCodes = (Array.isArray(blockers) ? blockers : []).map((blocker) => blocker?.code).filter(Boolean);
         const errors = (Array.isArray(resultErrors) ? resultErrors : [])
             .filter((error) => error && !blockerCodes.includes(error.code));
@@ -987,7 +1049,16 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                 // A phase error without a message still needs a human line.
                 message: error?.message || __('An unknown error occurred.', 'peak-publisher'),
             },
-        }));
+        },
+            // The pointer changed under the dialog: reloading re-resolves the targets, the
+            // checklist rebuilds on fresh facts (a deviation survives only for the same relation).
+            error?.code === 'current_release_changed' && createElement(Button, {
+                isSecondary: true,
+                onClick: () => refreshTargetContext(uploadId, meta),
+                disabled: isProcessing,
+                __next40pxDefaultSize: true,
+            }, __('Reload', 'peak-publisher')),
+        ));
     }
 
     function buildUploadActions(context, checklistItems) {
@@ -998,7 +1069,11 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             : false;
         const targetFinalizable = !isWporg || (!!target?.available && !!validation.finalizable && blockers.length === 0);
         const canFinalize = !!meta.plugin_ok && !!meta.slug && checksPass && targetFinalizable;
-        const finalizeOptions = meta?.hosting_type_choice ? { hosting_type: targetKey } : undefined;
+        // The upload's two decisions: the channel and whether the release becomes current.
+        const finalizeOptions = {
+            ...(meta?.hosting_type_choice ? { hosting_type: targetKey } : {}),
+            ...getCurrentReleaseFinalizeOptions(context),
+        };
 
         return [
             renderDiscardButton(uploadId),
@@ -1084,8 +1159,13 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         return {
             classNames: pendingReleaseImport ? [] : presentation.classNames,
             // The import screen owns its error display (WporgImportFacts).
-            notices: screen === 'import' ? null : renderResultErrorNotices(resultErrors, context.blockers),
-            identity: renderPublishPath(meta, context.uploadId),
+            notices: screen === 'import' ? null : renderResultErrorNotices(resultErrors, context.blockers, uploadId, meta),
+            // The pinned decision rows: publish path, and — past the wporg pre-screens —
+            // the current-release decision.
+            identity: createElement(wp.element.Fragment, null,
+                renderPublishPath(meta, context.uploadId),
+                !screen && renderCurrentReleaseDecision(context),
+            ),
             header: meta.plugin_ok ? {
                 headline: pluginData.Name,
                 desc: pluginData.Version,

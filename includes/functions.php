@@ -233,8 +233,85 @@ function raise_wporg_time_limit(): void {
  * on 1.0.1. Within this format the string is usable verbatim as the release ZIP's version part
  * and as the wordpress.org SVN tag.
  */
+const PBLSH_PUBLISHABLE_VERSION_PATTERN = '/^\d+(?:\.\d+)*(?<pre_release>-(?:rc|beta|alpha)(?:\.?\d+)?)?$/i';
+
 function is_publishable_version(string $version): bool {
-    return preg_match('/^\d+(?:\.\d+)*(?:-(?:rc|beta|alpha)(?:\.?\d+)?)?$/i', $version) === 1;
+    return preg_match(PBLSH_PUBLISHABLE_VERSION_PATTERN, $version) === 1;
+}
+
+
+/**
+ * Whether a publishable version carries the pre-release suffix (-rc, -beta, -alpha): a
+ * release for testers, which never becomes the current release by default.
+ */
+function is_pre_release_version(string $version): bool {
+    return preg_match(PBLSH_PUBLISHABLE_VERSION_PATTERN, $version, $found) === 1 && !empty($found['pre_release']);
+}
+
+
+/**
+ * The upload's default answer to "does this release become the current release?" — one
+ * decision tree for both channels: exactly one relation per upload, evaluated in this
+ * order. Where the channels differ, the reason is always the same: on wordpress.org
+ * trunk serves the new code anyway in first/no_current, so a tag pointer is always the
+ * better state; self-hosted serves nothing without a pointer, and a pre-release must not
+ * become current by default even then.
+ *
+ * @param array   $current      resolve_current_release() of the plugin (or its wporg marker).
+ * @param bool    $has_releases The plugin has releases (wporg: the mirror has).
+ * @param string  $version      The uploaded version V.
+ * @param bool    $is_wporg
+ * @param ?string $deploy_mode  wporg only: trunk_and_tag | tag_only (whether trunk gets code).
+ * @return array{relation:string, pre_release:bool, default_make_current:bool, choice:bool}
+ *         relation: first | unknown | repairs_pointer | no_current | equal | higher | lower;
+ *         choice: whether the user may deviate from the default.
+ */
+function decide_current_release(array $current, bool $has_releases, string $version, bool $is_wporg, ?string $deploy_mode = null): array {
+    $pre_release = is_pre_release_version($version);
+    $decide = static fn(string $relation, bool $default, bool $choice): array => [
+        'relation' => $relation,
+        'pre_release' => $pre_release,
+        'default_make_current' => $default,
+        'choice' => $choice,
+    ];
+    $state = (string) $current['state'];
+
+    if (!$has_releases) {
+        // wporg: forced in every pointer state, trunk carries this very code. self-hosted:
+        // opting out leaves the plugin without a current release (nothing is offered).
+        return $is_wporg ? $decide('first', true, false) : $decide('first', !$pre_release, true);
+    }
+    if ($state === 'unknown') {
+        // finalize re-evaluates with the live value and stops if the relation would differ.
+        return $decide('unknown', !$pre_release, true);
+    }
+    $normalized_version = normalize_version_number($version);
+    if ($state === 'tag_missing' && normalize_version_number((string) $current['pointer']) === $normalized_version) {
+        // The pointer already names this version — the release makes it valid; opting out
+        // would be a no-op.
+        return $decide('repairs_pointer', true, false);
+    }
+    if (in_array($state, [ 'trunk', 'tag_missing', 'none' ], true)) {
+        // wporg: with trunk getting the code a tag pointer is always better, and with no
+        // pointer at all there is nothing to preserve; only tag_only on a trunk/invalid
+        // pointer may leave trunk untouched. self-hosted: opting out keeps the pointer empty
+        // or invalid.
+        if ($is_wporg && ($deploy_mode === 'trunk_and_tag' || $state === 'none')) {
+            return $decide('no_current', true, false);
+        }
+        return $decide('no_current', !$pre_release, true);
+    }
+
+    $comparison = version_compare($normalized_version, normalize_version_number((string) $current['release']->post_title));
+    if ($comparison === 0) {
+        // Replace: the pointer stays, nothing is written.
+        return $decide('equal', true, false);
+    }
+    if ($comparison > 0) {
+        return $decide('higher', !$pre_release, true);
+    }
+    // A hotfix on an older line; opting in is a rollback with fix.
+    return $decide('lower', false, true);
 }
 
 

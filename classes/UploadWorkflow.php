@@ -88,6 +88,18 @@ class UploadWorkflow {
         $data['hosting_type_resolved'] = 'self_hosted';
         $data = $this->apply_target_release_context($data, $target);
 
+        // The current-release decision: the analysis facts say whether the user had a choice,
+        // the request carries the answer. A missing choice or a contradiction to a forced
+        // default is a client bug.
+        $current_release_facts = is_array($target['current_release'] ?? null) ? $target['current_release'] : null;
+        if ($current_release_facts === null) {
+            return $this->upload_error('plugin_or_version_invalid', __('Plugin or version is invalid.', 'peak-publisher'));
+        }
+        $make_current = $this->resolve_make_current_decision($request, $current_release_facts);
+        if ($make_current === null) {
+            return $this->upload_error('invalid_current_release_decision', __('The current-release decision of this upload is missing or invalid.', 'peak-publisher'));
+        }
+
         // Check if the plugin slug is valid
         // (deliberate last gate: the identity is read back from the upload cache before the release is created)
         $plugin_slug = normalize_plugin_slug($target['slug'] ?? null, 'slug');
@@ -116,6 +128,15 @@ class UploadWorkflow {
             if ($release_slug_sanitized !== $release_slug_unique) {
                 return [ 'status' => 'error', 'errors' => [ [ 'code' => 'release_slug_mismatch', 'message' => 'Release slug mismatch.' ] ] ];
             }
+        }
+
+        // The pointer the dialog showed must still be the pointer — another admin's flip is
+        // never overwritten silently. The same contract as the wporg deploy, without a lock:
+        // seconds pass between this read and the write, on this one instance.
+        $plugin_post_id = (int) ($data['existing_plugin'] ?? 0);
+        $pointer_before = $plugin_post_id > 0 ? (string) get_post_meta($plugin_post_id, '_pblsh_current_release', true) : '';
+        if ($pointer_before !== (string) $current_release_facts['pointer']) {
+            return $this->upload_error('current_release_changed', __('The current release of this plugin changed while this upload was open. Reload the upload facts and check the decision again.', 'peak-publisher'));
         }
 
         // Build the final release ZIP — the only place the slug materializes in the
@@ -169,29 +190,34 @@ class UploadWorkflow {
             'generated_with' => $built_zip['generated_with'],
         ];
 
-        // Create pblsh_plugin post
-        $plugin_post_id = $data['existing_plugin'] ?? 0;
-        $plugin_post_data = [
-            'post_type' => 'pblsh_plugin',
-            'post_status' => 'publish',
-            'post_title' => $data['plugin_data']['Name'] ?? '',
-            'post_name' => $plugin_slug,
+        // The decision and its effect, recorded before the release post is written (its
+        // content is this state); the pointer itself is written after the post exists.
+        $data['self_hosted_deploy'] = [
+            'current_release' => [
+                'make_current' => $make_current,
+                'pointer_before' => $pointer_before,
+                'pointer_written' => $make_current ? $version : null,
+            ],
         ];
-        if ($plugin_post_id > 0) {
-            if (empty($data['related_releases']['latest']) || version_compare($data['related_releases']['latest']['version'], $data['plugin_data']['Version'], '<=')) {
-                $plugin_post_data['ID'] = $plugin_post_id;
-                $plugin_post_id = wp_update_post($plugin_post_data);
+
+        // Create the pblsh_plugin post. An existing plugin is left as it is: its status is the
+        // operator's distribution switch, its title follows the reference release below.
+        if ($plugin_post_id <= 0) {
+            $plugin_post_id = wp_insert_post([
+                'post_type' => 'pblsh_plugin',
+                'post_status' => 'publish',
+                'post_title' => $data['plugin_data']['Name'] ?? '',
+                'post_name' => $plugin_slug,
+                // The pointer exists from the start; it is set below when this release becomes current.
+                'meta_input' => [ '_pblsh_current_release' => '' ],
+            ]);
+            if (is_wp_error($plugin_post_id)) {
+                return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => $plugin_post_id->get_error_message() ] ] ];
             }
-        } else {
-            $plugin_post_id = wp_insert_post($plugin_post_data);
+            if (!$plugin_post_id) {
+                return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => 'Failed to create plugin post.' ] ] ];
+            }
         }
-        if (is_wp_error($plugin_post_id)) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => $plugin_post_id->get_error_message() ] ] ];
-        }
-        if (!$plugin_post_id) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => 'Failed to create plugin post.' ] ] ];
-        }
-    
 
         // Create pblsh_release post (child of plugin)
         $release_meta = [
@@ -221,9 +247,12 @@ class UploadWorkflow {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_release_failed', 'message' => 'Failed to create release post.' ] ] ];
         }
 
-        /* if (empty($data['existing_plugin'])) {
-            update_post_meta($plugin_post_id, '_pblsh_latest_release_id', (int) $release_post_id);
-        } */
+        // The pointer (one of its two write sites, the other is the flip), then the title,
+        // which follows the reference release — current, else latest.
+        if ($make_current) {
+            update_post_meta((int) $plugin_post_id, '_pblsh_current_release', $version);
+        }
+        refresh_plugin_title_from_reference((int) $plugin_post_id);
 
         // Optional: cleanup temp folder later
         delete_directory_with_race_protection($this->tmp_root);
@@ -239,13 +268,27 @@ class UploadWorkflow {
                 'file_exists' => isset($zip_to_replace_full_path) ? file_exists($zip_to_replace_full_path) : null,
                 'plugin_post_id' => $plugin_post_id ?? null,
             ],
-            'plugin' => [
-                'post_type' => 'pblsh_plugin',
-                'post_status' => 'publish',
-                'post_title' => $data['plugin_data']['Name'] ?? '',
-                'post_name' => $plugin_slug,
-            ],
         ];
+    }
+
+    /**
+     * The user's current-release decision of a finalize request, validated against the
+     * target's facts: with a choice the request must carry a boolean make_current; without
+     * one the default applies, and a contradicting parameter is a client bug. Null = invalid.
+     */
+    private function resolve_make_current_decision(\WP_REST_Request $request, array $facts): ?bool {
+        $params = $request->get_json_params();
+        $has_param = is_array($params) && array_key_exists('make_current', $params);
+        $param = $has_param ? $params['make_current'] : null;
+
+        if (!empty($facts['choice'])) {
+            return is_bool($param) ? $param : null;
+        }
+        $default = (bool) $facts['default_make_current'];
+        if ($has_param && $param !== $default) {
+            return null;
+        }
+        return $default;
     }
 
     /**
@@ -517,13 +560,13 @@ class UploadWorkflow {
 
         if ($phase === 'refresh_target_context') {
             $data = (array) ($cache['data'] ?? []);
-            $target = $data['hosting_type_targets']['wporg'] ?? null;
-            if (!is_array($target)) {
-                return $this->upload_error('wporg_deploy_state_invalid', __('This upload has no wordpress.org destination.', 'peak-publisher'), $upload_id);
+            if (empty($data['phases']['analyze'])) {
+                return $this->upload_error('upload_analyze_incomplete', __('Upload analysis has not completed.', 'peak-publisher'), $upload_id, $data);
             }
 
-            // The gate advanced the world outside this upload (account saved, wporg state
-            // imported) — re-run the one authoritative target resolution, same as set_slug.
+            // The world outside this upload advanced (account saved, wporg state imported,
+            // the current release changed by another admin) — re-run the one authoritative
+            // target resolution, same as set_slug.
             $cache['data'] = $this->build_hosting_type_analysis_state($data);
             $cache['data']['phases'][$phase] = $this->get_time_log();
             @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
@@ -810,6 +853,29 @@ class UploadWorkflow {
             'blocking_reason' => null,
             'release_slug' => $slug !== '' && $version !== '' ? get_release_slug('self_hosted', $slug, $version) : '',
             'related_releases' => $related_releases,
+            'current_release' => $version !== '' ? $this->build_current_release_facts($plugin_post, $related_releases, $version, false) : null,
+        ];
+    }
+
+    /**
+     * The current-release facts of a target (see decide_current_release()): the plugin's
+     * pointer state, the version it names, and the uploaded version's relation to it with
+     * the default decision. The client keys its wording on them and never computes; finalize
+     * validates the decision against them.
+     *
+     * @param array|false $related_releases find_related_releases() of the plugin, false without one.
+     */
+    private function build_current_release_facts(?\WP_Post $plugin, $related_releases, string $version, bool $is_wporg, ?string $deploy_mode = null): array {
+        $current = $plugin instanceof \WP_Post
+            ? resolve_current_release($plugin)
+            : [ 'state' => 'none', 'pointer' => '', 'release' => null, 'latest' => null, 'reference' => null ];
+        $has_releases = is_array($related_releases) && $related_releases['latest'] !== false;
+
+        return [
+            'state' => $current['state'],
+            'pointer' => $current['pointer'],
+            'version' => $current['release'] instanceof \WP_Post ? (string) $current['release']->post_title : null,
+            ...decide_current_release($current, $has_releases, $version, $is_wporg, $deploy_mode),
         ];
     }
 
@@ -901,6 +967,8 @@ class UploadWorkflow {
                 ? $e->getMessage()
                 : __('Could not refresh wordpress.org SVN cache.', 'peak-publisher');
         }
+        // The refresh rewrote the marker's cache — the pointer is read from the fresh post.
+        $marker = get_post((int) $marker->ID) ?? $marker;
 
         require_once __DIR__ . '/WporgOperations.php';
         $access = WporgOperations::resolve_wporg_account_access($marker->post_name, $preferred_username);
@@ -950,6 +1018,7 @@ class UploadWorkflow {
                 'blocking_errors' => $blockers,
             ],
             'related_releases' => $related_releases,
+            'current_release' => $version !== '' ? $this->build_current_release_facts($marker, $related_releases, $version, true, $deploy_mode) : null,
         ];
     }
 
@@ -986,6 +1055,10 @@ class UploadWorkflow {
             $params = [];
         }
 
+        // The channel decision follows the same rule as the current-release decision
+        // (resolve_make_current_decision()): with a choice the request must carry it, without
+        // one the resolved channel applies and a contradicting parameter is a client bug —
+        // client and server disagree about the facts, which must surface.
         $has_choice = !empty($data['hosting_type_choice']);
         $requested_hosting_type = sanitize_key((string) ($params['hosting_type'] ?? ''));
         if ($has_choice) {
@@ -998,7 +1071,7 @@ class UploadWorkflow {
             $hosting_type = $requested_hosting_type;
         } else {
             $hosting_type = (string) ($data['hosting_type_resolved'] ?? '');
-            if ($hosting_type === '' || !isset($targets[$hosting_type])) {
+            if ($hosting_type === '' || !isset($targets[$hosting_type]) || ($requested_hosting_type !== '' && $requested_hosting_type !== $hosting_type)) {
                 return $this->upload_error('invalid_hosting_type', __('Invalid upload target.', 'peak-publisher'));
             }
         }

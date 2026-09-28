@@ -50,5 +50,60 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
         return null;
     }
 
-    return { getCurrentReleaseIssue };
+    // The wording of the upload's current-release decision for the outcome the toggle
+    // currently shows: keyed on the server's relation and
+    // pre-release flag — the client never compares versions. `warning` marks the outcomes
+    // that deserve a second look (a pre-release or an older version becoming current).
+    // Self-hosted wording; the wordpress.org variant arrives with the wporg deploy step.
+    function getUploadDecisionText(facts, version, makeCurrent, replacesRelease) {
+        const current = facts.version;
+        const pre = !!facts.pre_release;
+        const text = (title, desc, warning = false) => ({ title, desc, warning });
+        const becomes = pre ? __('Becomes the current release (pre-release)', 'peak-publisher') : __('Becomes the current release', 'peak-publisher');
+        const doesNot = pre ? __('Does not become the current release (pre-release)', 'peak-publisher') : __('Does not become the current release', 'peak-publisher');
+        const offeredToEverySite = sprintf(__('Every site will be offered %s as an update.', 'peak-publisher'), version);
+        const sitesWillReceive = sprintf(__('Sites will receive %s with their next update check.', 'peak-publisher'), version);
+
+        switch (facts.relation) {
+            case 'first':
+            case 'no_current': {
+                // No current release yet: the plugin offers no updates until one exists —
+                // 'first' has no releases at all, 'no_current' has releases but no pointer.
+                const isFirst = facts.relation === 'first';
+                if (makeCurrent) {
+                    return pre
+                        ? text(becomes, offeredToEverySite, true)
+                        : text(becomes, isFirst ? sitesWillReceive : __('This plugin has no current release yet and offers no updates — this release ends that.', 'peak-publisher'));
+                }
+                if (pre) {
+                    return text(doesNot, __('Pre-release versions are published without becoming current. Until you make a release current, the plugin offers no updates.', 'peak-publisher'));
+                }
+                return text(doesNot, isFirst
+                    ? sprintf(__('The release %s is published; the plugin offers no updates until you make it current from the release list.', 'peak-publisher'), version)
+                    : sprintf(__('The plugin keeps offering no updates until you make %s current from the release list.', 'peak-publisher'), version));
+            }
+            case 'repairs_pointer':
+                return text(becomes, sprintf(__('The current release already names %s, which does not exist yet — publishing this release makes it valid.', 'peak-publisher'), version));
+            case 'equal':
+                return text(__('Stays the current release', 'peak-publisher'),
+                    sprintf(__('You are replacing the release sites currently receive. Sites that already updated to %s will not download the replaced files.', 'peak-publisher'), version));
+            case 'higher':
+                if (makeCurrent) {
+                    return pre
+                        ? text(becomes, offeredToEverySite, true)
+                        : text(becomes, sitesWillReceive + (replacesRelease ? ' ' + sprintf(__('Sites that already updated to %s will not download the replaced files.', 'peak-publisher'), version) : ''));
+                }
+                return pre
+                    ? text(doesNot, sprintf(__('Pre-release versions are published without becoming current. Sites keep receiving %s.', 'peak-publisher'), current))
+                    : text(doesNot, sprintf(__('The release %1$s is published, sites keep receiving %2$s. You can make it current later from the release list.', 'peak-publisher'), version, current));
+            case 'lower':
+                return makeCurrent
+                    ? text(__('Becomes the current release (rollback)', 'peak-publisher'),
+                        sprintf(__('New installs and sites below %1$s will receive %1$s; sites on %2$s keep it — WordPress never offers an older version.', 'peak-publisher'), version, current), true)
+                    : text(doesNot, sprintf(__('Sites keep receiving %1$s. The release %2$s is published for manual downloads.', 'peak-publisher'), current, version));
+        }
+        return null;
+    }
+
+    return { getCurrentReleaseIssue, getUploadDecisionText };
 })());

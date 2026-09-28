@@ -105,5 +105,38 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
         return null;
     }
 
-    return { getCurrentReleaseIssue, getUploadDecisionText };
+    // The confirm before making a release current, by channel and by where the release sits
+    // relative to the current one: 'higher' | 'lower' | 'none' (no current release). The
+    // caller reads that off the version-sorted release list — rows above the current row
+    // are higher — never from a version comparison of its own.
+    function getFlipConfirmText(isWporg, version, relation) {
+        const question = isWporg
+            ? sprintf(__('Make %s the current release on wordpress.org?', 'peak-publisher'), version)
+            : sprintf(__('Make %s the current release?', 'peak-publisher'), version);
+        const timing = isWporg
+            ? __('wordpress.org picks this up within a few minutes.', 'peak-publisher')
+            : __('Sites see this with their next update check.', 'peak-publisher');
+        switch (relation) {
+            case 'lower':
+                return question + '\n'
+                    + sprintf(__('Sites already on a higher version keep it — WordPress never offers an older version. New installs and sites below %1$s will receive %1$s.', 'peak-publisher'), version)
+                    + '\n' + timing;
+            case 'higher':
+                return question + '\n'
+                    + sprintf(__('Every site will be offered %s as an update.', 'peak-publisher'), version) + ' ' + timing;
+            default:
+                return question + '\n' + (isWporg
+                    ? sprintf(__('wordpress.org currently distributes trunk; afterwards it distributes %s. This is picked up within a few minutes.', 'peak-publisher'), version)
+                    : sprintf(__('The plugin currently offers no updates; afterwards new installs and sites below %1$s will receive %1$s with their next update check.', 'peak-publisher'), version));
+        }
+    }
+
+    // The transient notice after a successful flip.
+    function getFlipSuccessText(isWporg, version, revision) {
+        return isWporg
+            ? sprintf(__('Stable tag set to %1$s in r%2$s — wordpress.org picks it up within a few minutes.', 'peak-publisher'), version, revision)
+            : sprintf(__('%s is now the current release — sites see it with their next update check.', 'peak-publisher'), version);
+    }
+
+    return { getCurrentReleaseIssue, getUploadDecisionText, getFlipConfirmText, getFlipSuccessText };
 })());

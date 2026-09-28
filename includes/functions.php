@@ -439,6 +439,43 @@ function get_current_release(\WP_Post $plugin): ?\WP_Post {
 
 
 /**
+ * Makes another release of a self-hosted plugin the current one — the second of the two
+ * write sites of `_pblsh_current_release` (the other is the upload's finalize). The
+ * caller's expectation is compared first, so a flip by another admin since the editor
+ * showed its pointer is never overwritten silently.
+ *
+ * @return array{from:string, to:string}|\WP_Error current_release_target_missing (404) when
+ *         no release carries the version, invalid_current_release_target (400) when it is
+ *         the current one already, current_release_changed (409) when the pointer differs
+ *         from the expected one.
+ */
+function flip_current_release_pointer(\WP_Post $plugin, string $version, string $expected_pointer) {
+    $current = resolve_current_release($plugin);
+    $target = get_posts([
+        'post_type' => 'pblsh_release',
+        'post_status' => 'any',
+        'post_parent' => (int) $plugin->ID,
+        'title' => $version,
+        'posts_per_page' => 1,
+    ]);
+    if (empty($target)) {
+        return new \WP_Error('current_release_target_missing', __('The release to make current no longer exists.', 'peak-publisher'), [ 'status' => 404 ]);
+    }
+    if ($current['release'] instanceof \WP_Post && (int) $current['release']->ID === (int) $target[0]->ID) {
+        return new \WP_Error('invalid_current_release_target', __('This release is the current release already.', 'peak-publisher'), [ 'status' => 400 ]);
+    }
+    if ((string) $current['pointer'] !== $expected_pointer) {
+        return new \WP_Error('current_release_changed', __('The current release changed in the meantime. Reload the plugin and check again.', 'peak-publisher'), [ 'status' => 409 ]);
+    }
+
+    update_post_meta((int) $plugin->ID, '_pblsh_current_release', $version);
+    refresh_plugin_title_from_reference((int) $plugin->ID);
+
+    return [ 'from' => (string) $current['pointer'], 'to' => $version ];
+}
+
+
+/**
  * Sets the plugin's title from its reference release (current, else latest): the plugin
  * name follows what sites receive. Both channels; called after every change of the
  * pointer or of the release set.

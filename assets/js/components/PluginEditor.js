@@ -3,9 +3,9 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { __, sprintf } = wp.i18n;
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
-    const { Tooltip, Button, DropdownMenu, MenuItem } = wp.components;
+    const { Tooltip, Button, DropdownMenu, MenuItem, Spinner } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
-    const { getCurrentReleaseIssue } = Pblsh.CurrentReleaseUtils;
+    const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
     const { NoticeBox, CurrentVersion } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
@@ -27,6 +27,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const fileInputRefs = useRef({});  // { [slotKey]: HTMLInputElement }
     const [downloadingReleaseId, setDownloadingReleaseId] = useState(null);
     const downloadingReleaseIdRef = useRef(null);
+    // The flip in progress (its ring shows the spinner, every ring is locked) and the
+    // transient success notice, which the next plugin change clears.
+    const [flippingReleaseId, setFlippingReleaseId] = useState(null);
+    const [flipNotice, setFlipNotice] = useState(null);
+    useEffect(() => { setFlipNotice(null); }, [pluginData && pluginData.id]);
     const validTabs = isWporg ? ['releases'] : ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
     const [draggingN, setDraggingN] = useState(null);     // screenshot_n being dragged
@@ -509,19 +514,45 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         ];
     };
 
+    // Makes another release current: confirm, request with the pointer the editor showed,
+    // reload, transient notice. A stale pointer (someone else flipped) is reported and the
+    // plugin reloaded — never overwritten.
+    const makeCurrent = async (rel, relation) => {
+        if (!pluginData || flippingReleaseId !== null) return;
+        if (!confirm(getFlipConfirmText(isWporg, rel.version, relation))) return;
+        setFlipNotice(null);
+        setFlippingReleaseId(rel.id);
+        try {
+            const response = await Pblsh.API.setCurrentRelease(pluginData.id, rel.version, pluginData.pointer);
+            if (typeof refreshPlugin === 'function') await refreshPlugin();
+            setFlipNotice(getFlipSuccessText(isWporg, response.to, response.revision));
+        } catch (e) {
+            // apiFetch rejects with the REST error payload: message leads, the code follows.
+            alert((e?.message || __('Could not change the current release.', 'peak-publisher'))
+                + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));
+            if (e?.code === 'current_release_changed' && typeof refreshPlugin === 'function') refreshPlugin();
+        } finally {
+            setFlippingReleaseId(null);
+        }
+    };
+
     // Notices above the releases table, in this order: transient success → closed
     // (installations concept) → the pointer state (no current release).
     const renderReleaseNotices = () => {
         const issue = getCurrentReleaseIssue(pluginData);
-        if (!issue) return null;
-        // The fact, then the remedy emphasized on its own line — one paragraph, as the box
-        // holds a single thought.
-        return createElement(NoticeBox, { key: 'current-release', variant: issue.variant, className: 'pblsh--releases-notice' },
-            createElement('p', null,
-                issue.fact,
-                ...(issue.remedy ? [ createElement('br'), createElement('strong', null, issue.remedy) ] : []),
+        return [
+            flipNotice && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--releases-notice' },
+                createElement('p', null, flipNotice),
             ),
-        );
+            // The fact, then the remedy emphasized on its own line — one paragraph, as the box
+            // holds a single thought.
+            issue && createElement(NoticeBox, { key: 'current-release', variant: issue.variant, className: 'pblsh--releases-notice' },
+                createElement('p', null,
+                    issue.fact,
+                    ...(issue.remedy ? [ createElement('br'), createElement('strong', null, issue.remedy) ] : []),
+                ),
+            ),
+        ];
     };
 
     const renderReleasesTable = () => {
@@ -530,8 +561,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             ? wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null)
             : false;
         const pluginIsDraft = pluginData?.status !== 'publish';
+        // The list is sorted by version, descending: rows above the current one are higher
+        // versions, rows below lower — the confirm's wording needs no version comparison.
+        const currentIndex = releases.findIndex((rel) => rel.is_current);
+        const relationToCurrent = (index) => currentIndex === -1 ? 'none' : (index < currentIndex ? 'higher' : 'lower');
         return [
-            renderReleaseNotices(),
+            ...renderReleaseNotices(),
             createElement('div', { key: 'table', className: 'pblsh--table-container' },
                 (isLoadingReleases || !hasLoaded) ?
                     createElement('div', { className: 'pblsh--loading pblsh--loading--table' },
@@ -552,7 +587,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             ? createElement('tr', null,
                                 createElement('td', { colSpan: showInstallations ? 5 : 4 }, __('No releases.', 'peak-publisher')),
                             )
-                            : releases.map((rel) =>
+                            : releases.map((rel, index) =>
                                 createElement('tr', { key: String(rel.id) },
                                     // Which release sites receive: a radio-like ring per row, filled on the
                                     // current one. "Current" is derived from the plugin's pointer, never a
@@ -571,7 +606,22 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                     'aria-label': __('Current release', 'peak-publisher'),
                                                 })
                                             )
-                                            : createElement('span', { className: 'pblsh--current-ring', 'aria-hidden': 'true' }),
+                                            : flippingReleaseId === rel.id
+                                                ? createElement(Spinner, { className: 'pblsh--current-ring-spinner' })
+                                                // The ring of every other row is the action "Make … the current release".
+                                                // wordpress.org rows wait for the wporg write paths — transitional.
+                                                : createElement(Button, {
+                                                    className: 'pblsh--current-ring-button',
+                                                    label: isWporg
+                                                        ? __('Not available for wordpress.org plugins yet', 'peak-publisher')
+                                                        : sprintf(__('Make %s the current release', 'peak-publisher'), rel.version),
+                                                    showTooltip: true,
+                                                    __experimentalIsFocusable: true,
+                                                    disabled: isWporg || flippingReleaseId !== null,
+                                                    onClick: () => makeCurrent(rel, relationToCurrent(index)),
+                                                },
+                                                    createElement('span', { className: 'pblsh--current-ring', 'aria-hidden': 'true' })
+                                                ),
                                     ),
                                     createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.version)),
                                     createElement('td', null, safe(rel.date)),
@@ -624,9 +674,18 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                 icon: Pblsh.Utils.getSvgIcon('dots_horizontal', { size: 24 }),
                                                 label: __('More options', 'peak-publisher'),
                                                 children: ({ onClose }) => [
+                                                    // The current release cannot be deleted — sites would silently get
+                                                    // nothing (self-hosted) or trunk (wordpress.org). The server guards it
+                                                    // too; here the item says why it is off.
                                                     createElement(wp.components.MenuItem, {
                                                         key: 'delete',
                                                         isDestructive: true,
+                                                        disabled: rel.is_current,
+                                                        info: rel.is_current
+                                                            ? (isWporg
+                                                                ? __('Make another release current first — the last release can only be removed via SVN.', 'peak-publisher')
+                                                                : __('Make another release current first — the last release can only be removed together with the plugin.', 'peak-publisher'))
+                                                            : undefined,
                                                         onClick: async () => {
                                                             try {
                                                                 const message = isWporg

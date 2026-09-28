@@ -2430,6 +2430,40 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     opacity: 0.5;
 }
 
+/* The ring of every other row is the action "Make … the current release": a bare
+   button around the ring; hovering previews the dot in the selection color */
+.pblsh--table__current-cell .pblsh--current-ring-button.components-button {
+    padding: 0;
+    min-width: 0;
+    height: auto;
+    border-radius: 50%;
+    line-height: 0;
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-button:hover .pblsh--current-ring {
+    border-color: var(--color-blue);
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-button:hover .pblsh--current-ring::after {
+    opacity: 0.35;
+}
+
+/* Locked: during a flip, and on wordpress.org rows until the wporg write paths exist */
+.pblsh--table__current-cell .pblsh--current-ring-button:disabled .pblsh--current-ring,
+.pblsh--table__current-cell .pblsh--current-ring-button[aria-disabled="true"] .pblsh--current-ring {
+    border-color: var(--border-color-light);
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-button[aria-disabled="true"]:hover .pblsh--current-ring::after {
+    opacity: 0;
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-spinner.components-spinner {
+    margin: 0;
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
 /* Installations Column */
 .pblsh--table__installations-header {
     width: 6.25rem; /* 100px */

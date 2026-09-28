@@ -49,6 +49,14 @@ lodash.set(window, 'Pblsh.API', {
             method: 'DELETE',
         });
     },
+    // Make a release the plugin's current release; expected_pointer is the pointer the
+    // editor showed, so a flip by someone else in the meantime is refused, not overwritten
+    setCurrentRelease: async (pluginId, version, expectedPointer) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/current-release', {
+            method: 'POST',
+            body: { version, expected_pointer: expectedPointer },
+        });
+    },
     // Dismiss the one-time notice about the schema upgrade (includes/upgrade.php)
     dismissUpgradeNotice: async () => {
         return await window.Pblsh.API.request('admin/upgrade-notice', {

@@ -61,6 +61,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/current-release', [
+            'methods' => 'POST',
+            'callback' => [$this, 'set_current_release'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/wporg-download-url', [
             'methods' => 'GET',
             'callback' => [$this, 'get_wporg_download_url'],
@@ -359,6 +365,18 @@ class AdminAPI {
             return $this->delete_wporg_release_tag($release, $parent);
         }
 
+        // The last gate before the irreversible delete: the current release cannot go — the
+        // plugin would silently stop delivering. Make another release current first; the
+        // last release leaves only together with the plugin.
+        $current_release = is_plugin_post($parent) ? get_current_release($parent) : null;
+        if ($current_release instanceof \WP_Post && (int) $current_release->ID === (int) $release->ID) {
+            return $this->rest_error_response($this->make_rest_error(
+                'current_release_protected',
+                __('This is the current release — make another release current before deleting it.', 'peak-publisher'),
+                409
+            ));
+        }
+
         $zip_rel = (string) get_post_meta($release->ID, '_pblsh_zip_path', true);
         if ($zip_rel !== '') {
             $zip_abs = trailingslashit(peak_publisher_upload_basedir()) . ltrim($zip_rel, '/\\');
@@ -497,6 +515,46 @@ class AdminAPI {
         // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Binary file output
         echo $data;
         exit;
+    }
+
+    /**
+     * Makes a release the plugin's current release — the one sites receive. Self-hosted
+     * writes the pointer meta; the wordpress.org branch (a Stable tag commit) arrives with
+     * the wporg write paths — until then the request is refused and the client offers no
+     * action for wordpress.org rows.
+     */
+    public function set_current_release(\WP_REST_Request $request) {
+        $plugin = get_post((int) $request->get_param('id'));
+        if (!is_plugin_post($plugin)) {
+            return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
+        }
+        $params = $request->get_json_params();
+        $version = trim((string) ($params['version'] ?? ''));
+        if ($version === '') {
+            return $this->rest_error_response($this->make_rest_error('invalid_version', __('Missing plugin version.', 'peak-publisher'), 400, 'version'));
+        }
+        $expected_pointer = (string) ($params['expected_pointer'] ?? '');
+
+        if (is_wporg_plugin($plugin)) {
+            // Transitional until the wporg write paths exist.
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_current_release_unavailable',
+                __('Changing the current release of a wordpress.org plugin is not available yet.', 'peak-publisher'),
+                501
+            ));
+        }
+
+        $result = flip_current_release_pointer($plugin, $version, $expected_pointer);
+        if (is_wp_error($result)) {
+            return $this->rest_error_response($result);
+        }
+
+        return [
+            'status' => 'ok',
+            'from' => $result['from'],
+            'to' => $result['to'],
+            'revision' => null,
+        ];
     }
 
     public function get_wporg_download_url(\WP_REST_Request $request) {

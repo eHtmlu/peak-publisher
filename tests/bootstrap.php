@@ -17,7 +17,11 @@ define('PBLSH_PLUGIN_URL', 'https://example.test/wp-content/plugins/peak-publish
 
 require_once __DIR__ . '/stubs/wordpress.php';
 
+require_once PBLSH_PLUGIN_DIR . 'includes/settings.php';
+require_once PBLSH_PLUGIN_DIR . 'includes/encryption.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/hosting.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_cache.php';
+require_once PBLSH_PLUGIN_DIR . 'includes/wporg_api.php';
+require_once PBLSH_PLUGIN_DIR . 'includes/wporg_stats.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/functions.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/upgrade.php';

@@ -164,6 +164,19 @@ function get_plugin_installations_count(int $plugin_post_id): int {
 }
 
 /**
+ * The REST view of a self-hosted plugin's installations: the exact count of unique
+ * sites of the last 24 hours, or 'disabled' when the setting switches the counting off
+ * — the client reads the state, never the setting. The wordpress.org counterpart is
+ * serialize_wporg_installations() (includes/wporg_stats.php).
+ */
+function serialize_self_hosted_installations(int $plugin_post_id): array {
+    if (empty(get_peak_publisher_settings()['count_plugin_installations'])) {
+        return [ 'state' => 'disabled', 'count' => null ];
+    }
+    return [ 'state' => 'ok', 'count' => get_plugin_installations_count($plugin_post_id) ];
+}
+
+/**
  * Returns number of installations currently on a specific normalized version.
  */
 function get_plugin_installations_count_by_version(int $plugin_post_id, string $normalized_version): int {

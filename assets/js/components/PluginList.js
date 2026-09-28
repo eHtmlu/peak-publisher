@@ -91,7 +91,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                     createElement(CurrentVersion, { plugin })
                                 ),
                                 showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' },
-                                    String(plugin.installations_count || 0)
+                                    String(plugin.installations.count ?? 0)
                                 ),
                                 createElement('td', { className: 'pblsh--table__actions-cell' },
                                     createElement('div', { className: 'pblsh--table__actions' },

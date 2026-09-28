@@ -505,7 +505,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             ),
                             showInstallations && createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String(pluginData?.installations_count || 0))
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String(pluginData?.installations?.count ?? 0))
                             ),
                         )
                     )

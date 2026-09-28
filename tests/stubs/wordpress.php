@@ -20,6 +20,10 @@ namespace Pblsh\Tests {
         public static array $options = [];
         /** @var array<int, array{hook:string, callback:callable, priority:int}> */
         public static array $actions = [];
+        /** @var array<int, array{code:int, body:string}|\WP_Error> Scripted answers of wp_remote_get(), consumed in order. */
+        public static array $http_responses = [];
+        /** @var array<int, array{url:string, args:array}> Every wp_remote_get() call, in order. */
+        public static array $http_requests = [];
         public static int $next_post_id = 1;
 
         public static function reset(): void {
@@ -27,6 +31,8 @@ namespace Pblsh\Tests {
             self::$meta = [];
             self::$options = [];
             self::$actions = [];
+            self::$http_responses = [];
+            self::$http_requests = [];
             self::$next_post_id = 1;
         }
     }
@@ -37,6 +43,8 @@ namespace {
     use Pblsh\Tests\FakeWordPress;
 
     const MINUTE_IN_SECONDS = 60;
+    const HOUR_IN_SECONDS = 3600;
+    const DAY_IN_SECONDS = 86400;
 
     class WP_Post {
         public int $ID = 0;
@@ -207,5 +215,52 @@ namespace {
 
     function wp_json_encode($data, int $flags = 0, int $depth = 512) {
         return json_encode($data, $flags, $depth);
+    }
+
+    /**
+     * The HTTP boundary: answers come from the scripted queue (a WP_Error is returned
+     * as is, like a transport failure); every call is recorded for assertions.
+     */
+    function wp_remote_get(string $url, array $args = []) {
+        FakeWordPress::$http_requests[] = [ 'url' => $url, 'args' => $args ];
+        $response = array_shift(FakeWordPress::$http_responses);
+        if ($response === null) {
+            throw new \LogicException('wp_remote_get() called without a scripted response for ' . $url);
+        }
+        return $response;
+    }
+
+    function wp_remote_retrieve_response_code($response) {
+        return is_array($response) ? $response['code'] : '';
+    }
+
+    function wp_remote_retrieve_body($response): string {
+        return is_array($response) ? $response['body'] : '';
+    }
+
+    function add_query_arg(array $args, string $url): string {
+        return $url . '?' . http_build_query($args);
+    }
+
+    function wp_strip_all_tags(string $text): string {
+        return trim(strip_tags($text));
+    }
+
+    function wp_basename(string $path): string {
+        return basename($path);
+    }
+
+    function esc_url_raw(string $url): string {
+        return $url;
+    }
+
+    /** The plugin header fields the modules read (the version for the User-Agent). */
+    function get_file_data(string $file, array $headers): array {
+        $head = (string) file_get_contents($file, false, null, 0, 8192);
+        $out = [];
+        foreach ($headers as $key => $header) {
+            $out[$key] = preg_match('/^[ \t\/*#@]*' . preg_quote($header, '/') . ':(.*)$/mi', $head, $m) ? trim($m[1]) : '';
+        }
+        return $out;
     }
 }

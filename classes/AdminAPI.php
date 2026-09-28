@@ -162,6 +162,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/admin/wporg/refresh-stats', [
+            'methods' => 'POST',
+            'callback' => [$this, 'refresh_wporg_stats_rest'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         // Plugin assets
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets', [
             'methods' => 'GET',
@@ -239,6 +245,9 @@ class AdminAPI {
     /**
      * Serialize a plugin post for admin REST responses. `version` is the current release —
      * the one sites receive — `latest_version` the highest; both null when absent.
+     * `installations` is the channel's figure with its state (self-hosted the exact
+     * 24-hour count or 'disabled', wordpress.org the cached public figure), `wporg_stats`
+     * the wordpress.org dashboard figures (null self-hosted).
      *
      * @param \WP_Post[] $releases The plugin's release posts.
      */
@@ -246,6 +255,7 @@ class AdminAPI {
         $hosting_type = get_plugin_hosting_type($post);
         $is_self_hosted = $hosting_type === 'self_hosted';
         $current = resolve_current_release($post, $releases);
+        $wporg_figures = $is_self_hosted ? null : serialize_wporg_installations((int) $post->ID);
 
         $out = [
             'id' => $post->ID,
@@ -262,7 +272,10 @@ class AdminAPI {
             'pointer' => $current['pointer'],
             'status' => $post->post_status,
             'count_of_releases' => count($releases),
-            'installations_count' => $is_self_hosted ? get_plugin_installations_count((int) $post->ID) : 0,
+            'installations' => $is_self_hosted
+                ? serialize_self_hosted_installations((int) $post->ID)
+                : $wporg_figures['installations'],
+            'wporg_stats' => $is_self_hosted ? null : $wporg_figures['wporg_stats'],
         ];
 
         if ($detail) {
@@ -325,7 +338,8 @@ class AdminAPI {
                 'is_current' => $current_release instanceof \WP_Post && (int) $current_release->ID === (int) $release->ID,
                 'date' => $release->post_date,
                 'download_url' => $is_wporg ? '' : rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
-                'installations_count' => (!$is_wporg && $normalized !== '') ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0,
+                // wordpress.org has no per-release figures — the column is not rendered there.
+                'installations_count' => $is_wporg ? null : ($normalized !== '' ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0),
             ];
         }
 
@@ -554,6 +568,31 @@ class AdminAPI {
             'from' => $result['from'],
             'to' => $result['to'],
             'revision' => null,
+        ];
+    }
+
+    /**
+     * Fetches the due wordpress.org figures — every marker, or one — and answers with
+     * the new state of every marker touched. The client calls it after loading the
+     * list (stale-while-revalidate) and from the editor's Refresh link (force); the
+     * server alone decides what is due (refresh_wporg_stats()).
+     */
+    public function refresh_wporg_stats_rest(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        $params = is_array($params) ? $params : [];
+        $plugin_id = isset($params['plugin_id']) ? (int) $params['plugin_id'] : null;
+        if ($plugin_id !== null && !is_wporg_plugin(get_post($plugin_id))) {
+            return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
+        }
+
+        $stats = [];
+        foreach (refresh_wporg_stats($plugin_id, !empty($params['force'])) as $id) {
+            $stats[$id] = serialize_wporg_installations($id);
+        }
+        return [
+            'status' => 'ok',
+            // An object even when empty, so the client can always iterate its keys.
+            'stats' => (object) $stats,
         ];
     }
 

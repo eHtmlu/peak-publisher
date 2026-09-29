@@ -124,40 +124,106 @@ class WporgOperations {
 
     /**
      * Publishes a prepared plugin directory as tags/{version} and, with $touch_trunk, as trunk
-     * — one commit through commit_files(). Both trees are reconciled against fresh remote
-     * listings under the lock: remote-only paths are deleted, changed and missing files put.
+     * — one commit through commit_files() — and executes the upload's current-release
+     * decision: the live trunk readme is read under the lock and compared with what the dialog
+     * showed (settle_pointer_decision()); trunk gets the workspace readme with the decided
+     * Stable tag when it gets code (R2), only its Stable tag line when the pointer changes on a
+     * tag-only deploy (R3), nothing otherwise. The tag gets the workspace as it is (R1 made its
+     * readme name its own version).
      *
-     * @return array{revision:int|null, committed:bool, details:array, touched_trunk:bool}
+     * @param array{make_current:bool, relation:string, expected:?string, readme_file_name:string} $pointer
+     *        The decision, the relation and the pointer the dialog showed (null = unknown), and
+     *        the workspace readme's file name (finalize guarantees one).
+     * @return array{revision:int|null, committed:bool, details:array, touched_trunk:bool,
+     *         stable_tag_before:?string, stable_tag_written:?string, pointer_changed:bool, trunk_readme:?array}
+     *         stable_tag_before = the live pointer (null = unreadable), stable_tag_written = the
+     *         value written to trunk (null = trunk readme untouched), trunk_readme = the cache
+     *         entry of the written trunk readme (null = none written).
      */
-    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk): array {
+    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk, array $pointer): array {
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
         $version = self::safe_path_segment($version);
         $root = trailingslashit($root);
         if (!is_dir($root) || !is_readable($root)) {
             throw self::exception('deploy_directory_missing');
         }
+        $readme_file_name = (string) ($pointer['readme_file_name'] ?? '');
+        if ($readme_file_name === '' || !is_file($root . $readme_file_name)) {
+            // finalize blocks uploads without a readme (wporg_readme_required) — an invariant here.
+            throw new \RuntimeException('wporg_readme_required');
+        }
 
-        $result = self::commit_files($marker, $username, 'deploy', static function(WporgPluginSvnClient $client) use ($wporg_slug, $root, $version, $touch_trunk): array {
+        $outcome = [ 'stable_tag_before' => null, 'stable_tag_written' => null, 'pointer_changed' => false, 'trunk_readme' => null ];
+        $result = self::commit_files($marker, $username, 'deploy', function(WporgPluginSvnClient $client) use ($wporg_slug, $root, $version, $touch_trunk, $pointer, $readme_file_name, &$outcome): array {
             $local_tree = self::collect_local_tree($root);
             if (!self::tree_has_php_file($local_tree)) {
                 throw self::exception('wporg_tag_requires_php');
             }
 
-            $plans = [];
-            if ($touch_trunk) {
-                $plans[] = self::build_reconcile_plan($client, $wporg_slug, 'trunk', $local_tree, self::read_remote_tree($client, $wporg_slug, 'trunk'));
+            // The live pointer, under the lock — from the trunk tree the trunk plan needs anyway.
+            $remote_trunk = $touch_trunk ? self::read_remote_tree($client, $wporg_slug, 'trunk') : null;
+            try {
+                $live = self::read_trunk_readme($client, $wporg_slug, $remote_trunk);
+            } catch (WporgSvnException $e) {
+                $live = null;
             }
+            $decision = self::settle_pointer_decision($client, $wporg_slug, $pointer, $live, $version, $touch_trunk);
+            $outcome['stable_tag_before'] = $live['stable_tag'] ?? null;
+            $outcome['pointer_changed'] = $decision['pointer_changed'];
+
             $tag_base = 'tags/' . $version;
-            $plans[] = self::build_reconcile_plan($client, $wporg_slug, $tag_base, $local_tree, self::read_remote_tree($client, $wporg_slug, $tag_base));
+            $plans = [ self::build_reconcile_plan($client, $wporg_slug, $tag_base, $local_tree, self::read_remote_tree($client, $wporg_slug, $tag_base)) ];
+
+            // The readme variant is a temp file: until the plan is returned only this closure
+            // knows it, so a failure after its creation cleans it up here.
+            $cleanup = [];
+            try {
+                if ($touch_trunk) {
+                    // trunk gets the workspace, its readme as the variant with the decided pointer.
+                    $variant = self::readme_variant((string) file_get_contents($root . $readme_file_name), $decision['pointer_value']);
+                    $cleanup[] = $variant['path'];
+                    $trunk_tree = $local_tree;
+                    $trunk_tree[$readme_file_name] = [ 'type' => 'file', 'path' => $variant['path'], 'size' => $variant['size'], 'hash' => $variant['hash'] ];
+                    $plans[] = self::build_reconcile_plan($client, $wporg_slug, 'trunk', $trunk_tree, $remote_trunk);
+                    $outcome['stable_tag_written'] = $decision['pointer_value'];
+                    $outcome['trunk_readme'] = self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $readme_file_name ]);
+                } elseif ($decision['pointer_changed']) {
+                    // Tag only, pointer changes: just the Stable tag line — in trunk's own readme
+                    // (readable, settle_pointer_decision() made sure), or the workspace readme when
+                    // trunk has none yet.
+                    $trunk_has_readme = is_array($live) && $live['file_name'] !== null;
+                    $variant = self::readme_variant($trunk_has_readme ? $live['content'] : (string) file_get_contents($root . $readme_file_name), $decision['pointer_value']);
+                    $cleanup[] = $variant['path'];
+                    $file_name = $trunk_has_readme ? $live['file_name'] : $readme_file_name;
+                    // trunk may not exist at all when it has no readme; an existing trunk is no change.
+                    $plans[] = [ 'deletes' => [], 'mkdirs' => $trunk_has_readme ? [] : [ 'trunk' ], 'puts' => [ [ 'path' => 'trunk/' . $file_name, 'local_path' => $variant['path'] ] ] ];
+                    $outcome['stable_tag_written'] = $decision['pointer_value'];
+                    $outcome['trunk_readme'] = self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $file_name ]);
+                }
+            } catch (\Throwable $e) {
+                foreach ($cleanup as $path) {
+                    if (file_exists($path)) {
+                        wp_delete_file($path);
+                    }
+                }
+                throw $e;
+            }
 
             return [
                 ...self::merge_reconcile_plans($plans),
                 'message' => sprintf('Publish %s %s via Peak Publisher', $wporg_slug, $version),
-                'details' => [ 'version' => $version, 'deploy_mode' => $touch_trunk ? 'trunk_and_tag' : 'tag_only' ],
+                'details' => [
+                    'version' => $version,
+                    'deploy_mode' => $touch_trunk ? 'trunk_and_tag' : 'tag_only',
+                    'make_current' => $decision['make_current'],
+                    'stable_tag_before' => $outcome['stable_tag_before'],
+                    'stable_tag_written' => $outcome['stable_tag_written'],
+                ],
+                'cleanup' => $cleanup,
             ];
         });
 
-        return [ ...$result, 'touched_trunk' => $touch_trunk ];
+        return [ ...$result, 'touched_trunk' => $touch_trunk, ...$outcome ];
     }
 
     public static function list_tags(string $wporg_slug): array {
@@ -242,9 +308,8 @@ class WporgOperations {
     }
 
     /**
-     * Reads trunk/readme.txt — the file that carries the plugin's pointer (the Stable tag
-     * wordpress.org distributes) and the screenshot captions. Returns the marker cache's
-     * `trunk_readme` structure (wporg_cache.php).
+     * Reads trunk's readme for the marker cache: the pointer (Stable tag) and the screenshot
+     * captions — the `trunk_readme` structure of wporg_cache.php.
      *
      * @return array{stable_tag:string, file_name:string|null, screenshots:array<int,string>}
      *         file_name null = trunk has no readme (stable_tag '' then); stable_tag '' = no
@@ -253,31 +318,54 @@ class WporgOperations {
      */
     public static function fetch_trunk_readme(string $wporg_slug): array {
         $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
-        $client = self::svn_client();
-        $base_path = $wporg_slug . '/trunk';
-        $none = [ 'stable_tag' => '', 'file_name' => null, 'screenshots' => [] ];
+        return self::trunk_readme_cache_entry(self::read_trunk_readme(self::svn_client(), $wporg_slug));
+    }
 
-        try {
-            $entries = $client->list_directory($base_path . '/', 1);
-        } catch (WporgSvnException $e) {
-            if ($e->get_error_code() === 'not_found') {
-                // No trunk at all — nothing carries a pointer.
-                return $none;
+    /**
+     * Reads trunk's readme with its content — for the cache entry and for rewriting its Stable
+     * tag line. $trunk_tree is a read_remote_tree() of trunk when the caller has one (the
+     * trunk_and_tag deploy), else trunk is listed.
+     *
+     * @return array{stable_tag:string, file_name:string|null, screenshots:array, content:string}
+     *         content is the file as parsed: UTF-8, BOM stripped.
+     * @throws WporgSvnException When trunk cannot be listed or the file not read.
+     */
+    private static function read_trunk_readme(WporgPluginSvnClient $client, string $wporg_slug, ?array $trunk_tree = null): array {
+        $none = [ 'stable_tag' => '', 'file_name' => null, 'screenshots' => [], 'content' => '' ];
+        if ($trunk_tree === null) {
+            $base_path = $wporg_slug . '/trunk';
+            try {
+                $entries = $client->list_directory($base_path . '/', 1);
+            } catch (WporgSvnException $e) {
+                if ($e->get_error_code() === 'not_found') {
+                    return $none; // no trunk at all — nothing carries a pointer
+                }
+                throw $e;
             }
-            throw $e;
+            $readme = self::find_readme_entry(self::direct_children($entries, $base_path));
+            $file_name = $readme !== null ? (string) ($readme['name'] ?? 'readme.txt') : null;
+        } else {
+            // Keys are relative paths; PHP turns a numeric file name into an int key, hence the casts.
+            $top_level_files = array_map('strval', array_keys(array_filter($trunk_tree, static fn(array $entry, $rel): bool => ($entry['type'] ?? '') === 'file' && !str_contains((string) $rel, '/'), ARRAY_FILTER_USE_BOTH)));
+            $file_name = find_wporg_readme_file_name($top_level_files);
         }
-
-        $readme = self::find_readme_entry(self::direct_children($entries, $base_path));
-        if ($readme === null) {
+        if ($file_name === null) {
             return $none;
         }
 
-        $parsed = parse_readme_txt(self::normalize_readme_content($client->read_file((string) $readme['path'])));
+        $content = self::normalize_readme_content($client->read_file($wporg_slug . '/trunk/' . $file_name));
+        $parsed = parse_readme_txt($content);
         return [
             'stable_tag' => (string) ($parsed['stable_tag'] ?? ''),
-            'file_name' => (string) ($readme['name'] ?? 'readme.txt'),
+            'file_name' => $file_name,
             'screenshots' => is_array($parsed['screenshots'] ?? null) ? $parsed['screenshots'] : [],
+            'content' => $content,
         ];
+    }
+
+    /** The marker cache's `trunk_readme` entry of a read or written readme (without the content). */
+    private static function trunk_readme_cache_entry(array $readme): array {
+        return [ 'stable_tag' => $readme['stable_tag'], 'file_name' => $readme['file_name'], 'screenshots' => $readme['screenshots'] ];
     }
 
     public static function fetch_tags_data_batch(string $wporg_slug, array $versions): array {
@@ -354,6 +442,76 @@ class WporgOperations {
                 'details' => [ 'version' => $version ],
             ];
         });
+    }
+
+    /**
+     * Writes a readme with its Stable tag set to $value into a temp file for a PUT and parses
+     * what was written. The caller lists the path in the Plan's cleanup.
+     *
+     * @return array{path:string, size:int, hash:string, stable_tag:string, screenshots:array}
+     */
+    private static function readme_variant(string $content, string $value): array {
+        $variant = set_readme_stable_tag($content, $value);
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        $path = wp_tempnam('readme.txt');
+        if (!is_string($path) || $path === '' || @file_put_contents($path, $variant) === false) {
+            throw self::exception('wporg_readme_variant_failed');
+        }
+        $parsed = parse_readme_txt($variant);
+        return [
+            'path' => $path,
+            'size' => strlen($variant),
+            'hash' => md5($variant),
+            'stable_tag' => (string) ($parsed['stable_tag'] ?? ''),
+            'screenshots' => is_array($parsed['screenshots'] ?? null) ? $parsed['screenshots'] : [],
+        ];
+    }
+
+    /**
+     * Settles the upload's pointer decision against the live trunk readme, under the lock:
+     * the relation the dialog showed must still hold when the commit lands. Throws
+     * current_release_changed when the pointer moved since the dialog — or, after a dialog
+     * that could not read it (relation unknown), when the live relation would be one the user
+     * never saw: equal or repairs_pointer (V names the pointer) or lower (V below a current
+     * release); higher, no_current and first carry the user's decision. Throws
+     * wporg_trunk_readme_unreadable when the plan needs the live readme and it could not be
+     * read: preserving an unknown pointer while trunk gets code, or replacing the line in a
+     * file that cannot be read. Writing the workspace variant with the new pointer needs
+     * nothing old.
+     *
+     * @param array{make_current:bool, relation:string, expected:?string} $pointer
+     * @param array|null $live read_trunk_readme(), null when it could not be read
+     * @return array{make_current:bool, pointer_value:string, pointer_changed:bool}
+     */
+    private static function settle_pointer_decision(WporgPluginSvnClient $client, string $wporg_slug, array $pointer, ?array $live, string $version, bool $touch_trunk): array {
+        $make_current = !empty($pointer['make_current']);
+
+        if ($live === null) {
+            if ($touch_trunk ? !$make_current : $make_current) {
+                throw self::exception('wporg_trunk_readme_unreadable');
+            }
+            return [ 'make_current' => $make_current, 'pointer_value' => $version, 'pointer_changed' => $make_current ];
+        }
+
+        $live_pointer = $live['stable_tag'];
+        $expected = $pointer['expected'] ?? null;
+        if ($expected !== null && $live_pointer !== $expected) {
+            throw self::exception('current_release_changed');
+        }
+        if ((string) ($pointer['relation'] ?? '') === 'unknown' && $live_pointer !== '' && $live_pointer !== 'trunk') {
+            $normalized_version = normalize_version_number($version);
+            $normalized_pointer = normalize_version_number($live_pointer);
+            $names_this_version = $normalized_pointer === $normalized_version;
+            $below_current = !$names_this_version
+                && version_compare($normalized_version, $normalized_pointer, '<')
+                && self::tag_exists($client, $wporg_slug, $live_pointer);
+            if ($names_this_version || $below_current) {
+                throw self::exception('current_release_changed');
+            }
+        }
+
+        $pointer_value = $make_current ? $version : $live_pointer;
+        return [ 'make_current' => $make_current, 'pointer_value' => $pointer_value, 'pointer_changed' => $pointer_value !== $live_pointer ];
     }
 
     /** Whether tags/{tag} exists — a fresh listing, never the cache. */
@@ -1036,6 +1194,9 @@ class WporgOperations {
             'invalid_svn_path' => [__('The plugin contains a file or folder path that cannot be published to wordpress.org SVN. Remove path segments containing ".." or backslashes and try again.', 'peak-publisher'), 400],
             'invalid_svn_path_segment' => [__('The version cannot be used as a wordpress.org SVN path segment. Remove slashes, backslashes, and ".." from the version.', 'peak-publisher'), 400],
             'deploy_in_progress' => [__('Another change to this plugin is still being written to wordpress.org. Try again in a few minutes.', 'peak-publisher'), 409],
+            'current_release_changed' => [__('The current release on wordpress.org changed in the meantime. Reload and check the decision again.', 'peak-publisher'), 409],
+            'wporg_trunk_readme_unreadable' => [__('trunk/readme.txt could not be read from wordpress.org, so the Stable tag cannot be handled safely. Try again.', 'peak-publisher'), 502],
+            'wporg_readme_variant_failed' => [__('The readme variant for trunk could not be written on this server.', 'peak-publisher'), 500],
         };
         return new WporgSvnException($code, $message, $status);
     }

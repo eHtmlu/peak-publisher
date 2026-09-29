@@ -382,6 +382,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         // encoding): its information cannot be processed. A hard stop on both channels —
         // no readme data could be stored, and wordpress.org requires UTF-8.
         const readmeTxtUnprocessable = !readmeTxtAlreadyUtf8 && !readmeTxtConvertedToUtf8;
+        // R1 (server): the release's readme names its own version as Stable tag. found = the
+        // value before (null = the file could not be processed), written = the value set.
+        const readmeStableTag = readmeCleanup.stable_tag || { found: null, written: null };
 
         if (!meta.plugin_readme_txt?.found) {
             return {
@@ -405,6 +408,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 ? sprintf(__('The file was converted from %s to UTF-8.', 'peak-publisher'), readmeTxtDetectedEncoding)
                 : __('The file was converted to UTF-8.', 'peak-publisher')),
             readmeTxtRemovedUtf8Bom && __('The UTF-8 BOM was removed from the file.', 'peak-publisher'),
+            readmeStableTag.written !== null && (readmeStableTag.found === ''
+                ? sprintf(__('Stable tag %s added so that the release names its own version.', 'peak-publisher'), readmeStableTag.written)
+                : sprintf(__('Stable tag set to %1$s (was %2$s) so that the release names its own version.', 'peak-publisher'), readmeStableTag.written, readmeStableTag.found)),
             readmeTxtUnprocessable && __('The file could not be converted to UTF-8, so its information cannot be processed. Convert it to UTF-8 without a BOM and upload again.', 'peak-publisher'),
         ].filter(Boolean);
         return {

@@ -804,11 +804,10 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     }
 
     // The facts of the active target's current-release decision, or null where the row has
-    // nothing to say. Until the wordpress.org deploy executes the decision (build step 2),
-    // the row is self-hosted only — the channel condition step 2 removes.
+    // nothing to say: no plugin, or a target without facts (the wordpress.org pre-screens).
     function getCurrentReleaseFacts(context) {
         const facts = context.target?.current_release;
-        return facts && !context.isWporg && context.meta?.plugin_ok ? facts : null;
+        return facts && context.meta?.plugin_ok ? facts : null;
     }
 
     // make_current = default XOR deviation, the deviation only for the facts it was made on.
@@ -826,7 +825,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         const facts = getCurrentReleaseFacts(context);
         if (!facts) return null;
         const makeCurrent = resolveMakeCurrent(facts);
-        const text = getUploadDecisionText(facts, context.pluginData.Version, makeCurrent, !!context.releaseContext.existingRelease);
+        const text = getUploadDecisionText(facts, context.pluginData.Version, makeCurrent, !!context.releaseContext.existingRelease, context.isWporg, context.target?.deploy_mode || null);
         if (!text) return null;
         const label = createElement(wp.element.Fragment, null,
             text.warning && createElement('span', { className: 'pblsh--current-release-decision__warning', 'aria-hidden': 'true' }, getSvgIcon('alert', { size: 18 })),
@@ -845,6 +844,9 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                 })
                 : createElement('span', { className: 'pblsh--current-release-decision__label' }, label),
             createElement('p', { className: 'pblsh--current-release-decision__desc' }, text.desc),
+            text.mechanics.length > 0 && createElement('p', { className: 'pblsh--current-release-decision__desc pblsh--current-release-decision__mechanics' },
+                ...text.mechanics.flatMap((line, index) => index === 0 ? [ line ] : [ createElement('br', { key: index }), line ]),
+            ),
         );
     }
 

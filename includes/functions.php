@@ -590,6 +590,127 @@ function parse_readme_txt(string $content): array {
 
 
 /**
+ * Sets the `Stable tag:` header of a readme to $value — the one place the pointer is written
+ * into a readme: R1 in analyze (the release's readme names its own version), the trunk
+ * variant of a deploy, the flip. Works on the header block exactly as wordpress.org's parser
+ * reads it (Parser::parse_readme_contents()): the title as the parser finds it (a first line
+ * that is no known header, a GitHub-style underline, the "Plugin Name" placeholder with the
+ * real name below), then the `Key: value` lines, blank lines tolerated, but an unknown key
+ * after a blank line already belongs to the short description; the block ends with its last
+ * header line. Sets every Stable tag line of the block (case-insensitive, the key's spelling
+ * kept — the parser keeps the last one it reads), inserts one after the last header line when
+ * there is none, keeps every line ending and a UTF-8 BOM as they are, and never touches
+ * anything below the block — a "Stable tag:" in the description included.
+ *
+ * Valid UTF-8 only: the caller guarantees it (analyze records when a readme could not be
+ * processed, wporg targets refuse such a readme).
+ *
+ * @throws \InvalidArgumentException On invalid UTF-8 — a caller bug, not a user error.
+ */
+function set_readme_stable_tag(string $content, string $value): string {
+    if (!is_utf8($content)) {
+        throw new \InvalidArgumentException('set_readme_stable_tag() needs valid UTF-8');
+    }
+    // The parser strips a BOM before reading; it goes back in front of the result.
+    $bom = has_utf8_bom($content) ? "\xEF\xBB\xBF" : '';
+    $content = strip_utf8_bom($content);
+    $new_header = 'Stable tag: ' . $value;
+    $join = static fn(array $lines): string => $bom . implode('', array_map(static fn(array $line): string => $line['text'] . $line['end'], $lines));
+
+    // Lines beside their own endings, so every line ending survives.
+    $parts = preg_split('/(\R)/u', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
+    $lines = [];
+    for ($i = 0; $i < count($parts); $i += 2) {
+        $lines[] = [ 'text' => $parts[$i], 'end' => $parts[$i + 1] ?? '' ];
+    }
+
+    // Parser::parse_possible_header(): a line with a colon that is no title or markdown heading.
+    $header_key = static function(string $line): ?string {
+        if (!str_contains($line, ':') || str_starts_with($line, '#') || str_starts_with($line, '=')) {
+            return null;
+        }
+        return strtolower(trim(explode(':', $line, 2)[0], " \t*-\r\n"));
+    };
+    $valid_headers = parse_readme_txt('')['valid_headers'] ?? [];
+    $is_known_header = static function(string $line) use ($header_key, $valid_headers): bool {
+        $key = $header_key($line);
+        return $key !== null && isset($valid_headers[$key]);
+    };
+    // Parser::get_first_nonwhitespace(): a line whose trimmed text is empty() — '' and '0'
+    // alike — is whitespace.
+    $next_content = static function(int $from) use ($lines): ?int {
+        for ($i = $from; $i < count($lines); $i++) {
+            if (!empty(trim($lines[$i]['text']))) {
+                return $i;
+            }
+        }
+        return null;
+    };
+
+    $start = $next_content(0);
+    if ($start === null) {
+        return $bom . $new_header . "\n";
+    }
+    $last_header = null;
+    if (!$is_known_header($lines[$start]['text'])) {
+        // The title, as the parser takes it: any first line that is no known header (the
+        // name may be left off entirely), a GitHub-style underline of = or - below it, and
+        // for the placeholder "Plugin Name" the real name on the next short line.
+        $title = strtolower(trim($lines[$start]['text'], "#= \t\0\x0B"));
+        $last_header = $start++;
+        if ($start < count($lines) && $lines[$start]['text'] !== '' && trim($lines[$start]['text'], '=-') === '') {
+            $last_header = $start++;
+        }
+        if ($title === 'plugin name') {
+            $name = $next_content($start);
+            if ($name !== null && strlen($lines[$name]['text']) < 50 && !$is_known_header($lines[$name]['text'])) {
+                $last_header = $name;
+                $start = $name + 1;
+            }
+        }
+    }
+    // The header loop starts at the next content line (whitespace-only lines between the
+    // title and the first header are skipped); inside the block only an empty() line is
+    // tolerated — a whitespace-only one ends it, like every other non-header line.
+    $start = $next_content($start) ?? count($lines);
+    $after_blank = false;
+    $replaced = false;
+    for ($i = $start; $i < count($lines); $i++) {
+        $text = $lines[$i]['text'];
+        if (empty($text)) {
+            $after_blank = true;
+            continue;
+        }
+        $key = $header_key($text);
+        if ($key === null || ($after_blank && !isset($valid_headers[$key]))) {
+            break;
+        }
+        if ($key === 'stable tag') {
+            $lines[$i]['text'] = preg_replace_callback('/^([ \t*\-]*stable\s+tag[ \t*\-]*:\s*).*$/iu', static fn(array $m): string => $m[1] . $value, $text);
+            $replaced = true;
+        }
+        $last_header = $i;
+        $after_blank = false;
+    }
+    if ($replaced) {
+        return $join($lines);
+    }
+
+    if ($last_header === null) {
+        array_unshift($lines, [ 'text' => $new_header, 'end' => "\n" ]);
+        return $join($lines);
+    }
+    $new_line = [ 'text' => $new_header, 'end' => $lines[$last_header]['end'] ];
+    if ($lines[$last_header]['end'] === '') {
+        // The header line was the file's last line without a newline: it gets one, the new line ends the file.
+        $lines[$last_header]['end'] = "\n";
+    }
+    array_splice($lines, $last_header + 1, 0, [ $new_line ]);
+    return $join($lines);
+}
+
+
+/**
  * Gets the WordPress filesystem.
  */
 function get_wp_filesystem(): \WP_Filesystem_Base {

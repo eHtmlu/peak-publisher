@@ -3672,6 +3672,11 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     font-size: 0.8125rem;
 }
 
+/* The wordpress.org mechanics under the consequence: the Stable tag line and the trunk sentence */
+.pblsh--upload-result .pblsh--current-release-decision__mechanics {
+    margin-top: 0.125rem;
+}
+
 .pblsh--upload-result .pblsh--publish-path__value {
     margin: 0;
     padding: 0;

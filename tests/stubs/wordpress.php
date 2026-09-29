@@ -259,6 +259,25 @@ namespace {
         return $url;
     }
 
+    // What the bundled wordpress.org readme parser calls while parsing (the readme tests
+    // read a Stable tag back through it): escaping and tag balancing are pass-throughs,
+    // the fake has no users, so every contributor is "ignored".
+    function esc_html(string $text): string {
+        return htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+    }
+
+    function force_balance_tags(string $text): string {
+        return $text;
+    }
+
+    function wp_kses(string $text, $allowed_html, array $allowed_protocols = []): string {
+        return $text;
+    }
+
+    function get_user_by(string $field, $value) {
+        return false;
+    }
+
     /** The acting user of the request; the tests run as one fixed administrator. */
     function wp_get_current_user(): WP_User {
         $user = new WP_User();

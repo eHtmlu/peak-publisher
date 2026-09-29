@@ -1,7 +1,8 @@
 // Pure helpers for the current release — the plugin-level pointer to the release sites
 // receive, on both channels. The vocabulary of its states lives here, keyed by the server's
 // current_release_state, and is shared by every surface that speaks about it (the list's
-// version cell, the editor header and notices); no state, like utils-upload-result.js.
+// version cell, the editor header and notices, the upload's decision row on both channels);
+// no state, like utils-upload-result.js.
 lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
     const { __, sprintf } = wp.i18n;
 
@@ -54,58 +55,128 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
     }
 
     // The wording of the upload's current-release decision for the outcome the toggle
-    // currently shows: keyed on the server's relation and
-    // pre-release flag — the client never compares versions. `warning` marks the outcomes
-    // that deserve a second look (a pre-release or an older version becoming current).
-    // Self-hosted wording; the wordpress.org variant arrives with the wporg deploy step.
-    function getUploadDecisionText(facts, version, makeCurrent, replacesRelease) {
+    // currently shows, keyed on the server's relation, pre-release flag and pointer state —
+    // the client never compares versions. `warning` marks the outcomes that deserve a second
+    // look (a pre-release or an older version becoming current, a pointer the dialog could not
+    // read). wordpress.org adds the mechanics — the Stable tag line the deploy writes and what
+    // happens to trunk — as `mechanics`; self-hosted has no file that carries the pointer.
+    function getUploadDecisionText(facts, version, makeCurrent, replacesRelease, isWporg = false, deployMode = null) {
         const current = facts.version;
         const pre = !!facts.pre_release;
-        const text = (title, desc, warning = false) => ({ title, desc, warning });
+        const text = (title, desc, warning = false) => ({ title, desc, warning, mechanics: [] });
         const becomes = pre ? __('Becomes the current release (pre-release)', 'peak-publisher') : __('Becomes the current release', 'peak-publisher');
         const doesNot = pre ? __('Does not become the current release (pre-release)', 'peak-publisher') : __('Does not become the current release', 'peak-publisher');
         const offeredToEverySite = sprintf(__('Every site will be offered %s as an update.', 'peak-publisher'), version);
-        const sitesWillReceive = sprintf(__('Sites will receive %s with their next update check.', 'peak-publisher'), version);
+        // Both channels deliver with the sites' next update check; wordpress.org first has to
+        // import the commit.
+        const sitesWillReceive = isWporg
+            ? sprintf(__('Sites will receive %s with their next update check once wordpress.org has processed the commit — usually within a few minutes.', 'peak-publisher'), version)
+            : sprintf(__('Sites will receive %s with their next update check.', 'peak-publisher'), version);
+        const replacedFilesNote = sprintf(__('Sites that already updated to %s will not download the replaced files.', 'peak-publisher'), version);
+        const keepsTrunk = __('wordpress.org keeps distributing trunk.', 'peak-publisher');
 
+        let result = null;
         switch (facts.relation) {
             case 'first':
             case 'no_current': {
-                // No current release yet: the plugin offers no updates until one exists —
-                // 'first' has no releases at all, 'no_current' has releases but no pointer.
+                // No current release yet — 'first' has no releases at all, 'no_current' has
+                // releases but no usable pointer (wordpress.org distributes trunk then).
                 const isFirst = facts.relation === 'first';
+                if (isWporg) {
+                    if (!makeCurrent) {
+                        result = text(doesNot, pre ? __('Pre-release versions are published as a tag only.', 'peak-publisher') + ' ' + keepsTrunk : keepsTrunk);
+                    } else if (isFirst) {
+                        result = text(becomes, sitesWillReceive);
+                    } else if (pre) {
+                        result = text(becomes, offeredToEverySite, true);
+                    } else {
+                        result = text(becomes, {
+                            trunk: __('wordpress.org currently distributes the trunk directory (Stable tag: trunk), which wordpress.org asks authors to avoid — this release ends that.', 'peak-publisher'),
+                            tag_missing: sprintf(__('The Stable tag on wordpress.org names %s, which does not exist, so wordpress.org distributes trunk — this release ends that.', 'peak-publisher'), facts.pointer),
+                            none: __('wordpress.org has no Stable tag for this plugin yet and distributes trunk — this release ends that.', 'peak-publisher'),
+                        }[facts.state]);
+                    }
+                    break;
+                }
                 if (makeCurrent) {
-                    return pre
+                    result = pre
                         ? text(becomes, offeredToEverySite, true)
                         : text(becomes, isFirst ? sitesWillReceive : __('This plugin has no current release yet and offers no updates — this release ends that.', 'peak-publisher'));
+                } else if (pre) {
+                    result = text(doesNot, __('Pre-release versions are published without becoming current. Until you make a release current, the plugin offers no updates.', 'peak-publisher'));
+                } else {
+                    result = text(doesNot, isFirst
+                        ? sprintf(__('The release %s is published; the plugin offers no updates until you make it current from the release list.', 'peak-publisher'), version)
+                        : sprintf(__('The plugin keeps offering no updates until you make %s current from the release list.', 'peak-publisher'), version));
                 }
-                if (pre) {
-                    return text(doesNot, __('Pre-release versions are published without becoming current. Until you make a release current, the plugin offers no updates.', 'peak-publisher'));
-                }
-                return text(doesNot, isFirst
-                    ? sprintf(__('The release %s is published; the plugin offers no updates until you make it current from the release list.', 'peak-publisher'), version)
-                    : sprintf(__('The plugin keeps offering no updates until you make %s current from the release list.', 'peak-publisher'), version));
+                break;
             }
+            case 'unknown':
+                // wordpress.org only: the dialog could not read the pointer. The label states the
+                // outcome; the description says what publishing does about the uncertainty.
+                result = makeCurrent
+                    ? text(becomes, __('The current release on wordpress.org could not be read. Peak Publisher reads it again when publishing and stops if the outcome would differ from what you see here.', 'peak-publisher'), true)
+                    : text(doesNot, __('The current release on wordpress.org could not be read and stays as it is. Peak Publisher reads it again when publishing and stops if the outcome would differ from what you see here.', 'peak-publisher'));
+                break;
             case 'repairs_pointer':
-                return text(becomes, sprintf(__('The current release already names %s, which does not exist yet — publishing this release makes it valid.', 'peak-publisher'), version));
+                result = text(becomes, isWporg
+                    ? sprintf(__('The Stable tag on wordpress.org already names %s, which does not exist yet — publishing this tag makes it valid. Until then wordpress.org distributes trunk.', 'peak-publisher'), version)
+                    : sprintf(__('The current release already names %s, which does not exist yet — publishing this release makes it valid.', 'peak-publisher'), version));
+                break;
             case 'equal':
-                return text(__('Stays the current release', 'peak-publisher'),
-                    sprintf(__('You are replacing the release sites currently receive. Sites that already updated to %s will not download the replaced files.', 'peak-publisher'), version));
+                result = text(__('Stays the current release', 'peak-publisher'),
+                    (isWporg
+                        ? __('You are replacing the release wordpress.org currently distributes.', 'peak-publisher')
+                        : __('You are replacing the release sites currently receive.', 'peak-publisher')) + ' ' + replacedFilesNote);
+                break;
             case 'higher':
                 if (makeCurrent) {
-                    return pre
+                    result = pre
                         ? text(becomes, offeredToEverySite, true)
-                        : text(becomes, sitesWillReceive + (replacesRelease ? ' ' + sprintf(__('Sites that already updated to %s will not download the replaced files.', 'peak-publisher'), version) : ''));
+                        : text(becomes, sitesWillReceive + (replacesRelease ? ' ' + replacedFilesNote : ''));
+                } else if (pre) {
+                    result = text(doesNot, isWporg
+                        ? sprintf(__('Pre-release versions are published as a tag only. Sites keep receiving %s.', 'peak-publisher'), current)
+                        : sprintf(__('Pre-release versions are published without becoming current. Sites keep receiving %s.', 'peak-publisher'), current));
+                } else {
+                    result = text(doesNot, isWporg
+                        ? sprintf(__('The tag %1$s is published, sites keep receiving %2$s. You can make it current later from the release list.', 'peak-publisher'), version, current)
+                        : sprintf(__('The release %1$s is published, sites keep receiving %2$s. You can make it current later from the release list.', 'peak-publisher'), version, current));
                 }
-                return pre
-                    ? text(doesNot, sprintf(__('Pre-release versions are published without becoming current. Sites keep receiving %s.', 'peak-publisher'), current))
-                    : text(doesNot, sprintf(__('The release %1$s is published, sites keep receiving %2$s. You can make it current later from the release list.', 'peak-publisher'), version, current));
+                break;
             case 'lower':
-                return makeCurrent
+                result = makeCurrent
                     ? text(__('Becomes the current release (rollback)', 'peak-publisher'),
                         sprintf(__('New installs and sites below %1$s will receive %1$s; sites on %2$s keep it — WordPress never offers an older version.', 'peak-publisher'), version, current), true)
-                    : text(doesNot, sprintf(__('Sites keep receiving %1$s. The release %2$s is published for manual downloads.', 'peak-publisher'), current, version));
+                    : text(doesNot, isWporg
+                        ? sprintf(__('Sites keep receiving %1$s. The tag %2$s is published for manual downloads.', 'peak-publisher'), current, version)
+                        : sprintf(__('Sites keep receiving %1$s. The release %2$s is published for manual downloads.', 'peak-publisher'), current, version));
+                break;
         }
-        return null;
+        if (result && isWporg) {
+            result.mechanics = getWporgMechanics(facts, version, makeCurrent, deployMode);
+        }
+        return result;
+    }
+
+    // The mechanics behind a wordpress.org decision, for developers who know the term: the
+    // Stable tag line the deploy writes into trunk/readme.txt — the pointer as the dialog read
+    // it, an arrow when the deploy changes it — and what happens to trunk. The arrow follows the
+    // server's rule: the line is written when the decided value differs from the live one.
+    function getWporgMechanics(facts, version, makeCurrent, deployMode) {
+        const shown = facts.state === 'unknown' ? __('(unknown)', 'peak-publisher') : facts.pointer;
+        const changes = makeCurrent && shown !== version;
+        const stableTag = shown === ''
+            ? sprintf(__('Stable tag on wordpress.org: %s', 'peak-publisher'), version)
+            : (changes
+                ? sprintf(__('Stable tag on wordpress.org: %1$s → %2$s', 'peak-publisher'), shown, version)
+                : sprintf(__('Stable tag on wordpress.org: %s (unchanged)', 'peak-publisher'), shown));
+        const trunk = deployMode === 'trunk_and_tag'
+            ? __('Trunk is updated with this release.', 'peak-publisher')
+            : (changes
+                ? __('Trunk code stays unchanged; only the Stable tag line in trunk/readme.txt is updated.', 'peak-publisher')
+                : __('Trunk stays unchanged.', 'peak-publisher'));
+        return [ stableTag, trunk ];
     }
 
     // The confirm before making a release current, by channel and by where the release sits

@@ -81,16 +81,11 @@ class UploadWorkflow {
         if (isset($active_target['status'])) {
             return $active_target;
         }
-        if ($active_target['hosting_type'] === 'wporg') {
-            return $this->finalize_wporg_upload($data, $active_target['target']);
-        }
         $target = $active_target['target'];
-        $data['hosting_type_resolved'] = 'self_hosted';
-        $data = $this->apply_target_release_context($data, $target);
 
-        // The current-release decision: the analysis facts say whether the user had a choice,
-        // the request carries the answer. A missing choice or a contradiction to a forced
-        // default is a client bug.
+        // The current-release decision (both channels): the analysis facts say whether the
+        // user had a choice, the request carries the answer. A missing choice or a
+        // contradiction to a forced default is a client bug.
         $current_release_facts = is_array($target['current_release'] ?? null) ? $target['current_release'] : null;
         if ($current_release_facts === null) {
             return $this->upload_error('plugin_or_version_invalid', __('Plugin or version is invalid.', 'peak-publisher'));
@@ -99,6 +94,12 @@ class UploadWorkflow {
         if ($make_current === null) {
             return $this->upload_error('invalid_current_release_decision', __('The current-release decision of this upload is missing or invalid.', 'peak-publisher'));
         }
+
+        if ($active_target['hosting_type'] === 'wporg') {
+            return $this->finalize_wporg_upload($data, $target, $make_current);
+        }
+        $data['hosting_type_resolved'] = 'self_hosted';
+        $data = $this->apply_target_release_context($data, $target);
 
         // Check if the plugin slug is valid
         // (deliberate last gate: the identity is read back from the upload cache before the release is created)
@@ -466,23 +467,39 @@ class UploadWorkflow {
             $size_after_cleanup = $this->get_path_size($root);
             $entry_count_after_cleanup = $this->count_directory_entries($root);
 
-            // Process readme.txt (root-level, wordpress.org precedence), normalize encoding/BOM, and parse
+            // Determine if the plugin is valid
+            $plugin_ok = $main_file && !empty($plugin_data['Name']);
+            $version_ok = $plugin_ok && is_publishable_version((string) ($plugin_data['Version'] ?? ''));
+
+            // Process readme.txt (root-level, wordpress.org precedence), normalize encoding/BOM,
+            // apply R1 and parse. R1: the release's readme names its own version as Stable tag —
+            // both channels (wordpress.org reads the pointer from trunk, never from a tag's
+            // readme; the file just must not contradict its release). Only on valid UTF-8:
+            // found = the parser's value before (null = not processable), written = the value
+            // set (null = skipped or already equal).
             $readme_info = default_plugin_readme_txt_data();
             $readme_abs = $this->find_readme_txt($root);
+            $readme_stable_tag = [ 'found' => null, 'written' => null ];
             if ($readme_abs) {
                 [$readme_content, $readme_cleanup_info] = $this->ensure_readme_utf8_without_bom($readme_abs);
                 $readme_info['found'] = true;
                 $readme_info['file_name'] = basename($readme_abs);
 
-                // Parse readme.txt and check if it is able to be encoded to JSON, if not, set the content to an empty array to avoid JSON encoding errors later.
                 $readme_content_parsed = parse_readme_txt($readme_content);
+                if (is_utf8($readme_content)) {
+                    $readme_stable_tag['found'] = (string) ($readme_content_parsed['stable_tag'] ?? '');
+                    $version = (string) ($plugin_data['Version'] ?? '');
+                    if ($version_ok && $readme_stable_tag['found'] !== $version) {
+                        $readme_content = set_readme_stable_tag($readme_content, $version);
+                        @file_put_contents($readme_abs, $readme_content);
+                        $readme_stable_tag['written'] = $version;
+                        $readme_content_parsed = parse_readme_txt($readme_content);
+                    }
+                }
+                // Parse readme.txt and check if it is able to be encoded to JSON, if not, set the content to an empty array to avoid JSON encoding errors later.
                 $readme_cleanup_info['can_be_encoded_to_json'] = json_encode($readme_content_parsed) !== false;
                 $readme_info['content'] = $readme_cleanup_info['can_be_encoded_to_json'] ? $readme_content_parsed : [];
             }
-
-            // Determine if the plugin is valid
-            $plugin_ok = $main_file && !empty($plugin_data['Name']);
-            $version_ok = $plugin_ok && is_publishable_version((string) ($plugin_data['Version'] ?? ''));
 
             // Search for bootstrap code
             $bootstrap = $this->search_bootstrap_code($root);
@@ -520,6 +537,7 @@ class UploadWorkflow {
                         'detected_encoding' => (string) ($readme_cleanup_info['detected_encoding'] ?? ''),
                         'converted_to_utf8' => (bool) ($readme_cleanup_info['converted_to_utf8'] ?? false),
                         'removed_utf8_bom' => (bool) ($readme_cleanup_info['removed_utf8_bom'] ?? false),
+                        'stable_tag' => $readme_stable_tag,
                     ],
                     'settings_on_upload' => array_intersect_key($settings, array_flip([
                         'auto_remove_workspace_artifacts',
@@ -1023,7 +1041,7 @@ class UploadWorkflow {
 
     /**
      * Builds the wporg deploy blockers that apply regardless of marker/import state.
-     * Every code returned here needs a dedicated checklist item in GlobalDropOverlay.js —
+     * Every code returned here needs a dedicated checklist item (upload-checks.js) —
      * the client has no generic fallback renderer for unknown blocker codes.
      */
     private function wporg_marker_independent_blockers(array $data): array {
@@ -1038,6 +1056,21 @@ class UploadWorkflow {
             $blockers[] = [
                 'code' => 'wporg_bootstrap_not_allowed',
                 'message' => __('Peak Publisher bootstrap code must be removed before publishing on wordpress.org.', 'peak-publisher'),
+            ];
+        }
+        // The readme carries the pointer wordpress.org distributes (its Stable tag): without
+        // one there is nothing to manage; one that is not UTF-8 and could not be converted
+        // was not processed, so its Stable tag cannot be set either.
+        $readme_actions = is_array($data['cleanup_info']['readme_txt'] ?? null) ? $data['cleanup_info']['readme_txt'] : [];
+        if (empty($data['plugin_readme_txt']['found'])) {
+            $blockers[] = [
+                'code' => 'wporg_readme_required',
+                'message' => __('wordpress.org plugins require a readme.txt file.', 'peak-publisher'),
+            ];
+        } elseif (empty($readme_actions['already_utf8']) && empty($readme_actions['converted_to_utf8'])) {
+            $blockers[] = [
+                'code' => 'wporg_readme_not_utf8',
+                'message' => __('The readme.txt could not be converted to UTF-8, so its Stable tag cannot be managed. Convert the file to UTF-8 without a BOM and upload again.', 'peak-publisher'),
             ];
         }
         return $blockers;
@@ -1104,7 +1137,7 @@ class UploadWorkflow {
         ];
     }
 
-    private function finalize_wporg_upload(array $data, array $target): array {
+    private function finalize_wporg_upload(array $data, array $target, bool $make_current): array {
         // Last gate before the irreversible SVN deploy: deliberately re-validates the target state
         // that resolve_finalize_target() already checked in this request.
         if (empty($target['available'])) {
@@ -1168,11 +1201,17 @@ class UploadWorkflow {
         // Store the account used for this deploy on the marker
         update_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', $username);
 
-        // Deploy the prepared directory to wordpress.org SVN
+        // Deploy the prepared directory to wordpress.org SVN, executing the current-release
+        // decision against the live pointer (the analysis fact is the dialog's expectation).
         require_once __DIR__ . '/WporgOperations.php';
         try {
             $touch_trunk = (string) ($target['deploy_mode'] ?? '') !== 'tag_only';
-            $deploy_result = WporgOperations::deploy_directory($marker, $deploy_root, $version, $username, $touch_trunk);
+            $deploy_result = WporgOperations::deploy_directory($marker, $deploy_root, $version, $username, $touch_trunk, [
+                'make_current' => $make_current,
+                'relation' => (string) $target['current_release']['relation'],
+                'expected' => $target['current_release']['pointer'],
+                'readme_file_name' => (string) ($data['plugin_readme_txt']['file_name'] ?? ''),
+            ]);
         } catch (WporgSvnException $e) {
             return $this->upload_error($e->get_error_code(), $e->getMessage());
         } catch (\Throwable $e) {
@@ -1180,16 +1219,25 @@ class UploadWorkflow {
         }
 
         // Deploy outcome, recorded where it becomes known — the mirror post below is regenerated
-        // from SVN and cannot tell how the tag got there.
+        // from SVN and cannot tell how the tag got there, nor what the decision did to trunk.
         $data['hosting_type_resolved'] = 'wporg';
         $data['wporg_deploy'] = [
             'username' => $username,
             'deploy_mode' => (string) $target['deploy_mode'],
             'revision' => $deploy_result['revision'],
             'touched_trunk' => !empty($deploy_result['touched_trunk']),
+            'current_release' => [
+                'make_current' => $make_current,
+                'stable_tag_before' => $deploy_result['stable_tag_before'],
+                'stable_tag_written' => $deploy_result['stable_tag_written'],
+                'pointer_changed' => $deploy_result['pointer_changed'],
+            ],
         ];
 
-        // Mirror the committed tag into local release posts
+        // The cache learns the written trunk readme first (write-through), then the mirror post
+        // is upserted and the title follows the reference — otherwise the title would follow
+        // the old pointer. The revision keys are dropped either way; the next read refreshes.
+        mark_wporg_plugin_cache_stale((int) $marker->ID, $deploy_result['trunk_readme'] !== null ? [ 'trunk_readme' => $deploy_result['trunk_readme'] ] : []);
         $release_id = sync_wporg_deployed_release_post($marker, $version);
         if (is_wp_error($release_id)) {
             return [
@@ -1207,8 +1255,6 @@ class UploadWorkflow {
         // mirror post's content is regenerated from SVN by the tag sync and must stay that way.
         update_post_meta((int) $release_id, '_pblsh_upload_state', wp_slash(json_encode($data)));
 
-        // Mark the marker cache stale and remove upload temp files
-        mark_wporg_plugin_cache_stale((int) $marker->ID);
         delete_directory_with_race_protection($this->tmp_root);
 
         return [

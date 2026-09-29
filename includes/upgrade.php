@@ -79,6 +79,7 @@ function acquire_schema_migration_lock(): bool {
 function upgrade_schema_from_live(): void {
     $topics = array_filter([
         'release_drafts' => upgrade_release_drafts_to_pointer(),
+        'readme_conversion' => upgrade_drop_readme_conversion_setting(),
     ]);
 
     if (!empty($topics)) {
@@ -183,4 +184,30 @@ function upgrade_release_drafts_to_pointer(): ?array {
         'former_drafts' => $former_drafts,
         'plugins_without_current' => $plugins_without_current,
     ];
+}
+
+
+/**
+ * Schema version 1 (ships with the release after 1.3.1): the setting
+ * `readme_txt_convert_to_utf8_without_bom` is gone — every uploaded readme is stored as
+ * UTF-8 without a BOM.
+ *
+ * Why: Peak Publisher writes the readme anyway (its Stable tag line names the release's
+ * version), a readme that is not UTF-8 cannot be stored as release data, and wordpress.org
+ * requires UTF-8 — keeping the file as it was never was a useful choice.
+ *
+ * What: the key is removed from the stored option. An operator who had switched the
+ * conversion off learns about the change through the notice.
+ *
+ * @return array|null `{ was_disabled: true }` when the conversion was switched off; null otherwise.
+ */
+function upgrade_drop_readme_conversion_setting(): ?array {
+    $settings = get_option('pblsh_settings');
+    if (!is_array($settings) || !array_key_exists('readme_txt_convert_to_utf8_without_bom', $settings)) {
+        return null;
+    }
+    $was_disabled = empty($settings['readme_txt_convert_to_utf8_without_bom']);
+    unset($settings['readme_txt_convert_to_utf8_without_bom']);
+    update_option('pblsh_settings', $settings, false);
+    return $was_disabled ? [ 'was_disabled' => true ] : null;
 }

@@ -65,6 +65,24 @@ final class UpgradeTest extends TestCase {
         self::assertFalse(get_option('pblsh_upgrade_notice'));
     }
 
+    public function test_the_readme_conversion_setting_is_dropped_and_reported_when_it_was_off(): void {
+        update_option('pblsh_settings', [ 'standalone_mode' => false, 'readme_txt_convert_to_utf8_without_bom' => false ]);
+
+        maybe_upgrade_schema();
+
+        self::assertSame([ 'standalone_mode' => false ], get_option('pblsh_settings'));
+        self::assertSame([ 'readme_conversion' => [ 'was_disabled' => true ] ], get_option('pblsh_upgrade_notice')['topics']);
+    }
+
+    public function test_a_readme_conversion_setting_that_was_on_is_dropped_silently(): void {
+        update_option('pblsh_settings', [ 'readme_txt_convert_to_utf8_without_bom' => true ]);
+
+        maybe_upgrade_schema();
+
+        self::assertSame([], get_option('pblsh_settings'));
+        self::assertFalse(get_option('pblsh_upgrade_notice'));
+    }
+
     public function test_migration_does_not_run_on_the_current_schema(): void {
         update_option('pblsh_schema_version', PBLSH_SCHEMA_VERSION);
         $plugin = $this->create_plugin('pblsh_plugin', 'plugin-a');

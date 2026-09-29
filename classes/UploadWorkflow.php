@@ -466,7 +466,7 @@ class UploadWorkflow {
             $size_after_cleanup = $this->get_path_size($root);
             $entry_count_after_cleanup = $this->count_directory_entries($root);
 
-            // Process readme.txt (root-level, case-sensitive), normalize encoding/BOM if configured, and parse
+            // Process readme.txt (root-level, wordpress.org precedence), normalize encoding/BOM, and parse
             $readme_info = default_plugin_readme_txt_data();
             $readme_abs = $this->find_readme_txt($root);
             if ($readme_abs) {
@@ -524,7 +524,6 @@ class UploadWorkflow {
                     'settings_on_upload' => array_intersect_key($settings, array_flip([
                         'auto_remove_workspace_artifacts',
                         'wordspace_artifacts_to_remove',
-                        'readme_txt_convert_to_utf8_without_bom',
                     ])),
                 ],
                 'plugin_data' => $plugin_data,
@@ -1670,15 +1669,16 @@ class UploadWorkflow {
     }
 
     /**
-     * Ensures readme.txt is UTF-8 (no BOM if configured).
-     * If modifications were applied, the file on disk is overwritten.
+     * Ensures the readme is UTF-8 without a BOM — always: Peak Publisher writes the file
+     * anyway, wordpress.org requires UTF-8, and a readme that is not UTF-8 cannot be stored
+     * as release data. A modified file is written back. The actions record what was found
+     * and what was done; a file the conversion could not make UTF-8 keeps
+     * `converted_to_utf8` false — the checklist stops the upload then.
      *
-     * @param string $abs Absolute path to the readme.txt file.
-     * @return array Array with the content and the cleanup actions.
+     * @param string $abs Absolute path to the readme file.
+     * @return array{0:string, 1:array} The content and the actions.
      */
     private function ensure_readme_utf8_without_bom(string $abs): array {
-        $settings = get_peak_publisher_settings();
-        $convert_to_utf8_without_bom = !empty($settings['readme_txt_convert_to_utf8_without_bom']);
         $actions = [
             'already_utf8' => false,
             'already_without_bom' => false,
@@ -1700,11 +1700,9 @@ class UploadWorkflow {
 
         $is_utf8 = is_utf8($content);
         $actions['already_utf8'] = $is_utf8;
-
-        // Convert to UTF-8 if needed
-        if ($convert_to_utf8_without_bom && !$is_utf8) {
+        if (!$is_utf8) {
             $converted = convert_to_utf8($content, $detected_encoding);
-            if ($converted !== $content) {
+            if ($converted !== $content && is_utf8($converted)) {
                 $content = $converted;
                 $modified = true;
                 $actions['converted_to_utf8'] = true;
@@ -1713,19 +1711,13 @@ class UploadWorkflow {
 
         $has_utf8_bom = has_utf8_bom($content);
         $actions['already_without_bom'] = !$has_utf8_bom;
-
-        // Strip UTF-8 BOM if present
-        if ($convert_to_utf8_without_bom && $has_utf8_bom) {
-            $converted = strip_utf8_bom($content);
-            if ($converted !== $content) {
-                $content = $converted;
-                $modified = true;
-                $actions['removed_utf8_bom'] = true;
-            }
+        if ($has_utf8_bom) {
+            $content = strip_utf8_bom($content);
+            $modified = true;
+            $actions['removed_utf8_bom'] = true;
         }
 
         if ($modified) {
-            // Overwrite file with normalized UTF-8 (without BOM)
             @file_put_contents($abs, $content);
         }
         return [$content, $actions];

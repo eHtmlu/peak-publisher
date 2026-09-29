@@ -18,9 +18,6 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
     const [useOlderPluginVersion, setUseOlderPluginVersion] = useState(false);
     const [useNotPeakPublisherForNewUpdateServer, setUseNotPeakPublisherForNewUpdateServer] = useState(false);
     const [keepWorkspaceArtifacts, setKeepWorkspaceArtifacts] = useState(false);
-    const [keepReadmeTxtBom, setKeepReadmeTxtBom] = useState(false);
-    const [keepReadmeTxtEncoding, setKeepReadmeTxtEncoding] = useState(false);
-    const [keepReadmeTxtAsIs, setKeepReadmeTxtAsIs] = useState(false);
     const [keepOldBootstrapCode, setKeepOldBootstrapCode] = useState(false);
 
     function reset() {
@@ -33,9 +30,6 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         setUseOlderPluginVersion(false);
         setUseNotPeakPublisherForNewUpdateServer(false);
         setKeepWorkspaceArtifacts(false);
-        setKeepReadmeTxtBom(false);
-        setKeepReadmeTxtEncoding(false);
-        setKeepReadmeTxtAsIs(false);
         setKeepOldBootstrapCode(false);
     }
 
@@ -377,14 +371,17 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
     }
 
     function checkReadmeTxt(context) {
-        const { meta, settings, isWporg } = context;
+        const { meta, isWporg } = context;
         const readmeCleanup = meta?.cleanup_info?.readme_txt || {};
         const readmeTxtAlreadyUtf8 = !!readmeCleanup.already_utf8;
         const readmeTxtAlreadyWithoutBom = !!readmeCleanup.already_without_bom;
         const readmeTxtDetectedEncoding = readmeCleanup.detected_encoding || '';
         const readmeTxtConvertedToUtf8 = !!readmeCleanup.converted_to_utf8;
         const readmeTxtRemovedUtf8Bom = !!readmeCleanup.removed_utf8_bom;
-        const readmeTxtCanBeEncodedToJson = !!readmeCleanup.can_be_encoded_to_json;
+        // The conversion could not make the file UTF-8 (no mbstring/iconv, an unknown
+        // encoding): its information cannot be processed. A hard stop on both channels —
+        // no readme data could be stored, and wordpress.org requires UTF-8.
+        const readmeTxtUnprocessable = !readmeTxtAlreadyUtf8 && !readmeTxtConvertedToUtf8;
 
         if (!meta.plugin_readme_txt?.found) {
             return {
@@ -400,94 +397,20 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
             };
         }
 
+        // One fact per line.
+        const lines = [
+            meta.plugin_readme_txt?.file_name !== 'readme.txt' && sprintf(__('Although %s also works, the officially valid filename is readme.txt.', 'peak-publisher'), meta.plugin_readme_txt.file_name),
+            readmeTxtAlreadyUtf8 && readmeTxtAlreadyWithoutBom && __('The file is a valid UTF-8 file without a BOM, exactly as it should be.', 'peak-publisher'),
+            readmeTxtConvertedToUtf8 && (readmeTxtDetectedEncoding
+                ? sprintf(__('The file was converted from %s to UTF-8.', 'peak-publisher'), readmeTxtDetectedEncoding)
+                : __('The file was converted to UTF-8.', 'peak-publisher')),
+            readmeTxtRemovedUtf8Bom && __('The UTF-8 BOM was removed from the file.', 'peak-publisher'),
+            readmeTxtUnprocessable && __('The file could not be converted to UTF-8, so its information cannot be processed. Convert it to UTF-8 without a BOM and upload again.', 'peak-publisher'),
+        ].filter(Boolean);
         return {
             title: __('Readme file exists', 'peak-publisher'),
-            type:
-                (readmeTxtAlreadyUtf8 && readmeTxtAlreadyWithoutBom)
-                ||
-                (settings.readme_txt_convert_to_utf8_without_bom && (
-                    (readmeTxtConvertedToUtf8 && readmeTxtAlreadyWithoutBom)
-                    ||
-                    (readmeTxtRemovedUtf8Bom && readmeTxtAlreadyUtf8)
-                    ||
-                    (readmeTxtConvertedToUtf8 && readmeTxtRemovedUtf8Bom)
-                    ||
-                    ((!readmeTxtAlreadyUtf8 !== readmeTxtConvertedToUtf8 || !readmeTxtAlreadyWithoutBom !== readmeTxtRemovedUtf8Bom) && keepReadmeTxtAsIs)
-                ))
-                ||
-                (!settings.readme_txt_convert_to_utf8_without_bom && (
-                    (readmeTxtAlreadyWithoutBom || keepReadmeTxtBom)
-                    &&
-                    (readmeTxtAlreadyUtf8 || keepReadmeTxtEncoding)
-                ))
-                ? 'ok' : 'error',
-            desc: [
-                meta.plugin_readme_txt?.file_name !== 'readme.txt' && [
-                    sprintf(__('Although %s also works, the officially valid filename is readme.txt.', 'peak-publisher'), meta.plugin_readme_txt.file_name),
-                    createElement('br'),
-                ],
-                readmeTxtAlreadyUtf8 && readmeTxtAlreadyWithoutBom && __('The file is a valid UTF-8 file without a BOM, exactly as it should be.', 'peak-publisher'),
-                (!readmeTxtAlreadyUtf8 || !readmeTxtAlreadyWithoutBom) && [
-                    settings.readme_txt_convert_to_utf8_without_bom && [
-                        readmeTxtConvertedToUtf8 && [
-                            readmeTxtDetectedEncoding && sprintf(__('The file was converted from %s to UTF-8 as specified in the settings.', 'peak-publisher'), readmeTxtDetectedEncoding),
-                            !readmeTxtDetectedEncoding && __('The file was converted to UTF-8 as specified in the settings.', 'peak-publisher'),
-                            createElement('br'),
-                        ],
-                        readmeTxtRemovedUtf8Bom && [
-                            __('The UTF-8 BOM was removed from the file as specified in the settings.', 'peak-publisher'),
-                            createElement('br'),
-                        ],
-                        (!readmeTxtAlreadyUtf8 !== readmeTxtConvertedToUtf8 || !readmeTxtAlreadyWithoutBom !== readmeTxtRemovedUtf8Bom) && [
-                            __('The file couldn\'t be converted to UTF-8 without a BOM. Please check it manually.', 'peak-publisher'),
-                            createElement('br'),
-                            !readmeTxtCanBeEncodedToJson && [
-                                __('The file can\'t be processed because it is not a valid UTF-8 file.', 'peak-publisher'),
-                                createElement('br'),
-                            ],
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: [
-                                    readmeTxtCanBeEncodedToJson && __('That\'s fine, I want to keep the current encoding of the file as it is.', 'peak-publisher'),
-                                    !readmeTxtCanBeEncodedToJson && __('That\'s fine, I want to keep the file even no information can be used from it.', 'peak-publisher'),
-                                ],
-                                checked: keepReadmeTxtAsIs,
-                                onChange: (value) => setKeepReadmeTxtAsIs(value),
-                            }),
-                        ],
-                    ],
-                    !settings.readme_txt_convert_to_utf8_without_bom && [
-                        !readmeTxtAlreadyWithoutBom && [
-                            __('The file has a UTF-8 BOM, which can cause issues.', 'peak-publisher'),
-                            createElement('br'),
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I want to keep the UTF-8 BOM in the file as it is.', 'peak-publisher'),
-                                checked: keepReadmeTxtBom,
-                                onChange: (value) => setKeepReadmeTxtBom(value),
-                            }),
-                        ],
-                        !readmeTxtAlreadyUtf8 && [
-                            readmeTxtDetectedEncoding && sprintf(__('The detected encoding is not UTF-8, but %s.', 'peak-publisher'), readmeTxtDetectedEncoding),
-                            !readmeTxtDetectedEncoding && __('The detected encoding is not UTF-8.', 'peak-publisher'),
-                            createElement('br'),
-                            !readmeTxtCanBeEncodedToJson && [
-                                __('The file can\'t be processed because it is not a valid UTF-8 file.', 'peak-publisher'),
-                                createElement('br'),
-                            ],
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: [
-                                    readmeTxtCanBeEncodedToJson && __('That\'s fine, I want to keep the current encoding of the file as it is.', 'peak-publisher'),
-                                    !readmeTxtCanBeEncodedToJson && __('That\'s fine, I want to keep the file even no information can be used from it.', 'peak-publisher'),
-                                ],
-                                checked: keepReadmeTxtEncoding,
-                                onChange: (value) => setKeepReadmeTxtEncoding(value),
-                            }),
-                        ],
-                    ],
-                ],
-            ],
+            type: readmeTxtUnprocessable ? 'error' : 'ok',
+            desc: lines.flatMap((line, index) => index === 0 ? [ line ] : [ createElement('br', { key: index }), line ]),
         };
     }
 

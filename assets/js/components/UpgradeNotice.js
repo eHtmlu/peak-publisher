@@ -1,10 +1,9 @@
-// UpgradeNotice Component - the one-time notice after the schema upgrade that replaced
-// release drafts with the current-release pointer (includes/upgrade.php). Addressed to
+// UpgradeNotice Component - the one-time notice after the schema upgrade
+// (includes/upgrade.php): one section per topic the migration reported. Addressed to
 // the site operator, so it is one per site, not per user; dismissing deletes the stored
-// facts. One section per topic the migration reported (includes/upgrade.php); the
-// drafts section names every former draft, because it is now downloadable by version —
-// the operator decides whether that is fine or the release goes. Owns its state: the
-// facts come with PblshData, the dismissal goes to the API.
+// facts. The drafts section names every former draft, because it is now downloadable by
+// version — the operator decides whether that is fine or the release goes. Owns its
+// state: the facts come with PblshData, the dismissal goes to the API.
 lodash.set(window, 'Pblsh.Components.UpgradeNotice', ({ onOpenPlugin }) => {
     const { __, _n, sprintf } = wp.i18n;
     const { createElement, useState } = wp.element;
@@ -70,9 +69,18 @@ lodash.set(window, 'Pblsh.Components.UpgradeNotice', ({ onOpenPlugin }) => {
         ];
     };
 
+    // The readme conversion setting is gone; the section appears only where it was off.
+    const renderReadmeConversion = () => [
+        topicTitle(__('readme.txt is always stored as UTF-8 now', 'peak-publisher')),
+        createElement('p', null,
+            __('The setting "Convert readme.txt to UTF-8 without a BOM" is gone, and you had switched it off: every uploaded readme.txt is now stored as UTF-8 without a BOM. Peak Publisher processes the file anyway, and wordpress.org requires UTF-8.', 'peak-publisher'),
+        ),
+    ];
+
     const topics = notice.topics && typeof notice.topics === 'object' ? notice.topics : {};
     const sections = [
         topics.release_drafts && renderReleaseDrafts(topics.release_drafts),
+        topics.readme_conversion && renderReadmeConversion(),
     ].filter(Boolean);
     if (sections.length === 0) return null;
 

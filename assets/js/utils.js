@@ -43,6 +43,17 @@ lodash.set(window, 'Pblsh.Utils', {
     getChannelDescription: (key) => (window.PblshData?.channelTexts || {})[key]?.description || '',
     getChannelIcon: (key) => ({ wporg: 'wordpress', self_hosted: 'server' })[key],
 
+    // The plugin's distribution status as the status button shows it: the post status
+    // self-hosted (public/draft), the directory's verdict on wordpress.org (public/closed).
+    getPluginStatus: (status) => {
+        const { __ } = wp.i18n;
+        return {
+            publish: { label: __('Public', 'peak-publisher'), modifier: 'public' },
+            draft: { label: __('Draft', 'peak-publisher'), modifier: 'draft' },
+            closed: { label: __('Closed', 'peak-publisher'), modifier: 'closed' },
+        }[status] || { label: status, modifier: 'draft' };
+    },
+
     // Get the deep link to one of the plugin's FAQ entries on wordpress.org (server-provided, see get_peak_publisher_faq_urls())
     getFaqUrl: (key) => (window.PblshData?.faqUrls || {})[key],
     // Generated fallback icon for plugins without directory assets (mirrors the

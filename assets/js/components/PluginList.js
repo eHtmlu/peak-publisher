@@ -4,7 +4,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
-    const { showAlert, getSvgIcon } = Pblsh.Utils;
+    const { showAlert, getSvgIcon, getPluginStatus } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount } = Pblsh.Components;
     //const { exportPlugin } = Pblsh.API;
 
@@ -61,8 +61,8 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                 createElement('td', { className: 'pblsh--table__status-cell' },
                                     createElement(wp.components.Button, {
                                         isTertiary: true,
-                                        className: 'pblsh--status-btn ' + (plugin.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
-                                        label: plugin.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher'),
+                                        className: 'pblsh--status-btn pblsh--status-btn--' + getPluginStatus(plugin.status).modifier,
+                                        label: getPluginStatus(plugin.status).label,
                                         icon: Pblsh.Utils.getSvgIcon('circle'),
                                         isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id),
                                         disabled: plugin.hosting_type === 'wporg' || (Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id)),

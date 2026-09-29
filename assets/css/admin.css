@@ -2549,6 +2549,8 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 .components-button.is-tertiary.pblsh--status-btn { color: #000 !important; }
 .components-button.is-tertiary.pblsh--status-btn--public { color: var(--color-green) !important; }
 .components-button.is-tertiary.pblsh--status-btn--draft { color: var(--color-gray) !important; }
+/* Closed on wordpress.org: the directory distributes nothing */
+.components-button.is-tertiary.pblsh--status-btn--closed { color: var(--color-red) !important; }
 
 /* Plugin info card */
 .pblsh--card--plugin-info {

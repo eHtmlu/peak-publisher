@@ -10,6 +10,9 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
     // the pointer does not name an existing tag; a self-hosted plugin offers no updates then.
     function getCurrentReleaseIssue(plugin) {
         if (!plugin || plugin.version) return null;
+        // Closed on wordpress.org: nothing is distributed whatever the pointer says — the
+        // closed notice is the one message; the pointer's issues return with the reopening.
+        if (plugin.wporg_stats && plugin.wporg_stats.closed) return null;
         const isWporg = plugin.hosting_type === 'wporg';
         const hasReleases = (Number(plugin.count_of_releases) || 0) > 0;
 
@@ -108,11 +111,16 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
     // The confirm before making a release current, by channel and by where the release sits
     // relative to the current one: 'higher' | 'lower' | 'none' (no current release). The
     // caller reads that off the version-sorted release list — rows above the current row
-    // are higher — never from a version comparison of its own.
-    function getFlipConfirmText(isWporg, version, relation) {
+    // are higher — never from a version comparison of its own. `closed` is the plugin's
+    // closed state on wordpress.org (wporg_stats.closed): the commit succeeds there, the
+    // distribution does not — so the confirm says only that, no matter the relation.
+    function getFlipConfirmText(isWporg, version, relation, closed = null) {
         const question = isWporg
             ? sprintf(__('Make %s the current release on wordpress.org?', 'peak-publisher'), version)
             : sprintf(__('Make %s the current release?', 'peak-publisher'), version);
+        if (isWporg && closed) {
+            return question + '\n' + __('The plugin is closed on wordpress.org — the change is committed, but nothing is distributed while it is closed.', 'peak-publisher');
+        }
         const timing = isWporg
             ? __('wordpress.org picks this up within a few minutes.', 'peak-publisher')
             : __('Sites see this with their next update check.', 'peak-publisher');

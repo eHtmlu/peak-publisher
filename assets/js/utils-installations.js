@@ -26,6 +26,17 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
             : __('Closed on wordpress.org', 'peak-publisher');
     }
 
+    // The notice above the releases of a closed plugin: wordpress.org's own closure
+    // sentence verbatim — it says whether the closure is permanent or under review, names
+    // the reason and that nothing is available for download. Only a closure answer without
+    // a sentence gets the bare fact and the consequence.
+    function getWporgClosedNotice(closed) {
+        if (closed.text) return closed.text;
+        return closed.date
+            ? sprintf(__('This plugin has been closed on wordpress.org as of %s. Nothing is distributed while it is closed.', 'peak-publisher'), closed.date)
+            : __('This plugin has been closed on wordpress.org. Nothing is distributed while it is closed.', 'peak-publisher');
+    }
+
     // The last failed attempt, as the editor's header row explains it.
     function getLastErrorText(lastError) {
         return sprintf(__('wordpress.org could not be reached %1$s: %2$s', 'peak-publisher'), formatRelativeTime(lastError.at), lastError.message);
@@ -86,5 +97,5 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
         };
     }
 
-    return { formatWporgActiveInstalls, getInstallationsCell, getWporgClosedFact, getLastErrorText, getDownloads, getRating };
+    return { formatWporgActiveInstalls, getInstallationsCell, getWporgClosedFact, getWporgClosedNotice, getLastErrorText, getDownloads, getRating };
 })());

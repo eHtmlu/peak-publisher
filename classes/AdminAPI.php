@@ -270,7 +270,9 @@ class AdminAPI {
             // the meta value) — shown as the mechanics line and sent back as the expected
             // value of a flip.
             'pointer' => $current['pointer'],
-            'status' => $post->post_status,
+            // The distribution switch: self-hosted the post status, wordpress.org the
+            // directory's verdict — 'closed' there means nothing is distributed.
+            'status' => !$is_self_hosted && $wporg_figures['wporg_stats']['closed'] !== null ? 'closed' : $post->post_status,
             'count_of_releases' => count($releases),
             'installations' => $is_self_hosted
                 ? serialize_self_hosted_installations((int) $post->ID)

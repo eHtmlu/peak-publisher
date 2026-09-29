@@ -4,9 +4,9 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip, Button, DropdownMenu, MenuItem, Spinner } = wp.components;
-    const { getSvgIcon, formatRelativeTime, getTimeTooltipProps } = Pblsh.Utils;
+    const { getSvgIcon, formatRelativeTime, getTimeTooltipProps, getPluginStatus } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
-    const { getLastErrorText, getDownloads, getRating } = Pblsh.InstallationsUtils;
+    const { getLastErrorText, getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
     const { NoticeBox, CurrentVersion, InstallationsCount, Figure } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
@@ -544,8 +544,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 isWporg && createElement('div', { className: 'pblsh--plugin-header__figures' }, ...renderWporgFiguresStatus()),
                                 createElement(Button, {
                                     isTertiary: true,
-                                    className: 'pblsh--status-btn ' + (pluginData?.status === 'publish' ? 'pblsh--status-btn--public' : 'pblsh--status-btn--draft'),
-                                    label: pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher'),
+                                    className: 'pblsh--status-btn pblsh--status-btn--' + getPluginStatus(pluginData?.status).modifier,
+                                    label: getPluginStatus(pluginData?.status).label,
                                     icon: getSvgIcon('circle'),
                                     isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
                                     disabled: isWporg || (Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id)),
@@ -556,7 +556,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             onTogglePluginStatus(pluginData.id, next);
                                         }
                                     },
-                                }, (pluginData?.status === 'publish' ? __('Public', 'peak-publisher') : __('Draft', 'peak-publisher')))
+                                }, getPluginStatus(pluginData?.status).label)
                             ),
                         ),
                         createElement('div', { className: 'pblsh--plugin-grid' },
@@ -612,7 +612,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     // plugin reloaded — never overwritten.
     const makeCurrent = async (rel, relation) => {
         if (!pluginData || flippingReleaseId !== null) return;
-        if (!confirm(getFlipConfirmText(isWporg, rel.version, relation))) return;
+        if (!confirm(getFlipConfirmText(isWporg, rel.version, relation, isWporg ? pluginData.wporg_stats.closed : null))) return;
         setFlipNotice(null);
         setFlippingReleaseId(rel.id);
         try {
@@ -629,13 +629,19 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         }
     };
 
-    // Notices above the releases table, in this order: transient success → closed
-    // (installations concept) → the pointer state (no current release).
+    // Notices above the releases table, in this order: transient success → closed on
+    // wordpress.org → the pointer state (no current release).
     const renderReleaseNotices = () => {
         const issue = getCurrentReleaseIssue(pluginData);
+        const closed = isWporg ? pluginData.wporg_stats.closed : null;
         return [
             flipNotice && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--releases-notice' },
                 createElement('p', null, flipNotice),
+            ),
+            // Closed on wordpress.org — the most important fact of the daily stats fetch:
+            // nothing is distributed, whatever the pointer says.
+            closed && createElement(NoticeBox, { key: 'closed', variant: 'warning', className: 'pblsh--releases-notice' },
+                createElement('p', null, getWporgClosedNotice(closed)),
             ),
             // The fact, then the remedy emphasized on its own line — one paragraph, as the box
             // holds a single thought.
@@ -653,7 +659,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         const hasLoaded = wp.data.select('pblsh/releases').hasLoadedForPlugin
             ? wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null)
             : false;
-        const pluginIsDraft = pluginData?.status !== 'publish';
+        // A draft (self-hosted) or closed (wordpress.org) plugin distributes nothing; its
+        // current release is what sites get once it does.
+        const distributesNothing = pluginData?.status !== 'publish';
+        const currentWhenTooltip = pluginData?.status === 'closed'
+            ? __('Current once the plugin is reopened on wordpress.org', 'peak-publisher')
+            : __('Current when the plugin is public', 'peak-publisher');
         // The list is sorted by version, descending: rows above the current one are higher
         // versions, rows below lower — the confirm's wording needs no version comparison.
         const currentIndex = releases.findIndex((rel) => rel.is_current);
@@ -688,12 +699,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     createElement('td', { className: 'pblsh--table__current-cell' },
                                         rel.is_current
                                             ? createElement(Tooltip, {
-                                                text: pluginIsDraft
-                                                    ? __('Current when the plugin is public', 'peak-publisher')
+                                                text: distributesNothing
+                                                    ? currentWhenTooltip
                                                     : __('Current release — sites receive this version', 'peak-publisher'),
                                             },
                                                 createElement('span', {
-                                                    className: 'pblsh--current-ring pblsh--current-ring--current' + (pluginIsDraft ? ' pblsh--current-ring--muted' : ''),
+                                                    className: 'pblsh--current-ring pblsh--current-ring--current' + (distributesNothing ? ' pblsh--current-ring--muted' : ''),
                                                     tabIndex: 0,
                                                     role: 'img',
                                                     'aria-label': __('Current release', 'peak-publisher'),

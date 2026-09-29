@@ -192,8 +192,10 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
         if (isWporg && closed) {
             return question + '\n' + __('The plugin is closed on wordpress.org — the change is committed, but nothing is distributed while it is closed.', 'peak-publisher');
         }
+        // Both channels deliver with the sites' next update check; wordpress.org first has to
+        // import the commit (the same wording as the upload's decision row).
         const timing = isWporg
-            ? __('wordpress.org picks this up within a few minutes.', 'peak-publisher')
+            ? __('Sites see this with their next update check once wordpress.org has processed the commit — usually within a few minutes.', 'peak-publisher')
             : __('Sites see this with their next update check.', 'peak-publisher');
         switch (relation) {
             case 'lower':
@@ -205,7 +207,7 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
                     + sprintf(__('Every site will be offered %s as an update.', 'peak-publisher'), version) + ' ' + timing;
             default:
                 return question + '\n' + (isWporg
-                    ? sprintf(__('wordpress.org currently distributes trunk; afterwards it distributes %s. This is picked up within a few minutes.', 'peak-publisher'), version)
+                    ? sprintf(__('wordpress.org currently distributes trunk; afterwards it distributes %s.', 'peak-publisher'), version) + ' ' + timing
                     : sprintf(__('The plugin currently offers no updates; afterwards new installs and sites below %1$s will receive %1$s with their next update check.', 'peak-publisher'), version));
         }
     }
@@ -213,7 +215,7 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
     // The transient notice after a successful flip.
     function getFlipSuccessText(isWporg, version, revision) {
         return isWporg
-            ? sprintf(__('Stable tag set to %1$s in r%2$s — wordpress.org picks it up within a few minutes.', 'peak-publisher'), version, revision)
+            ? sprintf(__('Stable tag set to %1$s in r%2$s — sites see it with their next update check once wordpress.org has processed the commit, usually within a few minutes.', 'peak-publisher'), version, revision)
             : sprintf(__('%s is now the current release — sites see it with their next update check.', 'peak-publisher'), version);
     }
 

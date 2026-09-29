@@ -9,7 +9,7 @@ require_once __DIR__ . '/WporgSvnException.php';
 
 /**
  * The operations layer for everything Peak Publisher does against wordpress.org:
- * SVN deploys and tag deletes (under a per-slug lock), tag and revision reads,
+ * SVN deploys, stable tag flips and tag deletes (under a per-slug lock), tag and revision reads,
  * the account/access probe and the directory hint. Every write is one commit
  * through commit_files(), which also keeps the operations log. It owns the fixed
  * error catalog of these operations (exception()); the HTTP transport lives in
@@ -209,9 +209,14 @@ class WporgOperations {
                 throw $e;
             }
 
+            // The commit message tells the log reader at once whether the release went live.
+            $stable_tag_note = $decision['pointer_changed']
+                ? sprintf('stable tag set to %s', $decision['pointer_value'])
+                : ($live !== null && $live['stable_tag'] !== '' ? sprintf('stable tag stays %s', $live['stable_tag']) : 'stable tag unchanged');
+
             return [
                 ...self::merge_reconcile_plans($plans),
-                'message' => sprintf('Publish %s %s via Peak Publisher', $wporg_slug, $version),
+                'message' => sprintf('Publish version %s of %s (%s) via Peak Publisher', $version, $wporg_slug, $stable_tag_note),
                 'details' => [
                     'version' => $version,
                     'deploy_mode' => $touch_trunk ? 'trunk_and_tag' : 'tag_only',
@@ -224,6 +229,59 @@ class WporgOperations {
         });
 
         return [ ...$result, 'touched_trunk' => $touch_trunk, ...$outcome ];
+    }
+
+    /**
+     * Makes tags/{version} the current release on wordpress.org: one commit that rewrites the
+     * Stable tag line of trunk's readme (R2 — only existing tags, never trunk). Built under
+     * the lock from the live readme and compared with the value the editor showed, so a flip
+     * by someone else is refused, never overwritten; null = the editor could not read the
+     * pointer (no expectation to compare with).
+     *
+     * @return array{revision:int, committed:bool, details:array, from:string, trunk_readme:array}
+     *         from = the Stable tag before, trunk_readme = the cache entry of the written readme.
+     * @throws WporgSvnException current_release_target_missing (the tag does not exist),
+     *         wporg_trunk_readme_unreadable, wporg_trunk_readme_missing (trunk has no readme —
+     *         a release with one must be published first), current_release_changed,
+     *         invalid_current_release_target (it is the current release already).
+     */
+    public static function set_stable_tag(\WP_Post $marker, string $version, ?string $expected_stable_tag, string $username): array {
+        $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
+        $version = self::safe_path_segment($version);
+
+        $outcome = [];
+        $result = self::commit_files($marker, $username, 'stable_tag', function(WporgPluginSvnClient $client) use ($wporg_slug, $version, $expected_stable_tag, &$outcome): array {
+            if (!self::tag_exists($client, $wporg_slug, $version)) {
+                throw self::exception('current_release_target_missing');
+            }
+            try {
+                $live = self::read_trunk_readme($client, $wporg_slug);
+            } catch (WporgSvnException $e) {
+                throw self::exception('wporg_trunk_readme_unreadable');
+            }
+            if ($live['file_name'] === null) {
+                throw self::exception('wporg_trunk_readme_missing');
+            }
+            if ($expected_stable_tag !== null && $live['stable_tag'] !== $expected_stable_tag) {
+                throw self::exception('current_release_changed');
+            }
+            if ($live['stable_tag'] === $version) {
+                throw self::exception('invalid_current_release_target');
+            }
+
+            // The variant is the closure's last step: nothing can throw between its creation
+            // and the plan that lists it for cleanup.
+            $variant = self::readme_variant($live['content'], $version);
+            $outcome = [ 'from' => $live['stable_tag'], 'trunk_readme' => self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $live['file_name'] ]) ];
+            return [
+                'puts' => [ [ 'path' => 'trunk/' . $live['file_name'], 'local_path' => $variant['path'] ] ],
+                'message' => sprintf('Set stable tag to version %s of %s via Peak Publisher', $version, $wporg_slug),
+                'details' => [ 'from' => $live['stable_tag'], 'to' => $version ],
+                'cleanup' => [ $variant['path'] ],
+            ];
+        });
+
+        return [ ...$result, ...$outcome ];
     }
 
     public static function list_tags(string $wporg_slug): array {
@@ -425,8 +483,13 @@ class WporgOperations {
     }
 
     /**
-     * Deletes tags/{version} in one commit. A tag that does not exist yields an empty plan:
-     * nothing is committed (committed false), the caller removes its mirror post as before.
+     * Deletes tags/{version} in one commit. R4 — the current release cannot be deleted
+     * (wordpress.org would fall back to distributing trunk): the live trunk readme is the
+     * last gate before the irreversible delete, read under the lock; no cache check before it.
+     *
+     * @throws WporgSvnException wporg_tag_not_found (404) when the tag is gone already — the
+     *         caller answers with the code, the client refreshes, the tag sync removes the
+     *         post; current_release_protected (409); wporg_trunk_readme_unreadable.
      */
     public static function delete_tag(\WP_Post $marker, string $version, string $username): array {
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
@@ -434,11 +497,19 @@ class WporgOperations {
 
         return self::commit_files($marker, $username, 'delete_tag', static function(WporgPluginSvnClient $client) use ($wporg_slug, $version): array {
             if (!self::tag_exists($client, $wporg_slug, $version)) {
-                return [ 'details' => [ 'version' => $version, 'tag_existed' => false ] ];
+                throw self::exception('wporg_tag_not_found');
+            }
+            try {
+                $live = self::read_trunk_readme($client, $wporg_slug);
+            } catch (WporgSvnException $e) {
+                throw self::exception('wporg_trunk_readme_unreadable');
+            }
+            if ($live['stable_tag'] === $version) {
+                throw self::exception('current_release_protected');
             }
             return [
                 'deletes' => [ 'tags/' . $version ],
-                'message' => sprintf('Delete %s %s via Peak Publisher', $wporg_slug, $version),
+                'message' => sprintf('Delete version %s of %s via Peak Publisher', $version, $wporg_slug),
                 'details' => [ 'version' => $version ],
             ];
         });
@@ -1197,6 +1268,11 @@ class WporgOperations {
             'current_release_changed' => [__('The current release on wordpress.org changed in the meantime. Reload and check the decision again.', 'peak-publisher'), 409],
             'wporg_trunk_readme_unreadable' => [__('trunk/readme.txt could not be read from wordpress.org, so the Stable tag cannot be handled safely. Try again.', 'peak-publisher'), 502],
             'wporg_readme_variant_failed' => [__('The readme variant for trunk could not be written on this server.', 'peak-publisher'), 500],
+            'current_release_target_missing' => [__('The tag to make current no longer exists on wordpress.org.', 'peak-publisher'), 404],
+            'invalid_current_release_target' => [__('This release is the current release on wordpress.org already.', 'peak-publisher'), 400],
+            'wporg_trunk_readme_missing' => [__('wordpress.org has no readme.txt in trunk yet — publish a release with a readme.txt first.', 'peak-publisher'), 409],
+            'current_release_protected' => [__('This is the current release on wordpress.org — make another release current before deleting it.', 'peak-publisher'), 409],
+            'wporg_tag_not_found' => [__('This tag no longer exists on wordpress.org.', 'peak-publisher'), 404],
         };
         return new WporgSvnException($code, $message, $status);
     }

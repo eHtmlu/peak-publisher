@@ -47,10 +47,13 @@
         if (!state) state = initialState;
         switch (action.type) {
             case 'SET_LIST': {
+                // The list refreshes the list fields and drops plugins it no longer names;
+                // what the store already knows beyond the list (the detail's wporg_account)
+                // stays, so a list refresh behind an open editor does not blank it.
                 var map = {};
                 var ids = [];
                 (Array.isArray(action.items) ? action.items : []).forEach(function(it) {
-                    map[it.id] = it;
+                    map[it.id] = assign({}, state.byId[it.id] || {}, it);
                     ids.push(it.id);
                 });
                 return assign({}, state, { ids: ids, byId: map, lastFetch: Date.now(), error: null });

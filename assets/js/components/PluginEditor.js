@@ -20,6 +20,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     // The releases table has per-version figures only self-hosted, and only while the
     // counting is on — read off the plugin's installations state, never the setting.
     const showReleaseInstallations = !!pluginData && !isWporg && pluginData.installations.state === 'ok';
+    // The one gate for every wordpress.org write action (flip, delete): a usable account
+    // (wporg_account.can_write; the list payload has no account, so undefined until the
+    // detail is loaded — off then too, without a reason to show).
+    const wporgAccount = isWporg && pluginData ? pluginData.wporg_account : null;
+    const wporgWriteBlocked = isWporg && !(wporgAccount && wporgAccount.can_write);
+    const wporgWriteBlockedText = wporgAccount === undefined ? null : __('No usable wordpress.org account — connect one under Settings › wordpress.org.', 'peak-publisher');
 
     // ---- Asset state ----
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
@@ -712,16 +718,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             )
                                             : flippingReleaseId === rel.id
                                                 ? createElement(Spinner, { className: 'pblsh--current-ring-spinner' })
-                                                // The ring of every other row is the action "Make … the current release".
-                                                // wordpress.org rows wait for the wporg write paths — transitional.
+                                                // The ring of every other row is the action "Make … the current release" —
+                                                // both channels; wordpress.org needs a usable account.
                                                 : createElement(Button, {
                                                     className: 'pblsh--current-ring-button',
-                                                    label: isWporg
-                                                        ? __('Not available for wordpress.org plugins yet', 'peak-publisher')
-                                                        : sprintf(__('Make %s the current release', 'peak-publisher'), rel.version),
+                                                    label: wporgWriteBlocked && wporgWriteBlockedText ? wporgWriteBlockedText : sprintf(__('Make %s the current release', 'peak-publisher'), rel.version),
                                                     showTooltip: true,
                                                     __experimentalIsFocusable: true,
-                                                    disabled: isWporg || flippingReleaseId !== null,
+                                                    disabled: wporgWriteBlocked || flippingReleaseId !== null,
                                                     onClick: () => makeCurrent(rel, relationToCurrent(index)),
                                                 },
                                                     createElement('span', { className: 'pblsh--current-ring', 'aria-hidden': 'true' })
@@ -784,12 +788,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                     createElement(wp.components.MenuItem, {
                                                         key: 'delete',
                                                         isDestructive: true,
-                                                        disabled: rel.is_current,
+                                                        disabled: rel.is_current || wporgWriteBlocked,
                                                         info: rel.is_current
                                                             ? (isWporg
                                                                 ? __('Make another release current first — the last release can only be removed via SVN.', 'peak-publisher')
                                                                 : __('Make another release current first — the last release can only be removed together with the plugin.', 'peak-publisher'))
-                                                            : undefined,
+                                                            : (wporgWriteBlocked && wporgWriteBlockedText ? wporgWriteBlockedText : undefined),
                                                         onClick: async () => {
                                                             try {
                                                                 const message = isWporg
@@ -806,7 +810,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                                     refreshPlugin();
                                                                 }
                                                             } catch (e) {
-                                                                alert(e?.message || 'Error deleting release');
+                                                                // apiFetch rejects with the REST error payload: message leads, the code follows.
+                                                                alert((e?.message || __('Could not delete the release.', 'peak-publisher'))
+                                                                    + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));
+                                                                // The tag is gone already, or the release became current meanwhile: the list is stale.
+                                                                if (['wporg_tag_not_found', 'current_release_protected'].includes(e?.code) && typeof refreshPlugin === 'function') refreshPlugin();
                                                             }
                                                         },
                                                     },

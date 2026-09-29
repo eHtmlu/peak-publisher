@@ -412,6 +412,44 @@ class AdminAPI {
         return [ 'status' => 'ok' ];
     }
 
+    /**
+     * The account a wordpress.org write outside the upload runs with (flip, tag delete): the
+     * marker's assigned account, else the first usable one, probed as before the deploy. Never
+     * written back — the assignment changes only through a deploy (select_wporg_account_username()
+     * is the interim rule until accounts are assigned explicitly).
+     *
+     * @return string|\WP_REST_Response The username, or the error response to return.
+     */
+    private function resolve_wporg_write_account(\WP_Post $marker) {
+        $preferred_username = wporg_string_from_value(get_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', true));
+
+        require_once __DIR__ . '/WporgOperations.php';
+        try {
+            $account = WporgOperations::resolve_wporg_account_access((string) $marker->post_name, $preferred_username !== '' ? $preferred_username : null);
+        } catch (\Throwable $e) {
+            return $this->rest_error_response($this->make_rest_error('wporg_access_check_failed', __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'), 502));
+        }
+
+        $status = (string) ($account['status'] ?? 'error');
+        $username = (string) ($account['username'] ?? '');
+        if ($status === 'ok' && $username !== '') {
+            return $username;
+        }
+        [$code, $http_status] = match ($status) {
+            'no_credentials' => ['wporg_no_credentials', 400],
+            'not_found' => ['wporg_not_found', 404],
+            'credentials_rejected' => ['wporg_credentials_rejected', 401],
+            default => ['wporg_access_check_failed', 502],
+        };
+        return $this->rest_error_response($this->make_rest_error(
+            $code,
+            (isset($account['message']) && is_string($account['message']) && $account['message'] !== '')
+                ? $account['message']
+                : __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
+            $http_status
+        ));
+    }
+
     private function delete_wporg_release_tag(\WP_Post $release, \WP_Post $parent) {
         $version = (string) ($release->post_title ?? '');
         if ($version === '') {
@@ -427,57 +465,19 @@ class AdminAPI {
             ));
         }
 
-        $preferred_username = wporg_string_from_value(get_post_meta((int) $parent->ID, '_pblsh_wporg_account_username', true));
+        $username = $this->resolve_wporg_write_account($parent);
+        if ($username instanceof \WP_REST_Response) {
+            return $username;
+        }
 
         require_once __DIR__ . '/WporgOperations.php';
         try {
-            $account = WporgOperations::resolve_wporg_account_access((string) $parent->post_name, $preferred_username !== '' ? $preferred_username : null);
-        } catch (\Throwable $e) {
-            return $this->rest_error_response($this->make_rest_error(
-                'wporg_access_check_failed',
-                __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
-                502
-            ));
-        }
-
-        $account_status = (string) ($account['status'] ?? 'error');
-        $username = (string) ($account['username'] ?? '');
-        if ($account_status !== 'ok' || $username === '') {
-            [$code, $status] = match ($account_status) {
-                'no_credentials' => ['wporg_no_credentials', 400],
-                'not_found' => ['wporg_not_found', 404],
-                'credentials_rejected' => ['wporg_credentials_rejected', 401],
-                default => ['wporg_access_check_failed', 502],
-            };
-            return $this->rest_error_response($this->make_rest_error(
-                $code,
-                (isset($account['message']) && is_string($account['message']) && $account['message'] !== '')
-                    ? $account['message']
-                    : __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
-                $status
-            ));
-        }
-
-        try {
             $delete_result = WporgOperations::delete_tag($parent, $version, $username);
+        } catch (WporgSvnException $e) {
+            // The pipeline's errors travel as they are: code, message and status from the throw site.
+            return $this->rest_error_response($this->make_rest_error($e->get_error_code(), $e->getMessage(), $e->get_http_status()));
         } catch (\Throwable $e) {
-            $code = $e instanceof \RuntimeException && $e->getMessage() !== '' ? $e->getMessage() : 'wporg_tag_delete_failed';
-            if ($code === '0' || $code === '') {
-                $code = 'wporg_tag_delete_failed';
-            }
-            $status = in_array($code, ['wporg_concurrent_external_change', 'deploy_in_progress'], true) ? 409 : 502;
-            if (in_array($code, ['no_write_access', 'invalid_credentials', 'account_not_configured'], true)) {
-                $status = 403;
-            }
-            return $this->rest_error_response($this->make_rest_error(
-                $code,
-                __('Could not delete the wordpress.org SVN tag.', 'peak-publisher'),
-                $status
-            ));
-        }
-
-        if ($preferred_username !== $username) {
-            update_post_meta((int) $parent->ID, '_pblsh_wporg_account_username', $username);
+            return $this->rest_error_response($this->make_rest_error('wporg_tag_delete_failed', __('Could not delete the wordpress.org SVN tag.', 'peak-publisher'), 502));
         }
 
         wp_delete_post((int) $release->ID, true);
@@ -485,7 +485,7 @@ class AdminAPI {
 
         return [
             'status' => 'ok',
-            'revision' => (int) ($delete_result['revision'] ?? 0),
+            'revision' => $delete_result['revision'],
             'committed' => !empty($delete_result['committed']),
         ];
     }
@@ -534,10 +534,10 @@ class AdminAPI {
     }
 
     /**
-     * Makes a release the plugin's current release — the one sites receive. Self-hosted
-     * writes the pointer meta; the wordpress.org branch (a Stable tag commit) arrives with
-     * the wporg write paths — until then the request is refused and the client offers no
-     * action for wordpress.org rows.
+     * Makes a release the plugin's current release — the one sites receive — on both channels:
+     * self-hosted writes the pointer meta, wordpress.org commits the Stable tag line of trunk's
+     * readme. expected_pointer is the pointer the editor showed (null when it could not read
+     * it), so a flip by someone else in the meantime is refused, never overwritten.
      */
     public function set_current_release(\WP_REST_Request $request) {
         $plugin = get_post((int) $request->get_param('id'));
@@ -549,28 +549,34 @@ class AdminAPI {
         if ($version === '') {
             return $this->rest_error_response($this->make_rest_error('invalid_version', __('Missing plugin version.', 'peak-publisher'), 400, 'version'));
         }
-        $expected_pointer = (string) ($params['expected_pointer'] ?? '');
+        $expected_pointer = isset($params['expected_pointer']) && is_string($params['expected_pointer']) ? $params['expected_pointer'] : null;
 
-        if (is_wporg_plugin($plugin)) {
-            // Transitional until the wporg write paths exist.
-            return $this->rest_error_response($this->make_rest_error(
-                'wporg_current_release_unavailable',
-                __('Changing the current release of a wordpress.org plugin is not available yet.', 'peak-publisher'),
-                501
-            ));
+        if (!is_wporg_plugin($plugin)) {
+            $result = flip_current_release_pointer($plugin, $version, (string) $expected_pointer);
+            if (is_wp_error($result)) {
+                return $this->rest_error_response($result);
+            }
+            return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $result['to'], 'revision' => null ];
         }
 
-        $result = flip_current_release_pointer($plugin, $version, $expected_pointer);
-        if (is_wp_error($result)) {
-            return $this->rest_error_response($result);
+        $username = $this->resolve_wporg_write_account($plugin);
+        if ($username instanceof \WP_REST_Response) {
+            return $username;
+        }
+        require_once __DIR__ . '/WporgOperations.php';
+        try {
+            $result = WporgOperations::set_stable_tag($plugin, $version, $expected_pointer, $username);
+        } catch (WporgSvnException $e) {
+            return $this->rest_error_response($this->make_rest_error($e->get_error_code(), $e->getMessage(), $e->get_http_status()));
+        } catch (\Throwable $e) {
+            return $this->rest_error_response($this->make_rest_error('wporg_stable_tag_failed', __('Could not change the current release on wordpress.org.', 'peak-publisher'), 502));
         }
 
-        return [
-            'status' => 'ok',
-            'from' => $result['from'],
-            'to' => $result['to'],
-            'revision' => null,
-        ];
+        // The cache serves the written pointer until the next refresh; the title follows it.
+        mark_wporg_plugin_cache_stale((int) $plugin->ID, [ 'trunk_readme' => $result['trunk_readme'] ]);
+        refresh_plugin_title_from_reference((int) $plugin->ID);
+
+        return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $version, 'revision' => $result['revision'] ];
     }
 
     /**

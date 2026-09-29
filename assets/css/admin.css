@@ -948,6 +948,15 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     width: 16rem;
 }
 
+/* Installations column: wordpress.org's rounded bucket per row */
+.pblsh--wporg-import__installations-header,
+.pblsh--wporg-import__installations-cell {
+    box-sizing: border-box;
+    width: 7rem;
+    white-space: nowrap;
+    text-align: right;
+}
+
 .pblsh--wporg-import__table th,
 .pblsh--wporg-import__table td {
     padding: 0.75rem;

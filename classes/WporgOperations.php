@@ -474,6 +474,7 @@ class WporgOperations {
             'icon' => null,
             'description' => null,
             'release_count' => null,
+            'active_installs' => null,
             'closed_date' => null,
         ];
         $normalized = normalize_wporg_username($username);
@@ -487,7 +488,7 @@ class WporgOperations {
         try {
             $info = wporg_api_plugin_information(
                 [ $wporg_slug ],
-                wporg_api_fields([ 'contributors', 'icons', 'short_description', 'versions' ])
+                wporg_api_fields([ 'active_installs', 'contributors', 'icons', 'short_description', 'versions' ])
             )[$wporg_slug];
         } catch (WporgSvnException $e) {
             // Remote failures degrade to 'unknown' facts — for a valid slug the hint never throws.
@@ -506,6 +507,9 @@ class WporgOperations {
             $hint['release_count'] = is_array($data['versions'] ?? null)
                 ? count(array_diff(array_map('strval', array_keys($data['versions'])), [ 'trunk' ]))
                 : null;
+            // wordpress.org's rounded bucket — the import table shows it for manually
+            // added slugs, which the discovery did not deliver.
+            $hint['active_installs'] = is_numeric($data['active_installs'] ?? null) ? (int) $data['active_installs'] : null;
 
             // author_profile is the profile URL of the current plugin owner (post author);
             // its last path segment is the owner's user_nicename.

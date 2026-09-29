@@ -1165,6 +1165,8 @@ class AdminAPI {
                 'slug' => $slug,
                 'name' => (string) ($plugin['name'] ?? $slug),
                 'icon' => isset($plugin['icon']) && is_string($plugin['icon']) ? $plugin['icon'] : null,
+                // wordpress.org's rounded bucket, as the plugin list will show it.
+                'active_installs' => is_int($plugin['active_installs'] ?? null) ? $plugin['active_installs'] : null,
                 'already_imported' => isset($already_imported_by_slug[$slug]),
                 'existing_plugin_id' => $already_imported_by_slug[$slug] ?? null,
                 'count_of_releases' => isset($already_imported_by_slug[$slug])

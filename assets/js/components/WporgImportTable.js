@@ -11,7 +11,8 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
     const { useSelect } = wp.data;
     const { Button, TextControl, Spinner } = wp.components;
     const { getGeopatternIconUrl, getSvgIcon } = Pblsh.Utils;
-    const { ChannelPath } = Pblsh.Components;
+    const { formatWporgActiveInstalls } = Pblsh.InstallationsUtils;
+    const { ChannelPath, Figure } = Pblsh.Components;
 
     const [discoverStatus, setDiscoverStatus] = useState('idle');
     const [discoverError, setDiscoverError] = useState('');
@@ -79,6 +80,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
             slug: String(plugin.slug || ''),
             name: String(plugin.name || plugin.slug || ''),
             icon: typeof plugin.icon === 'string' ? plugin.icon : '',
+            active_installs: Number.isFinite(plugin.active_installs) ? plugin.active_installs : null,
             already_imported: !!plugin.already_imported,
             imported: false,
             existing_plugin_id: plugin.existing_plugin_id || null,
@@ -144,6 +146,11 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
                     count_of_releases: Number.isFinite(plugin.count_of_releases)
                         ? plugin.count_of_releases
                         : (Number.isFinite(row.count_of_releases) ? row.count_of_releases : null),
+                    // Discovered rows brought their figure; manually added ones get it
+                    // from the directory hint.
+                    active_installs: Number.isFinite(row.active_installs)
+                        ? row.active_installs
+                        : (hint && Number.isFinite(hint.active_installs) ? hint.active_installs : null),
                     directory_hint: plugin.directory_hint && typeof plugin.directory_hint === 'object' ? plugin.directory_hint : null,
                     access_status: plugin.access_status || 'error',
                     message: plugin.message || null,
@@ -392,6 +399,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
         setImportRows((prev) => prev.concat([{
             slug: result.slug,
             name: result.slug,
+            active_installs: null,
             already_imported: false,
             imported: false,
             existing_plugin_id: null,
@@ -618,7 +626,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
             return null;
         })();
         return content ? createElement('tr', null,
-            createElement('td', { colSpan: 3, className: 'pblsh--wporg-import__table-state' }, content),
+            createElement('td', { colSpan: 4, className: 'pblsh--wporg-import__table-state' }, content),
         ) : null;
     };
 
@@ -627,7 +635,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
     const renderAddRow = () => {
         return createElement('tfoot', null,
             createElement('tr', null,
-                createElement('td', { colSpan: 3, className: 'pblsh--wporg-import__add-cell' },
+                createElement('td', { colSpan: 4, className: 'pblsh--wporg-import__add-cell' },
                     createElement('div', { className: 'pblsh--wporg-import__add-controls' },
                         createElement(TextControl, {
                             value: manualSlug,
@@ -692,6 +700,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
                                 }) : null),
                             ),
                             createElement('th', null, __('Plugin', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--wporg-import__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--wporg-import__status-header' }, __('Status', 'peak-publisher')),
                         ),
                     ),
@@ -724,6 +733,12 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
                                         }) : null),
                                 ),
                                 createElement('td', null, renderRowIdentity(row)),
+                                // wordpress.org's rounded public figure, as the plugin list will show it.
+                                createElement('td', { className: 'pblsh--wporg-import__installations-cell' },
+                                    Number.isFinite(row.active_installs)
+                                        ? createElement(Figure, { title: formatWporgActiveInstalls(row.active_installs).title }, formatWporgActiveInstalls(row.active_installs).text)
+                                        : '—',
+                                ),
                                 createElement('td', null,
                                     // The row's one action sits inline right after the
                                     // status it follows from ("Already imported → Open"),

@@ -10,33 +10,49 @@ require_once __DIR__ . '/WporgSvnException.php';
 /**
  * The operations layer for everything Peak Publisher does against wordpress.org:
  * SVN deploys and tag deletes (under a per-slug lock), tag and revision reads,
- * the account/access probe and the directory hint. It owns the fixed error
- * catalog of these operations (exception()); the HTTP transport lives in
+ * the account/access probe and the directory hint. Every write is one commit
+ * through commit_files(), which also keeps the operations log. It owns the fixed
+ * error catalog of these operations (exception()); the HTTP transport lives in
  * WporgPluginSvnClient.
  */
 class WporgOperations {
-    public static function deploy_directory(
-        string $root,
-        string $version,
-        string $wporg_slug,
-        string $username,
-        bool $touch_trunk = true,
-        ?callable $progress = null
-    ): array {
+    /**
+     * The one write path to wordpress.org SVN: every commit Peak Publisher makes — deploy,
+     * stable tag, tag delete, later assets and readme edits — is one Plan committed here
+     * under the plugin's lock. $build_plan builds the Plan *under the lock* from fresh remote
+     * reads (never a cache), so its facts hold when the commit lands, and it throws when the
+     * remote state contradicts what the caller's dialog showed.
+     *
+     * Plan = [
+     *   'deletes' => string[]                                  paths relative to the plugin root
+     *   'mkdirs'  => string[]                                  directories to create (tolerant)
+     *   'puts'    => array{path:string, local_path:string}[]   a PUT replaces existing content
+     *   'message' => string                                    the commit message
+     *   'details' => array                                     the operations log entry's details
+     *   'cleanup' => string[]                                  temp files deleted in finally
+     * ]
+     * Every entry counts as a change: a directory is listed only when it may be missing,
+     * never one known to exist (creating an existing one is tolerated, but it is no change).
+     * The primitive orders the operations: deletes deep-first, mkdirs shallow-first, puts by
+     * path. An empty plan (no deletes, no mkdirs, no puts) commits nothing: committed false,
+     * revision null, no log entry.
+     *
+     * @param \WP_Post $marker     The wporg marker (post_name = slug; the log lives on it).
+     * @param string   $operation  deploy | stable_tag | delete_tag | assets | readme — the
+     *                             lock's label and the log entry's operation.
+     * @param callable $build_plan fn(WporgPluginSvnClient $client, int $base_revision): Plan
+     * @return array{revision:int|null, committed:bool, details:array}
+     * @throws WporgSvnException Credentials, lock, not_found, concurrent change, transport
+     *         errors — and whatever $build_plan throws.
+     */
+    public static function commit_files(\WP_Post $marker, string $username, string $operation, callable $build_plan): array {
         raise_wporg_time_limit();
 
-        // Validate deploy inputs and account credentials
-        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
         $username = normalize_wporg_username($username, 'username');
         if (is_wp_error($username)) {
             throw WporgSvnException::from_wp_error($username);
         }
-        $version = self::safe_path_segment($version);
-        $root = trailingslashit($root);
-        if (!is_dir($root) || !is_readable($root)) {
-            throw self::exception('deploy_directory_missing');
-        }
-
         $credentials = get_wporg_credentials($username);
         if (is_wp_error($credentials)) {
             throw WporgSvnException::from_wp_error($credentials);
@@ -45,68 +61,49 @@ class WporgOperations {
             throw self::exception('account_not_configured');
         }
 
-        // Lock this wporg slug before writing to SVN
-        $lock = self::acquire_wporg_deploy_lock($wporg_slug, $username, 'deploy');
+        $lock = self::acquire_wporg_deploy_lock($wporg_slug, $username, $operation, (int) $marker->ID);
         $client = null;
+        $plan = [ 'cleanup' => [] ];
         try {
-            // Collect the local tree that will be reconciled into SVN
-            $local_tree = self::collect_local_tree($root);
-            if (!self::tree_has_php_file($local_tree)) {
-                throw self::exception('wporg_tag_requires_php');
-            }
-
-            // Read the base revision before building the remote diff
-            $deploy_base_revision = self::get_plugin_revision($wporg_slug);
-            if ($deploy_base_revision === null) {
+            $base_revision = self::get_plugin_revision($wporg_slug);
+            if ($base_revision === null) {
                 throw self::exception('not_found');
             }
-
             $client = self::svn_client($username, $credentials['password']);
 
-            if (is_callable($progress)) {
-                $progress('diff');
+            $plan = self::normalize_plan($build_plan($client, $base_revision));
+            if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['puts'] === []) {
+                return [ 'revision' => null, 'committed' => false, 'details' => $plan['details'] ];
             }
 
-            // Build reconcile plans for trunk and the version tag
-            $plans = [];
-            if ($touch_trunk) {
-                $remote_trunk = self::read_remote_tree($client, $wporg_slug, 'trunk');
-                $plans[] = self::build_reconcile_plan($client, $wporg_slug, 'trunk', $local_tree, $remote_trunk);
-            }
-
-            $tag_base = 'tags/' . $version;
-            $remote_tag = self::read_remote_tree($client, $wporg_slug, $tag_base);
-            $plans[] = self::build_reconcile_plan($client, $wporg_slug, $tag_base, $local_tree, $remote_tag);
-
-            // Abort if SVN changed since the diff was built
+            // Abort if SVN changed while the plan was built.
             $current_revision = self::get_plugin_revision($wporg_slug);
-            if ($current_revision === null || (int) $current_revision !== (int) $deploy_base_revision) {
+            if ($current_revision === null || (int) $current_revision !== (int) $base_revision) {
                 throw self::exception('wporg_concurrent_external_change');
             }
 
-            if (is_callable($progress)) {
-                $progress('commit');
-            }
-
-            // Apply the reconcile plans and commit them as one revision
             $client->begin_commit($wporg_slug);
-            foreach ($plans as $plan) {
-                self::apply_reconcile_plan($client, $plan);
+            foreach ($plan['deletes'] as $path) {
+                $client->del($path);
             }
+            foreach ($plan['mkdirs'] as $path) {
+                $client->mkdir($path);
+            }
+            foreach ($plan['puts'] as $put) {
+                $client->add_file($put['path'], $put['local_path']);
+            }
+            $commit = $client->commit($plan['message']);
 
-            $commit = $client->commit(sprintf('Publish %s %s via Peak Publisher', $wporg_slug, $version));
             // A successful commit is the strongest possible credential verdict.
             record_wporg_credentials_verdict($username, true);
-            return [
-                'revision' => (int) ($commit['revision'] ?? 0),
-                'committed' => true,
-                'touched_trunk' => $touch_trunk,
-            ];
+            $revision = (int) ($commit['revision'] ?? 0);
+            record_wporg_operation((int) $marker->ID, $operation, $username, $revision, $plan['details']);
+            return [ 'revision' => $revision, 'committed' => true, 'details' => $plan['details'] ];
         } catch (WporgSvnException $e) {
             if ($e->get_error_code() === 'invalid_credentials') {
                 record_wporg_credentials_verdict($username, false);
             }
-            if ($client instanceof WporgPluginSvnClient && in_array($e->get_error_code(), ['wporg_concurrent_external_change'], true)) {
+            if ($client instanceof WporgPluginSvnClient) {
                 $client->abort();
             }
             throw $e;
@@ -117,7 +114,50 @@ class WporgOperations {
             throw $e;
         } finally {
             self::release_wporg_deploy_lock($lock);
+            foreach ($plan['cleanup'] as $path) {
+                if (file_exists($path)) {
+                    wp_delete_file($path);
+                }
+            }
         }
+    }
+
+    /**
+     * Publishes a prepared plugin directory as tags/{version} and, with $touch_trunk, as trunk
+     * — one commit through commit_files(). Both trees are reconciled against fresh remote
+     * listings under the lock: remote-only paths are deleted, changed and missing files put.
+     *
+     * @return array{revision:int|null, committed:bool, details:array, touched_trunk:bool}
+     */
+    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk): array {
+        $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
+        $version = self::safe_path_segment($version);
+        $root = trailingslashit($root);
+        if (!is_dir($root) || !is_readable($root)) {
+            throw self::exception('deploy_directory_missing');
+        }
+
+        $result = self::commit_files($marker, $username, 'deploy', static function(WporgPluginSvnClient $client) use ($wporg_slug, $root, $version, $touch_trunk): array {
+            $local_tree = self::collect_local_tree($root);
+            if (!self::tree_has_php_file($local_tree)) {
+                throw self::exception('wporg_tag_requires_php');
+            }
+
+            $plans = [];
+            if ($touch_trunk) {
+                $plans[] = self::build_reconcile_plan($client, $wporg_slug, 'trunk', $local_tree, self::read_remote_tree($client, $wporg_slug, 'trunk'));
+            }
+            $tag_base = 'tags/' . $version;
+            $plans[] = self::build_reconcile_plan($client, $wporg_slug, $tag_base, $local_tree, self::read_remote_tree($client, $wporg_slug, $tag_base));
+
+            return [
+                ...self::merge_reconcile_plans($plans),
+                'message' => sprintf('Publish %s %s via Peak Publisher', $wporg_slug, $version),
+                'details' => [ 'version' => $version, 'deploy_mode' => $touch_trunk ? 'trunk_and_tag' : 'tag_only' ],
+            ];
+        });
+
+        return [ ...$result, 'touched_trunk' => $touch_trunk ];
     }
 
     public static function list_tags(string $wporg_slug): array {
@@ -296,76 +336,36 @@ class WporgOperations {
         return $out;
     }
 
-    public static function delete_tag(string $wporg_slug, string $version, string $username): array {
-        raise_wporg_time_limit();
-
-        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+    /**
+     * Deletes tags/{version} in one commit. A tag that does not exist yields an empty plan:
+     * nothing is committed (committed false), the caller removes its mirror post as before.
+     */
+    public static function delete_tag(\WP_Post $marker, string $version, string $username): array {
+        $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
         $version = self::safe_path_segment($version);
-        $username = normalize_wporg_username($username, 'username');
-        if (is_wp_error($username)) {
-            throw WporgSvnException::from_wp_error($username);
-        }
 
-        $credentials = get_wporg_credentials($username);
-        if (is_wp_error($credentials)) {
-            throw WporgSvnException::from_wp_error($credentials);
-        }
-        if ($credentials === null || empty($credentials['password'])) {
-            throw self::exception('account_not_configured');
-        }
-
-        $lock = self::acquire_wporg_deploy_lock($wporg_slug, $username, 'delete');
-        $client = null;
-        try {
-            $client = self::svn_client($username, $credentials['password']);
-            $tag_path = $wporg_slug . '/tags/' . $version . '/';
-
-            $deploy_base_revision = self::get_plugin_revision($wporg_slug);
-            if ($deploy_base_revision === null) {
-                throw self::exception('not_found');
+        return self::commit_files($marker, $username, 'delete_tag', static function(WporgPluginSvnClient $client) use ($wporg_slug, $version): array {
+            if (!self::tag_exists($client, $wporg_slug, $version)) {
+                return [ 'details' => [ 'version' => $version, 'tag_existed' => false ] ];
             }
-
-            try {
-                $client->list_directory($tag_path, 0);
-            } catch (WporgSvnException $e) {
-                if ($e->get_error_code() === 'not_found') {
-                    return [
-                        'revision' => 0,
-                        'committed' => false,
-                        'deleted' => false,
-                        'tag_existed' => false,
-                    ];
-                }
-                throw $e;
-            }
-
-            $current_revision = self::get_plugin_revision($wporg_slug);
-            if ($current_revision === null || (int) $current_revision !== (int) $deploy_base_revision) {
-                throw self::exception('wporg_concurrent_external_change');
-            }
-
-            $client->begin_commit($wporg_slug);
-            $client->del('tags/' . $version);
-            $commit = $client->commit(sprintf('Delete %s %s via Peak Publisher', $wporg_slug, $version));
-
             return [
-                'revision' => (int) ($commit['revision'] ?? 0),
-                'committed' => true,
-                'deleted' => true,
-                'tag_existed' => true,
+                'deletes' => [ 'tags/' . $version ],
+                'message' => sprintf('Delete %s %s via Peak Publisher', $wporg_slug, $version),
+                'details' => [ 'version' => $version ],
             ];
+        });
+    }
+
+    /** Whether tags/{tag} exists — a fresh listing, never the cache. */
+    private static function tag_exists(WporgPluginSvnClient $client, string $wporg_slug, string $tag): bool {
+        try {
+            $client->list_directory($wporg_slug . '/tags/' . self::safe_path_segment($tag) . '/', 0);
+            return true;
         } catch (WporgSvnException $e) {
-            if ($client instanceof WporgPluginSvnClient) {
-                $client->abort();
+            if (in_array($e->get_error_code(), [ 'not_found', 'invalid_svn_path_segment' ], true)) {
+                return false;
             }
             throw $e;
-        } catch (\Throwable $e) {
-            if ($client instanceof WporgPluginSvnClient) {
-                $client->abort();
-            }
-            throw $e;
-        } finally {
-            self::release_wporg_deploy_lock($lock);
         }
     }
 
@@ -823,46 +823,46 @@ class WporgOperations {
             }
         }
 
-        // Order operations so deletes are deep-first and directories are shallow-first
-        uasort($delete_paths, static fn(array $a, array $b): int => substr_count((string) $b['path'], '/') <=> substr_count((string) $a['path'], '/'));
-        uasort($mkdir_paths, static fn(string $a, string $b): int => substr_count($a, '/') <=> substr_count($b, '/'));
-        uasort($put_paths, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
-
         return [
-            'base' => $base,
-            'delete' => array_values($delete_paths),
-            'mkdir' => array_values($mkdir_paths),
-            'put' => array_values($put_paths),
+            'deletes' => array_values(array_map(static fn(array $delete): string => (string) $delete['path'], $delete_paths)),
+            // The base only when it does not exist yet (nothing was listed): a new tag directory
+            // must exist before its children. An existing base is not a change and stays out, so
+            // a plan without changes stays empty.
+            'mkdirs' => [ ...($remote_tree === [] ? [ $base ] : []), ...array_values($mkdir_paths) ],
+            'puts' => array_values($put_paths),
         ];
     }
 
-    private static function apply_reconcile_plan(WporgPluginSvnClient $client, array $plan): void {
-        // Ensure the base directory exists before child operations
-        $base = (string) ($plan['base'] ?? '');
-        if ($base !== '') {
-            $client->mkdir($base);
-        }
-
-        // Delete remote-only or type-changed paths first
-        foreach (($plan['delete'] ?? []) as $delete) {
-            if (is_array($delete) && !empty($delete['path'])) {
-                $client->del((string) $delete['path']);
+    /** Concatenates the reconcile plans of several bases into one Plan (commit_files() orders them). */
+    private static function merge_reconcile_plans(array $plans): array {
+        $merged = [ 'deletes' => [], 'mkdirs' => [], 'puts' => [] ];
+        foreach ($plans as $plan) {
+            foreach (array_keys($merged) as $key) {
+                $merged[$key] = [ ...$merged[$key], ...$plan[$key] ];
             }
         }
+        return $merged;
+    }
 
-        // Create needed directories before uploading files
-        foreach (($plan['mkdir'] ?? []) as $path) {
-            if (is_string($path) && $path !== '') {
-                $client->mkdir($path);
-            }
-        }
-
-        // Upload changed or missing files
-        foreach (($plan['put'] ?? []) as $put) {
-            if (is_array($put) && !empty($put['path']) && !empty($put['local_path'])) {
-                $client->add_file((string) $put['path'], (string) $put['local_path']);
-            }
-        }
+    /**
+     * Fills a Plan's optional keys and puts its operations into commit order: deletes
+     * deep-first, directories shallow-first, files by path.
+     */
+    private static function normalize_plan(array $plan): array {
+        $deletes = array_values(array_filter((array) ($plan['deletes'] ?? []), 'is_string'));
+        $mkdirs = array_values(array_filter((array) ($plan['mkdirs'] ?? []), 'is_string'));
+        $puts = array_values(array_filter((array) ($plan['puts'] ?? []), static fn($put): bool => is_array($put) && !empty($put['path']) && !empty($put['local_path'])));
+        usort($deletes, static fn(string $a, string $b): int => substr_count($b, '/') <=> substr_count($a, '/'));
+        usort($mkdirs, static fn(string $a, string $b): int => substr_count($a, '/') <=> substr_count($b, '/'));
+        usort($puts, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
+        return [
+            'deletes' => $deletes,
+            'mkdirs' => $mkdirs,
+            'puts' => $puts,
+            'message' => trim((string) ($plan['message'] ?? '')),
+            'details' => is_array($plan['details'] ?? null) ? $plan['details'] : [],
+            'cleanup' => array_values(array_filter((array) ($plan['cleanup'] ?? []), 'is_string')),
+        ];
     }
 
     private static function read_remote_files(WporgPluginSvnClient $client, array $paths): array {

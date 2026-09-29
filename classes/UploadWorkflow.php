@@ -1173,7 +1173,7 @@ class UploadWorkflow {
         require_once __DIR__ . '/WporgOperations.php';
         try {
             $touch_trunk = (string) ($target['deploy_mode'] ?? '') !== 'tag_only';
-            $deploy_result = WporgOperations::deploy_directory($deploy_root, $version, $slug, $username, $touch_trunk);
+            $deploy_result = WporgOperations::deploy_directory($marker, $deploy_root, $version, $username, $touch_trunk);
         } catch (WporgSvnException $e) {
             return $this->upload_error($e->get_error_code(), $e->getMessage());
         } catch (\Throwable $e) {
@@ -1186,7 +1186,7 @@ class UploadWorkflow {
         $data['wporg_deploy'] = [
             'username' => $username,
             'deploy_mode' => (string) $target['deploy_mode'],
-            'revision' => (int) ($deploy_result['revision'] ?? 0),
+            'revision' => $deploy_result['revision'],
             'touched_trunk' => !empty($deploy_result['touched_trunk']),
         ];
 
@@ -1198,7 +1198,7 @@ class UploadWorkflow {
                 'code' => 'wporg_local_sync_failed_after_commit',
                 'message' => $release_id->get_error_message(),
                 'committed' => true,
-                'revision' => (int) ($deploy_result['revision'] ?? 0),
+                'revision' => $deploy_result['revision'],
                 'slug' => $slug,
                 'plugin_id' => (int) $marker->ID,
             ];
@@ -1216,7 +1216,7 @@ class UploadWorkflow {
             'status' => 'ok',
             'plugin_id' => (int) $marker->ID,
             'release_id' => (int) $release_id,
-            'revision' => (int) ($deploy_result['revision'] ?? 0),
+            'revision' => $deploy_result['revision'],
             'committed' => true,
             'touched_trunk' => !empty($deploy_result['touched_trunk']),
         ];

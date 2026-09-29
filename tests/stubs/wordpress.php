@@ -74,6 +74,11 @@ namespace {
         public function get_error_data() { return $this->data; }
     }
 
+    class WP_User {
+        public int $ID = 0;
+        public string $user_login = '';
+    }
+
     function is_wp_error($thing): bool {
         return $thing instanceof WP_Error;
     }
@@ -252,6 +257,14 @@ namespace {
 
     function esc_url_raw(string $url): string {
         return $url;
+    }
+
+    /** The acting user of the request; the tests run as one fixed administrator. */
+    function wp_get_current_user(): WP_User {
+        $user = new WP_User();
+        $user->ID = 1;
+        $user->user_login = 'admin';
+        return $user;
     }
 
     /** The plugin header fields the modules read (the version for the User-Agent). */

@@ -459,7 +459,7 @@ class AdminAPI {
         }
 
         try {
-            $delete_result = WporgOperations::delete_tag((string) $parent->post_name, $version, $username);
+            $delete_result = WporgOperations::delete_tag($parent, $version, $username);
         } catch (\Throwable $e) {
             $code = $e instanceof \RuntimeException && $e->getMessage() !== '' ? $e->getMessage() : 'wporg_tag_delete_failed';
             if ($code === '0' || $code === '') {

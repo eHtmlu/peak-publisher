@@ -2619,7 +2619,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 }
 .pblsh--plugin-meta { display: flex; gap: 0.5rem; align-items: center; color: #666; }
 .pblsh--plugin-meta .pblsh--plugin-version { font-weight: 600; }
-.pblsh--plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.75rem; }
+.pblsh--plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.75rem; }
 .pblsh--plugin-grid__label { color: #666; font-size: 0.8125rem; }
 .pblsh--plugin-grid__value {
     font-size: 1.5rem;

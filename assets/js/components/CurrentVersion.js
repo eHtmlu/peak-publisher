@@ -16,7 +16,7 @@ const CurrentVersion = ({ plugin }) => {
     // while the pointer is unknown nothing can be claimed.
     const label = plugin && plugin.hosting_type === 'wporg' && issue && plugin.current_release_state !== 'unknown'
         ? 'trunk'
-        : '\u2014';
+        : '—';
     if (!issue) {
         return createElement('span', { className: 'pblsh--current-version' }, label);
     }

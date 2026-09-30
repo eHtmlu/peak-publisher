@@ -337,8 +337,8 @@ class WporgPluginSvnClient {
             $code = $this->write_error_code_from_response($response);
             throw new WporgSvnException(
                 $code,
-                $this->write_error_message($code, __('wordpress.org SVN file upload failed.', 'peak-publisher')),
-                $status > 0 ? $status : 502
+                $this->write_failure_message($code, __('wordpress.org SVN file upload failed.', 'peak-publisher'), $response),
+                $this->write_failure_status($code, $status)
             );
         }
     }
@@ -356,8 +356,8 @@ class WporgPluginSvnClient {
         $code = $this->write_error_code_from_response($response);
         throw new WporgSvnException(
             $code,
-            $this->write_error_message($code, __('wordpress.org SVN delete failed.', 'peak-publisher')),
-            $status > 0 ? $status : 502
+            $this->write_failure_message($code, __('wordpress.org SVN delete failed.', 'peak-publisher'), $response),
+            $this->write_failure_status($code, $status)
         );
     }
 
@@ -381,8 +381,8 @@ class WporgPluginSvnClient {
             $code = $this->write_error_code_from_response($response);
             throw new WporgSvnException(
                 $code,
-                $this->write_error_message($code, __('wordpress.org SVN directory creation failed.', 'peak-publisher')),
-                $status > 0 ? $status : 502
+                $this->write_failure_message($code, __('wordpress.org SVN directory creation failed.', 'peak-publisher'), $response),
+                $this->write_failure_status($code, $status)
             );
         }
     }
@@ -413,8 +413,8 @@ class WporgPluginSvnClient {
                 $code = $this->write_error_code_from_response($merge);
                 throw new WporgSvnException(
                     $code,
-                    $this->write_error_message($code, __('wordpress.org SVN commit failed.', 'peak-publisher')),
-                    $merge_status > 0 ? $merge_status : 502
+                    $this->write_failure_message($code, __('wordpress.org SVN commit failed.', 'peak-publisher'), $merge),
+                    $this->write_failure_status($code, $merge_status)
                 );
             }
             if ($merge_status === 207 && $this->multistatus_has_failure((string) ($merge['body'] ?? ''))) {
@@ -604,20 +604,24 @@ class WporgPluginSvnClient {
                 CURLOPT_HTTPHEADER => $headers,
             ]);
 
+            $started = microtime(true);
             $body = curl_exec($ch);
             if ($body === false) {
+                $this->log_request('PUT', $url, 0, $started, curl_error($ch));
                 throw new WporgSvnException(
                     'svn_unavailable',
-                    curl_error($ch) ?: __('wordpress.org SVN is not reachable.', 'peak-publisher'),
+                    sprintf(__('wordpress.org SVN is not reachable: %s', 'peak-publisher'), curl_error($ch) ?: __('connection failed', 'peak-publisher')),
                     503
                 );
             }
 
-            return [
+            $result = [
                 'status' => (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE),
                 'body' => (string) $body,
                 'headers' => [],
             ];
+            $this->log_request('PUT', $url, $result['status'], $started, $result['status'] >= 400 ? $result['body'] : null);
+            return $result;
         } finally {
             curl_close($ch);
             fclose($fh);
@@ -685,7 +689,9 @@ class WporgPluginSvnClient {
             return __('wordpress.org rejected the commit, likely because the plugin is too large. Try splitting binary assets, or contact wp.org plugin reviewers if you need a higher limit.', 'peak-publisher');
         }
         if ($code === 'no_write_access') {
-            return __('The wordpress.org account has no write access to this plugin.', 'peak-publisher');
+            // wordpress.org takes the password regardless of the username's case, but its
+            // pre-commit hook checks the commit rights against the exact spelling.
+            return sprintf(__('The wordpress.org account "%s" has no write access to this plugin. Check the account\'s spelling, including capitalization.', 'peak-publisher'), (string) $this->username);
         }
         if ($code === 'wporg_concurrent_external_change') {
             return __('wordpress.org SVN reported a commit conflict.', 'peak-publisher');
@@ -699,8 +705,22 @@ class WporgPluginSvnClient {
         if ($this->response_indicates_size_rejected($status, $body)) {
             return 'wporg_size_rejected';
         }
+        // wordpress.org enforces per-plugin commit rights in its pre-commit hook (since 2026-08
+        // no longer at the WebDAV layer): the MERGE fails with 500 and the hook's text
+        // "Access denied: user 'x' cannot modify: /slug/...".
+        if ($status >= 500 && stripos($body, 'access denied') !== false && stripos($body, 'cannot modify') !== false) {
+            return 'no_write_access';
+        }
 
         return $this->write_error_code_from_status($status);
+    }
+
+    /** The HTTP status a failed write answers with: a denied commit is a 403 whatever wordpress.org's hook answered. */
+    private function write_failure_status(string $code, int $status): int {
+        if ($code === 'no_write_access') {
+            return 403;
+        }
+        return $status > 0 ? $status : 502;
     }
 
     private function response_indicates_size_rejected(int $status, string $body): bool {
@@ -1012,20 +1032,71 @@ class WporgPluginSvnClient {
             $args['body'] = $body;
         }
 
+        $started = microtime(true);
         $response = wp_remote_request($url, $args);
         if (is_wp_error($response)) {
+            $this->log_request($args['method'], $url, 0, $started, $response->get_error_message());
             throw new WporgSvnException(
                 'svn_unavailable',
-                __('wordpress.org SVN is not reachable.', 'peak-publisher'),
+                sprintf(__('wordpress.org SVN is not reachable: %s', 'peak-publisher'), $response->get_error_message()),
                 503
             );
         }
 
-        return [
+        $result = [
             'status' => (int) wp_remote_retrieve_response_code($response),
             'body' => (string) wp_remote_retrieve_body($response),
             'headers' => wp_remote_retrieve_headers($response),
         ];
+        $this->log_request($args['method'], $url, $result['status'], $started, $result['status'] >= 400 ? $result['body'] : null);
+        return $result;
+    }
+
+    /**
+     * One debug.log line per SVN request while WP_DEBUG is on: method, path, status and
+     * duration — where the seconds of a commit go, and what wordpress.org answered when a
+     * request failed (the SVN error text, else the start of the body).
+     */
+    private function log_request(string $method, string $url, int $status, float $started, ?string $detail): void {
+        if (!defined('WP_DEBUG') || !WP_DEBUG) {
+            return;
+        }
+        $excerpt = $detail === null || $detail === '' ? '' : ' ' . $this->response_excerpt($detail);
+        error_log(sprintf(
+            'Peak Publisher SVN: %s %s -> %s in %d ms%s',
+            strtoupper($method),
+            (string) parse_url($url, PHP_URL_PATH),
+            $status > 0 ? (string) $status : 'no response',
+            (int) round((microtime(true) - $started) * 1000),
+            $excerpt
+        ));
+    }
+
+    /**
+     * What a failed response says, fit for a log line or a message: the human-readable part
+     * of a mod_dav_svn error (a hook's output, a conflict), else the body without markup —
+     * at most 200 characters.
+     */
+    private function response_excerpt(string $body): string {
+        $text = preg_match('~<[^>]*:?human-readable[^>]*>(.*?)</[^>]*:?human-readable>~is', $body, $m) ? $m[1] : (string) preg_replace('/<[^>]+>/', ' ', $body);
+        $text = trim((string) preg_replace('/\s+/', ' ', html_entity_decode($text, ENT_QUOTES | ENT_XML1)));
+        return function_exists('mb_substr') ? mb_substr($text, 0, 200) : substr($text, 0, 200);
+    }
+
+    /**
+     * The message of a failed write: the code's own text where one exists, else the
+     * operation's text with the status and what wordpress.org answered — a plain
+     * "commit failed" hides the hook output or gateway error that explains it.
+     */
+    private function write_failure_message(string $code, string $fallback, array $response): string {
+        if (in_array($code, [ 'wporg_size_rejected', 'no_write_access', 'wporg_concurrent_external_change' ], true)) {
+            return $this->write_error_message($code, $fallback);
+        }
+        $status = (int) ($response['status'] ?? 0);
+        $excerpt = $this->response_excerpt((string) ($response['body'] ?? ''));
+        return $fallback . ' ' . ($excerpt === ''
+            ? sprintf(__('(HTTP %d)', 'peak-publisher'), $status)
+            : sprintf(__('(HTTP %1$d: %2$s)', 'peak-publisher'), $status, $excerpt));
     }
 
     private function request_paths_multi(string $method, array $paths, array $headers = [], ?string $body = null, int $concurrency = 5): array {

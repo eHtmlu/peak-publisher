@@ -41,7 +41,11 @@ class WporgOperations {
      * @param string   $operation  deploy | stable_tag | delete_tag | assets | readme — the
      *                             lock's label and the log entry's operation.
      * @param callable $build_plan fn(WporgPluginSvnClient $client, int $base_revision): Plan
-     * @return array{revision:int|null, committed:bool, details:array}
+     * @return array{revision:int|null, committed:bool, base_revision:int, details:array}
+     *         base_revision = the plugin's revision the plan was built against; a caller whose
+     *         cache was fresh there can advance it once plugin_changed_only_in() confirms that
+     *         nothing else changed since (revisions count across the whole repository, so they
+     *         never simply follow each other).
      * @throws WporgSvnException Credentials, lock, not_found, concurrent change, transport
      *         errors — and whatever $build_plan throws.
      */
@@ -73,16 +77,12 @@ class WporgOperations {
 
             $plan = self::normalize_plan($build_plan($client, $base_revision));
             if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['puts'] === []) {
-                return [ 'revision' => null, 'committed' => false, 'details' => $plan['details'] ];
+                return [ 'revision' => null, 'committed' => false, 'base_revision' => (int) $base_revision, 'details' => $plan['details'] ];
             }
 
-            // Abort if SVN changed while the plan was built.
-            $current_revision = self::get_plugin_revision($wporg_slug);
-            if ($current_revision === null || (int) $current_revision !== (int) $base_revision) {
-                throw self::exception('wporg_concurrent_external_change');
-            }
-
-            $client->begin_commit($wporg_slug);
+            // The revision guard sits in the commit's opening read: the plan is void when the
+            // plugin changed since it was built.
+            $client->begin_commit($wporg_slug, (int) $base_revision);
             foreach ($plan['deletes'] as $path) {
                 $client->del($path);
             }
@@ -98,7 +98,7 @@ class WporgOperations {
             record_wporg_credentials_verdict($username, true);
             $revision = (int) ($commit['revision'] ?? 0);
             record_wporg_operation((int) $marker->ID, $operation, $username, $revision, $plan['details']);
-            return [ 'revision' => $revision, 'committed' => true, 'details' => $plan['details'] ];
+            return [ 'revision' => $revision, 'committed' => true, 'base_revision' => (int) $base_revision, 'details' => $plan['details'] ];
         } catch (WporgSvnException $e) {
             if ($e->get_error_code() === 'invalid_credentials') {
                 record_wporg_credentials_verdict($username, false);
@@ -363,6 +363,23 @@ class WporgOperations {
             'plugin_info' => $plugin_file['plugin_info'],
             'plugin_readme_txt' => self::fetch_readme_data($client, $children),
         ];
+    }
+
+    /**
+     * Whether nothing but the named direct children of the plugin root (trunk, tags, assets,
+     * branches) changed since $base_revision — one listing: a directory's revision bubbles up
+     * from every change beneath it. A caller that committed into one child only can keep a
+     * cache fresh at its new revision when this holds.
+     */
+    public static function plugin_changed_only_in(string $wporg_slug, array $children, int $base_revision): bool {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $entries = self::svn_client()->list_directory($wporg_slug . '/', 1);
+        foreach (self::direct_children($entries, $wporg_slug) as $entry) {
+            if (!in_array((string) ($entry['name'] ?? ''), $children, true) && (int) ($entry['revision'] ?? 0) > $base_revision) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1261,7 +1278,6 @@ class WporgOperations {
             'account_not_configured' => [__('Account not configured.', 'peak-publisher'), 400],
             'wporg_tag_requires_php' => [__('wordpress.org requires the plugin to contain at least one PHP file.', 'peak-publisher'), 400],
             'not_found' => [__('The plugin was not found on wordpress.org SVN.', 'peak-publisher'), 404],
-            'wporg_concurrent_external_change' => [__('The wordpress.org SVN repository changed while your release was being prepared. Please try again.', 'peak-publisher'), 409],
             'invalid_svn_path' => [__('The plugin contains a file or folder path that cannot be published to wordpress.org SVN. Remove path segments containing ".." or backslashes and try again.', 'peak-publisher'), 400],
             'invalid_svn_path_segment' => [__('The version cannot be used as a wordpress.org SVN path segment. Remove slashes, backslashes, and ".." from the version.', 'peak-publisher'), 400],
             'deploy_in_progress' => [__('Another change to this plugin is still being written to wordpress.org. Try again in a few minutes.', 'peak-publisher'), 409],

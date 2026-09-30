@@ -413,41 +413,21 @@ class AdminAPI {
     }
 
     /**
-     * The account a wordpress.org write outside the upload runs with (flip, tag delete): the
-     * marker's assigned account, else the first usable one, probed as before the deploy. Never
-     * written back — the assignment changes only through a deploy (select_wporg_account_username()
-     * is the interim rule until accounts are assigned explicitly).
+     * The wordpress.org account a write of this plugin commits as: the marker's assigned
+     * account when it is usable, else the first usable one (select_wporg_account_username()),
+     * never written back to the marker. No probe beforehand — the commit itself is the
+     * verdict (commit_files() records it, begin_commit() reports rejected credentials), and a
+     * probe cost four requests on every click.
      *
-     * @return string|\WP_REST_Response The username, or the error response to return.
+     * @return string|\WP_REST_Response the username, or the error response (wporg_no_credentials)
      */
     private function resolve_wporg_write_account(\WP_Post $marker) {
         $preferred_username = wporg_string_from_value(get_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', true));
-
-        require_once __DIR__ . '/WporgOperations.php';
-        try {
-            $account = WporgOperations::resolve_wporg_account_access((string) $marker->post_name, $preferred_username !== '' ? $preferred_username : null);
-        } catch (\Throwable $e) {
-            return $this->rest_error_response($this->make_rest_error('wporg_access_check_failed', __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'), 502));
+        $username = select_wporg_account_username($preferred_username !== '' ? $preferred_username : null);
+        if ($username === null) {
+            return $this->rest_error_response($this->make_rest_error('wporg_no_credentials', __('No usable wordpress.org account — connect one under Settings › wordpress.org.', 'peak-publisher'), 400));
         }
-
-        $status = (string) ($account['status'] ?? 'error');
-        $username = (string) ($account['username'] ?? '');
-        if ($status === 'ok' && $username !== '') {
-            return $username;
-        }
-        [$code, $http_status] = match ($status) {
-            'no_credentials' => ['wporg_no_credentials', 400],
-            'not_found' => ['wporg_not_found', 404],
-            'credentials_rejected' => ['wporg_credentials_rejected', 401],
-            default => ['wporg_access_check_failed', 502],
-        };
-        return $this->rest_error_response($this->make_rest_error(
-            $code,
-            (isset($account['message']) && is_string($account['message']) && $account['message'] !== '')
-                ? $account['message']
-                : __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
-            $http_status
-        ));
+        return $username;
     }
 
     private function delete_wporg_release_tag(\WP_Post $release, \WP_Post $parent) {
@@ -572,8 +552,21 @@ class AdminAPI {
             return $this->rest_error_response($this->make_rest_error('wporg_stable_tag_failed', __('Could not change the current release on wordpress.org.', 'peak-publisher'), 502));
         }
 
-        // The cache serves the written pointer until the next refresh; the title follows it.
-        mark_wporg_plugin_cache_stale((int) $plugin->ID, [ 'trunk_readme' => $result['trunk_readme'] ]);
+        // The flip changed only trunk's readme: when nothing else in the plugin changed since
+        // the cached revision, the cache stays fresh with the written pointer; otherwise (or
+        // when that cannot be verified) it goes stale and serves the pointer until the refresh.
+        // The title follows the pointer either way.
+        $known = [ 'trunk_readme' => $result['trunk_readme'] ];
+        try {
+            $only_trunk = WporgOperations::plugin_changed_only_in((string) $plugin->post_name, [ 'trunk' ], (int) $result['base_revision']);
+        } catch (\Throwable $e) {
+            $only_trunk = false;
+        }
+        if ($only_trunk) {
+            advance_wporg_plugin_cache((int) $plugin->ID, (int) $result['base_revision'], (int) $result['revision'], $known);
+        } else {
+            mark_wporg_plugin_cache_stale((int) $plugin->ID, $known);
+        }
         refresh_plugin_title_from_reference((int) $plugin->ID);
 
         return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $version, 'revision' => $result['revision'] ];

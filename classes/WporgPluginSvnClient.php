@@ -180,7 +180,13 @@ class WporgPluginSvnClient {
         return $this->repo_access_result('ok', null);
     }
 
-    public function begin_commit(string $wporg_slug): void {
+    /**
+     * Opens a commit: reads the plugin root's commit resources, compares the root's version-name
+     * (it bubbles up from every subtree) with $expected_revision — the revision the caller built
+     * its plan against; a change since then voids the plan, and nothing has been created yet to
+     * clean up — then creates the activity and checks out the working baseline and root.
+     */
+    public function begin_commit(string $wporg_slug, int $expected_revision): void {
         $wporg_slug = trim($wporg_slug, '/');
         if ($wporg_slug === '' || $this->username === null || $this->password === null) {
             throw new WporgSvnException(
@@ -222,6 +228,14 @@ class WporgPluginSvnClient {
                     'svn_read_failed',
                     __('wordpress.org SVN returned an unexpected plugin lookup response.', 'peak-publisher'),
                     502
+                );
+            }
+
+            if ($this->revision_int($this->first_prop((string) $root['body'], 'version-name')) !== $expected_revision) {
+                throw new WporgSvnException(
+                    'wporg_concurrent_external_change',
+                    __('The plugin changed on wordpress.org while the commit was being prepared. Please try again.', 'peak-publisher'),
+                    409
                 );
             }
 

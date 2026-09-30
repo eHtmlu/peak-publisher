@@ -468,6 +468,34 @@ function mark_wporg_plugin_cache_stale(int $plugin_id, array $known = []): void 
 }
 
 
+/**
+ * The cache after a commit of Peak Publisher's own that changed nothing the cache derives
+ * from SVN except $known (a flip: only trunk's readme, served as `trunk_readme`): a cache
+ * fresh at the commit's base revision stays fresh at the new one — the next read costs one
+ * revision check instead of a full refresh. The caller has verified that nothing else in the
+ * plugin changed since the base (WporgOperations::plugin_changed_only_in()); a cache at any
+ * other revision, or without one, is stale already and stays so with $known served meanwhile
+ * (mark_wporg_plugin_cache_stale()).
+ */
+function advance_wporg_plugin_cache(int $plugin_id, int $base_revision, int $revision, array $known): void {
+    $post = get_post($plugin_id);
+    if (!$post instanceof \WP_Post || !is_wporg_plugin($post)) {
+        return;
+    }
+
+    $cached = wporg_decode_json_object((string) $post->post_content);
+    if ((int) ($cached['revision'] ?? 0) !== $base_revision) {
+        mark_wporg_plugin_cache_stale($plugin_id, $known);
+        return;
+    }
+
+    wp_update_post([
+        'ID' => $plugin_id,
+        'post_content' => wp_slash(wp_json_encode((object) array_merge($cached, $known, [ 'revision' => $revision ]))),
+    ]);
+}
+
+
 function wporg_find_release_post_by_version(int $plugin_id, string $version): ?\WP_Post {
     $releases = get_posts([
         'post_type' => 'pblsh_release',

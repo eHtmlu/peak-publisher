@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace Pblsh\Tests\Unit;
 
+use function Pblsh\advance_wporg_plugin_cache;
 use function Pblsh\mark_wporg_plugin_cache_stale;
 use function Pblsh\resolve_current_release;
 
 /**
- * mark_wporg_plugin_cache_stale() (includes/wporg_cache.php): the revision keys go, every
- * other fact stays, and facts the caller just established on SVN — the trunk readme a deploy
- * or flip wrote — are served until the next refresh.
+ * The marker cache after a commit of Peak Publisher's own (includes/wporg_cache.php):
+ * mark_wporg_plugin_cache_stale() drops the revision keys and keeps every other fact, serving
+ * what the caller just established on SVN until the next refresh; advance_wporg_plugin_cache()
+ * keeps a cache that is fresh at the commit's base revision fresh at the new one.
  */
 final class WporgCacheStaleTest extends TestCase {
 
@@ -42,6 +44,41 @@ final class WporgCacheStaleTest extends TestCase {
         $plugin = $this->create_plugin('pblsh_plugin', 'my-plugin');
 
         mark_wporg_plugin_cache_stale($plugin->ID, [ 'trunk_readme' => self::READ ]);
+
+        self::assertSame('', get_post($plugin->ID)->post_content);
+    }
+
+    public function test_a_cache_fresh_at_the_base_advances_to_the_commit_revision(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin', 'publish', [ 'revision' => 7, 'release_count' => 2, 'trunk_readme' => self::READ, 'fetched_at' => 123 ]);
+        $written = [ 'stable_tag' => '1.1.0', 'file_name' => 'readme.txt', 'screenshots' => [] ];
+
+        advance_wporg_plugin_cache($marker->ID, 7, 8, [ 'trunk_readme' => $written ]);
+
+        self::assertSame([ 'revision' => 8, 'release_count' => 2, 'trunk_readme' => $written, 'fetched_at' => 123 ], json_decode(get_post($marker->ID)->post_content, true), 'the caller verified nothing else changed since 7: the next read needs no refresh');
+    }
+
+    public function test_a_cache_at_another_revision_than_the_base_goes_stale(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin', 'publish', [ 'revision' => 6, 'release_count' => 2, 'trunk_readme' => self::READ, 'fetched_at' => 123 ]);
+        $written = [ 'stable_tag' => '1.1.0', 'file_name' => 'readme.txt', 'screenshots' => [] ];
+
+        advance_wporg_plugin_cache($marker->ID, 7, 8, [ 'trunk_readme' => $written ]);
+
+        self::assertSame([ 'trunk_readme' => $written, 'fetched_at' => 123 ], json_decode(get_post($marker->ID)->post_content, true), 'the cache predates the base: it was stale already, the written readme is served meanwhile');
+    }
+
+    public function test_a_stale_cache_stays_stale_and_serves_the_known_facts(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin', 'publish', [ 'trunk_readme' => self::READ, 'fetched_at' => 123 ]);
+        $written = [ 'stable_tag' => '1.1.0', 'file_name' => 'readme.txt', 'screenshots' => [] ];
+
+        advance_wporg_plugin_cache($marker->ID, 7, 8, [ 'trunk_readme' => $written ]);
+
+        self::assertSame([ 'trunk_readme' => $written, 'fetched_at' => 123 ], json_decode(get_post($marker->ID)->post_content, true), 'a pending refresh is not cancelled by a commit');
+    }
+
+    public function test_advancing_leaves_a_self_hosted_plugin_alone(): void {
+        $plugin = $this->create_plugin('pblsh_plugin', 'my-plugin');
+
+        advance_wporg_plugin_cache($plugin->ID, 7, 8, [ 'trunk_readme' => self::READ ]);
 
         self::assertSame('', get_post($plugin->ID)->post_content);
     }

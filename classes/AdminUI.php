@@ -82,6 +82,7 @@ class AdminUI {
             'components/CurrentVersion.js',
             'components/InstallationsCount.js',
             'components/PluginList.js',
+            'components/PluginAssets.js',
             'components/PluginEditor.js',
             'components/Settings.js',
             'components/WporgImportFacts.js',

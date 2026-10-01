@@ -7,7 +7,8 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { Button, DropdownMenu, MenuItem } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
-    const { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText } = Pblsh.AssetsUtils;
+    const { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText } = Pblsh.AssetsUtils;
+    const { TipLink } = Pblsh.Components;
 
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
     const [assetsLoading, setAssetsLoading] = useState(false);
@@ -103,6 +104,10 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     // Helper: build accept string from exts array, e.g. ['png','jpg','gif'] → '.png,.jpg,.jpeg,.gif'
     const slotAccept = (s) => (s.exts || []).flatMap(e => e === 'jpg' ? ['.jpg', '.jpeg'] : ['.' + e]).join(',');
     const slotHint   = (s) => s.prefix + '.{' + (s.exts || []).join('|') + '}';
+
+    // Caption details only matter once the readme has a caption: then a missing one usually
+    // means a numbering that slipped; without any, one line and the tip say what to do.
+    const hasCaptions = !!(assets && assets.screenshot_captions && Object.keys(assets.screenshot_captions).length > 0);
 
     const renderAssetBox = (slot, assetData, screenshotN = null, caption = null) => {
         const stripTags = (html) => { const el = document.createElement('div'); el.innerHTML = html; return el.textContent || ''; };
@@ -204,6 +209,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--asset-slot__box-label' }, def.label),
                         createElement('div', { className: 'pblsh--asset-slot__box-filename' }, assetData.filename),
                         metaLine && createElement('div', { className: 'pblsh--asset-slot__box-meta' }, metaLine),
+                        isScreenshot && hasCaptions && !caption && createElement('div', { className: 'pblsh--asset-slot__hint' }, __('No caption in readme.txt', 'peak-publisher')),
                         warnings.length > 0 && createElement('div', { className: 'pblsh--asset-slot__warnings' },
                             warnings.map((w, i) => createElement('div', { key: i, className: 'pblsh--asset-slot__warning', title: w.message },
                                 getSvgIcon('information_outline', { size: 14 }),
@@ -373,6 +379,14 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             // Screenshots group (slot-based)
             createElement('div', { className: 'pblsh--assets-group' },
                 createElement('div', { className: 'pblsh--assets-group__label' }, __('Screenshots', 'peak-publisher')),
+                hasCaptions
+                    ? createElement('div', { className: 'pblsh--assets-group__hints' },
+                        createElement('div', null, getCaptionsSourceText(assets.captions_source)),
+                        createElement('div', null, getPositionsHint(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
+                    )
+                    : screenshots.length > 0 && createElement('div', { className: 'pblsh--assets-group__hints' },
+                        createElement('div', null, getNoCaptionsText(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
+                    ),
                 createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
                     slots.map(({ n, screenshot, caption }) =>
                         renderAssetBox('screenshot', screenshot, n, caption)

@@ -1899,6 +1899,14 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     line-height: 1;
 }
 
+/* The text gives the link its baseline, so a link inside running text sits on
+   the line's baseline. Without it the inline-flex takes its baseline from the
+   first item, the icon, whose bottom edge would lift the text off the line. */
+.pblsh--faq-link__text,
+.pblsh--tip-link__text {
+    align-self: baseline;
+}
+
 /* The tip mark's two-tone bulb — glowing glass over a metal-gray base; the
    tips' recognition mark, stable on hover. */
 .pblsh--tip-bulb__glass {
@@ -3618,11 +3626,18 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     outline-offset: -2px;
 }
 
-/* Caption text — shown right after the slot label */
-.pblsh--asset-slot__caption {
-    font-size: 0.9375rem;
-    color: #1e1e1e;
-    line-height: 1.4;
+/* A group's explanatory lines right under its label (where the screenshot captions come from). */
+.pblsh--assets-group__label + .pblsh--assets-group__hints {
+    margin-top: -0.5rem;
+}
+.pblsh--assets-group__hints {
+    color: #8c96a0;
+    margin-bottom: 1rem;
+}
+
+/* A box's explanatory line under its figures (a screenshot without caption). */
+.pblsh--asset-slot__hint {
+    color: #8c96a0;
 }
 
 /* Decision rows — pinned between header and body. The publish path (channel + slug) and

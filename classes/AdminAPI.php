@@ -812,37 +812,7 @@ class AdminAPI {
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
-        return $this->with_captions($post, $this->assets()->describe($post));
-    }
-
-    /**
-     * Get screenshot captions from the latest published release's readme.txt.
-     *
-     * @return object Screenshot captions keyed by number, e.g. {1: "Caption", 2: "Caption"}.
-     */
-    private function get_screenshot_captions(int $plugin_id): object {
-        $latest = get_posts([
-            'post_type'      => 'pblsh_release',
-            'post_status'    => 'publish',
-            'post_parent'    => $plugin_id,
-            'posts_per_page' => 1,
-            'orderby'        => 'date',
-            'order'          => 'DESC',
-        ]);
-        if (empty($latest)) {
-            return (object) [];
-        }
-        $content = json_decode((string) $latest[0]->post_content, true);
-        $screenshots = $content['plugin_readme_txt']['content']['screenshots'] ?? [];
-        if (empty($screenshots) || !is_array($screenshots)) {
-            return (object) [];
-        }
-        // Ensure keys are integers and values are strings.
-        $captions = [];
-        foreach ($screenshots as $n => $caption) {
-            $captions[(int) $n] = (string) $caption;
-        }
-        return (object) $captions;
+        return $this->assets()->describe($post);
     }
 
     /** Uploads a file into a slot: multipart with file, slot and screenshot_n (optional). */
@@ -862,7 +832,7 @@ class AdminAPI {
             $screenshot_n === null || $screenshot_n === '' ? null : (int) $screenshot_n,
             $_FILES['file'] // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
         );
-        return $this->asset_write_response($post, $result);
+        return $this->asset_write_response($result);
     }
 
     /** Deletes a slot: JSON { slot, screenshot_n? }. */
@@ -877,7 +847,7 @@ class AdminAPI {
             sanitize_key((string) ($params['slot'] ?? '')),
             isset($params['screenshot_n']) ? (int) $params['screenshot_n'] : null
         );
-        return $this->asset_write_response($post, $result);
+        return $this->asset_write_response($result);
     }
 
     /** Moves or swaps screenshots: JSON { from, to }; the server decides which and answers `mode`. */
@@ -888,7 +858,7 @@ class AdminAPI {
         }
         $params = $request->get_json_params();
         $result = $this->assets()->move($post, (int) ($params['from'] ?? 0), (int) ($params['to'] ?? 0));
-        return $this->asset_write_response($post, $result);
+        return $this->asset_write_response($result);
     }
 
     /** The plugin of an asset request: a self-hosted plugin — wordpress.org plugins have no assets tab yet. */
@@ -904,18 +874,11 @@ class AdminAPI {
     }
 
     /** Every write answers the fresh manifest, or the error as it is. */
-    private function asset_write_response(\WP_Post $post, array|\WP_Error $result) {
+    private function asset_write_response(array|\WP_Error $result) {
         if (is_wp_error($result)) {
             return $this->rest_error_response($result);
         }
-        $result['assets'] = $this->with_captions($post, $result['assets']);
         return [ 'status' => 'ok', ...$result ];
-    }
-
-    /** The view with the screenshot captions of the latest release by date. */
-    private function with_captions(\WP_Post $post, array $assets): array {
-        $assets['screenshot_captions'] = $this->get_screenshot_captions((int) $post->ID);
-        return $assets;
     }
 
     public function get_peak_publisher_settings_rest(): array {

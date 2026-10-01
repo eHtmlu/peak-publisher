@@ -51,5 +51,20 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         return sprintf(__('Swap screenshots %1$d and %2$d?', 'peak-publisher'), fromN, toN);
     }
 
-    return { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText };
+    // Where the screenshot captions come from — the readme of the release sites receive, else
+    // the latest release's (the server's captions_source: state, version, fallback).
+    function getCaptionsSourceText(source) {
+        if (!source.version) return __('Captions appear once a release with a readme.txt is published.', 'peak-publisher');
+        return source.fallback
+            ? sprintf(__('Captions from readme.txt of %s (latest — no current release)', 'peak-publisher'), source.version)
+            : sprintf(__('Captions from readme.txt of %s (current release)', 'peak-publisher'), source.version);
+    }
+
+    // wordpress.org renders captions by position: moving a screenshot leaves its caption behind.
+    const getPositionsHint = () => __('Captions are bound to positions, not images — reordering screenshots does not move their captions.', 'peak-publisher');
+
+    // Screenshots without a single caption: one line instead of the caption details.
+    const getNoCaptionsText = () => __('No captions in readme.txt yet', 'peak-publisher');
+
+    return { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText };
 })());

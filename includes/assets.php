@@ -416,6 +416,55 @@ function is_valid_svg_file(string $path): bool {
 
 
 /**
+ * The screenshot captions the plugin page shows and where they come from — the readme of the
+ * release sites receive (resolve_current_release()): the current release's readme; on
+ * wordpress.org, when the pointer names no tag (trunk, a missing tag, none), the trunk readme
+ * the marker cache holds (that is what the plugin page shows then); otherwise (the pointer
+ * unknown, or self-hosted without a current release) the latest release's readme, marked as a
+ * fallback. Captions are bound to positions from 1, like wordpress.org renders them.
+ *
+ * @return array{captions: array<int, string>, source: array{state: string, version: ?string, fallback: bool}}
+ */
+function get_screenshot_captions(\WP_Post $plugin): array {
+    $current = resolve_current_release($plugin);
+    $state = $current['state'];
+
+    if ($state === 'current') {
+        $release = $current['release'];
+        $fallback = false;
+    } elseif (is_wporg_plugin($plugin) && in_array($state, [ 'trunk', 'tag_missing', 'none' ], true)) {
+        $cache = wporg_decode_json_object((string) $plugin->post_content);
+        $screenshots = is_array($cache['trunk_readme'] ?? null) ? ($cache['trunk_readme']['screenshots'] ?? []) : [];
+        return [ 'captions' => asset_captions_from($screenshots), 'source' => [ 'state' => $state, 'version' => null, 'fallback' => false ] ];
+    } else {
+        $release = $current['reference'];
+        $fallback = true;
+    }
+
+    $content = $release instanceof \WP_Post ? wporg_decode_json_object((string) $release->post_content) : [];
+    return [
+        'captions' => asset_captions_from($content['plugin_readme_txt']['content']['screenshots'] ?? []),
+        'source' => [ 'state' => $state, 'version' => $release instanceof \WP_Post ? (string) $release->post_title : null, 'fallback' => $fallback ],
+    ];
+}
+
+
+/** The parser's screenshots section as int-keyed captions (re-validation of stored data: only scalar entries count). */
+function asset_captions_from($screenshots): array {
+    $captions = [];
+    if (is_array($screenshots)) {
+        foreach ($screenshots as $n => $caption) {
+            if ((int) $n >= 1 && is_scalar($caption)) {
+                $captions[(int) $n] = (string) $caption;
+            }
+        }
+    }
+    ksort($captions);
+    return $captions;
+}
+
+
+/**
  * The generated icon of a plugin without an icon: wordpress.org's own service for a wporg
  * plugin (byte-identical to the plugin page), Peak Publisher's endpoint (the same generator)
  * for a self-hosted one; the banner color, when valid, makes the pattern's tint and cache key.

@@ -28,7 +28,10 @@ class AssetManager {
         return $this->local ??= new LocalAssetStore();
     }
 
-    /** The editor's view (REST GET): every fixed slot (entry or null), the screenshots by number. */
+    /**
+     * The editor's view (REST GET): every fixed slot (entry or null), the screenshots by number,
+     * and their captions from the readme of the release sites receive (get_screenshot_captions()).
+     */
     public function describe(\WP_Post $plugin): array {
         $manifest = read_asset_manifest((int) $plugin->ID);
         $out = [];
@@ -38,6 +41,9 @@ class AssetManager {
             }
         }
         $out['screenshots'] = $this->screenshot_views($plugin, $manifest);
+        $captions = get_screenshot_captions($plugin);
+        $out['screenshot_captions'] = (object) $captions['captions'];
+        $out['captions_source'] = $captions['source'];
         $out['wporg'] = null;
         return $out;
     }

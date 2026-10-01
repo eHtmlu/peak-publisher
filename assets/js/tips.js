@@ -173,6 +173,49 @@ lodash.set(window, 'Pblsh.Tips', {
         };
     },
 
+    // Screenshot captions: where they are written, why they stay with the position, and when
+    // a change reaches the plugin page — one example shows the format and the swap. The assets
+    // tab links it.
+    screenshotCaptions: () => {
+        const { __, sprintf } = wp.i18n;
+        const { createElement, createInterpolateElement } = wp.element;
+
+        // The example: three captions, used in the readme snippet and the swap.
+        const captions = [
+            __('The settings page with the default options', 'peak-publisher'),
+            __('The block in the editor, before and after styling', 'peak-publisher'),
+            __('The front end on a phone', 'peak-publisher'),
+        ];
+        const snippet = '== Screenshots ==\n\n' + captions.map((caption, index) => (index + 1) + '. ' + caption).join('\n');
+
+        return {
+            title: __('How screenshot captions work', 'peak-publisher'),
+            content: [
+                createElement('h2', { key: 'where-title' }, __('Captions live in readme.txt', 'peak-publisher')),
+                createElement('p', { key: 'where' }, createInterpolateElement(
+                    __('Each line of the numbered list under <code>== Screenshots ==</code> in readme.txt becomes the caption of the screenshot with that number. For example:', 'peak-publisher'),
+                    { code: createElement('code') },
+                )),
+                createElement('pre', { key: 'snippet' },
+                    createElement('code', { className: 'language-plaintext' }, snippet),
+                ),
+                createElement('p', { key: 'where-docs' }, createInterpolateElement(
+                    __('wordpress.org\'s <a>guide to plugin assets</a> describes the format in full.', 'peak-publisher'),
+                    { a: createElement('a', { href: 'https://developer.wordpress.org/plugins/wordpress-org/plugin-assets/#screenshots', target: '_blank', rel: 'noreferrer' }) },
+                )),
+                createElement('h2', { key: 'position-title' }, __('The number is the position, not the picture', 'peak-publisher')),
+                createElement('p', { key: 'position' }, sprintf(
+                    /* translators: 1: the example caption of screenshot 1, 2: the example caption of screenshot 3 */
+                    __('Swap screenshots 1 and 3 in the example: the phone picture now sits in position 1 and gets the caption "%1$s", the settings page in position 3 gets "%2$s". To keep picture and caption together, swap lines 1 and 3 in readme.txt as well.', 'peak-publisher'),
+                    captions[0],
+                    captions[2],
+                )),
+                createElement('h2', { key: 'release-title' }, __('A caption changes with a release', 'peak-publisher')),
+                createElement('p', { key: 'release' }, __('Captions come from the readme.txt of the release sites receive. A new or corrected caption shows once a release that carries it is the current release.', 'peak-publisher')),
+            ],
+        };
+    },
+
     // Version-number guidance for the first release and beyond.
     versionNumbers: () => {
         const { __ } = wp.i18n;

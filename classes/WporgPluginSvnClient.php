@@ -651,7 +651,8 @@ class WporgPluginSvnClient {
             $this->log_request('PUT', $url, $result['status'], $started, $result['status'] >= 400 ? $result['body'] : null);
             return $result;
         } finally {
-            curl_close($ch);
+            // The cURL handle is freed with $ch (curl_close() has no effect since PHP 8.0 and
+            // is deprecated since 8.5); only the file handle needs closing.
             fclose($fh);
         }
     }
@@ -1234,7 +1235,6 @@ class WporgPluginSvnClient {
                 }
 
                 curl_multi_remove_handle($multi, $ch);
-                curl_close($ch);
                 unset($handles[$key]);
 
                 if ($error === null && !empty($queue)) {
@@ -1253,7 +1253,6 @@ class WporgPluginSvnClient {
         foreach ($handles as $entry) {
             $ch = $entry['handle'];
             curl_multi_remove_handle($multi, $ch);
-            curl_close($ch);
         }
         curl_multi_close($multi);
 

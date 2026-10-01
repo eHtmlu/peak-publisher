@@ -20,7 +20,12 @@ code in this repository creates today:
   slot: `{filename, revision, resolution, filesize, width, height}` — revision is the time of
   the last change; `includes/assets.php`), `assets_banners_color` (the average color of the
   first banner file, for the generated icon),
-  `_pblsh_installations` (24-hour counting cache, regenerable, not declared); marker
+  `_pblsh_installations` (24-hour counting cache, regenerable, not declared); marker: the same
+  manifest metas and `assets_banners_color` describing the assets mirror (revision = the SVN
+  revision the file was last changed in; regenerable from SVN), `_pblsh_wporg_assets`
+  (`{revision, listed_at, other_files, color_source, pending}` — the revision of `assets/` the
+  mirror holds, `0` = no directory, `null` = never pulled; `pending` = the working copy,
+  slot id → entry, user work; `includes/wporg_assets.php`),
   `_pblsh_wporg_account_username`, `_pblsh_wporg_operations` (the operations log: every SVN
   write Peak Publisher committed, newest first, unbounded — `{operation, at, user {id, login},
   username, revision, details}`), `_pblsh_wporg_stats` (daily cache of the wordpress.org info
@@ -32,7 +37,8 @@ code in this repository creates today:
   dismissed), `pblsh_schema_migration_lock` (only while the migration runs).
 - **Files** under `wp-content/uploads/pblsh-peak-publisher/`:
   `plugins/{slug}/releases/{slug}.{version}.zip`, `plugins/{slug}/assets/`,
-  `encryption-key.php`, `tmp/` (upload working directories, transient).
+  `wporg-plugins/{slug}/mirror/assets/` (the slot files of a wporg plugin's SVN `assets/`,
+  regenerable), `encryption-key.php`, `tmp/` (upload working directories, transient).
 
 Everything between live and current is development state and disposable: development and test
 data are regenerated, never migrated. Migration code moves data from the live schema to the

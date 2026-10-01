@@ -8,10 +8,9 @@ defined('ABSPATH') || exit;
 /**
  * The facade over a plugin's assets on both channels. Reading is the same for both: the
  * shipped layer — the self-hosted directory, or the mirror of a wordpress.org plugin's SVN
- * assets/ — described by the manifest (read_asset_manifest()). Writing goes to the channel's
- * store: self-hosted at once (LocalAssetStore), wordpress.org into the working copy
- * (WporgAssetSync, C5). The list, the editor header and the public API read the shipped layer
- * only; the assets tab (describe()) overlays the working copy.
+ * assets/ that WporgAssetSync keeps in step — described by the manifest
+ * (read_asset_manifest()). Self-hosted writes go to LocalAssetStore at once; the assets of a
+ * wordpress.org plugin are read-only here.
  */
 class AssetManager {
     private static ?self $instance = null;
@@ -31,6 +30,8 @@ class AssetManager {
     /**
      * The editor's view (REST GET): every fixed slot (entry or null), the screenshots by number,
      * and their captions from the readme of the release sites receive (get_screenshot_captions()).
+     * A wordpress.org plugin adds where its mirror stands: the revision of assets/ it holds,
+     * when it was last confirmed, and how many files of assets/ are no slot of this tab.
      */
     public function describe(\WP_Post $plugin): array {
         $manifest = read_asset_manifest((int) $plugin->ID);
@@ -45,6 +46,14 @@ class AssetManager {
         $out['screenshot_captions'] = (object) $captions['captions'];
         $out['captions_source'] = $captions['source'];
         $out['wporg'] = null;
+        if (is_wporg_plugin($plugin)) {
+            $state = get_wporg_assets_state((int) $plugin->ID);
+            $out['wporg'] = [
+                'revision' => $state['revision'],
+                'listed_at' => $state['listed_at'] > 0 ? gmdate('Y-m-d\TH:i:s\Z', $state['listed_at']) : null,
+                'other_files' => $state['other_files'],
+            ];
+        }
         return $out;
     }
 

@@ -262,7 +262,7 @@ class AdminAPI {
             'name' => $post->post_title,
             'slug' => $post->post_name,
             'hosting_type' => $hosting_type,
-            'icon_url' => $is_self_hosted ? $this->assets()->get_best_icon_url($post) : null,
+            'icon_url' => $this->assets()->get_best_icon_url($post),
             'version' => $current['release'] instanceof \WP_Post ? (string) $current['release']->post_title : null,
             'latest_version' => $current['latest'] instanceof \WP_Post ? (string) $current['latest']->post_title : null,
             'current_release_state' => $current['state'],
@@ -760,6 +760,13 @@ class AdminAPI {
             wp_delete_post((int) $release_id, true);
         }
 
+        // The assets mirror and the working copy live together under wporg-plugins/{slug}/.
+        $plugin_dir = dirname(get_plugin_assets_dir($plugin), 2);
+        if (is_dir($plugin_dir)) {
+            get_wp_filesystem()->delete(trailingslashit($plugin_dir), true);
+        }
+        remove_empty_folders(peak_publisher_upload_basedir());
+
         wp_delete_post((int) $plugin->ID, true);
 
         return [
@@ -817,7 +824,7 @@ class AdminAPI {
 
     /** Uploads a file into a slot: multipart with file, slot and screenshot_n (optional). */
     public function handle_upload_asset(\WP_REST_Request $request) {
-        $post = $this->asset_plugin($request);
+        $post = $this->asset_plugin($request, true);
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
@@ -837,7 +844,7 @@ class AdminAPI {
 
     /** Deletes a slot: JSON { slot, screenshot_n? }. */
     public function handle_delete_asset(\WP_REST_Request $request) {
-        $post = $this->asset_plugin($request);
+        $post = $this->asset_plugin($request, true);
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
@@ -852,7 +859,7 @@ class AdminAPI {
 
     /** Moves or swaps screenshots: JSON { from, to }; the server decides which and answers `mode`. */
     public function handle_move_asset(\WP_REST_Request $request) {
-        $post = $this->asset_plugin($request);
+        $post = $this->asset_plugin($request, true);
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
@@ -861,14 +868,16 @@ class AdminAPI {
         return $this->asset_write_response($result);
     }
 
-    /** The plugin of an asset request: a self-hosted plugin — wordpress.org plugins have no assets tab yet. */
-    private function asset_plugin(\WP_REST_Request $request): \WP_Post|\WP_REST_Response {
+    /** The plugin of an asset request — both channels read; $write marks a change. */
+    private function asset_plugin(\WP_REST_Request $request, bool $write = false): \WP_Post|\WP_REST_Response {
         $post = get_post((int) $request->get_param('id'));
         if (!is_plugin_post($post)) {
             return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
         }
-        if (is_wporg_plugin($post)) {
-            return $this->rest_error_response($this->make_rest_error('unsupported_hosting_type', __('Plugin assets are only available for self-hosted plugins.', 'peak-publisher'), 404));
+        // Transitional: the assets of a wordpress.org plugin are shown read-only until changes
+        // go into its working copy and from there into one commit.
+        if ($write && is_wporg_plugin($post)) {
+            return $this->rest_error_response($this->make_rest_error('unsupported_hosting_type', __('The assets of wordpress.org plugins cannot be changed here yet.', 'peak-publisher'), 400));
         }
         return $post;
     }

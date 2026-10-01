@@ -95,6 +95,20 @@ class WporgPluginSvnClient {
     }
 
     /**
+     * Downloads a file into a local path — the assets mirror's downloads, up to 10 MB each,
+     * which the HTTP API streams to disk instead of holding them in memory; the timeout grows
+     * with the expected size like the upload's. Status handling is read_file()'s. A failure
+     * may leave a partial file for the caller to remove.
+     */
+    public function download_file(string $path, string $local_path, int $expected_size): void {
+        $this->file_body_from_response($this->request_url('GET', $this->build_url($path), [], null, [
+            'stream' => true,
+            'filename' => $local_path,
+            'timeout' => max(30, min(300, (int) ceil($expected_size / 100000))),
+        ]));
+    }
+
+    /**
      * Checks whether the plugin repository exists and the stored credentials are accepted.
      *
      * wordpress.org stopped enforcing per-plugin write access on WebDAV probe requests
@@ -1027,7 +1041,11 @@ class WporgPluginSvnClient {
         return $this->request_url($method, $this->build_url($path), $headers, $body);
     }
 
-    private function request_url(string $method, string $url, array $headers = [], ?string $body = null): array {
+    /**
+     * One request through the WordPress HTTP API with the client's User-Agent and credentials,
+     * logged. $options are further HTTP API arguments (a longer timeout, streaming to a file).
+     */
+    private function request_url(string $method, string $url, array $headers = [], ?string $body = null, array $options = []): array {
         $request_headers = array_merge([
             'User-Agent' => wporg_user_agent(),
         ], $headers);
@@ -1036,12 +1054,12 @@ class WporgPluginSvnClient {
             $request_headers['Authorization'] = 'Basic ' . base64_encode($this->username . ':' . $this->password);
         }
 
-        $args = [
+        $args = array_merge([
             'method' => strtoupper($method),
             'headers' => $request_headers,
             'timeout' => 20,
             'redirection' => 0,
-        ];
+        ], $options);
         if ($body !== null) {
             $args['body'] = $body;
         }

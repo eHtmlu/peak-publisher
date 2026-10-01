@@ -1,14 +1,20 @@
 // PluginAssets Component - the assets tab of the plugin editor: icons, banners and
 // screenshots in fixed slots, uploaded, replaced, deleted and reordered from here. Owns
 // its state (the manifest, the upload in progress, the drag); the plugin comes with
-// pluginData, a changed icon reaches the header and the list through refreshPlugin.
+// pluginData, a changed icon reaches the header and the list through refreshPlugin. A
+// wordpress.org plugin shows its mirror of SVN's assets/ with where the mirror stands.
 lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin }) => {
     const { __, sprintf } = wp.i18n;
-    const { createElement, useState, useEffect, useRef } = wp.element;
+    const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
     const { Button, DropdownMenu, MenuItem } = wp.components;
-    const { getSvgIcon } = Pblsh.Utils;
-    const { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText } = Pblsh.AssetsUtils;
+    const { getSvgIcon, getTimeTooltipProps } = Pblsh.Utils;
+    const { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText } = Pblsh.AssetsUtils;
     const { TipLink } = Pblsh.Components;
+
+    const isWporg = !!pluginData && pluginData.hosting_type === 'wporg';
+    // Transitional: the assets of a wordpress.org plugin are shown read-only until changes go
+    // into its working copy and from there into one commit.
+    const editable = !isWporg;
 
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
     const [assetsLoading, setAssetsLoading] = useState(false);
@@ -127,13 +133,13 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const isDragging = isScreenshot && draggingN === screenshotN;
         const isDragOver = isScreenshot && dragOverN === screenshotN && draggingN !== screenshotN;
 
-        const metaLine = hasAsset ? getMetaLine(assetData) : '';
+        const metaLine = hasAsset ? getMetaLine(assetData, isWporg) : '';
         const imageModClass = def.group === 'banners' ? 'pblsh--asset-slot__box-image--banner'
             : def.group === 'screenshots' ? 'pblsh--asset-slot__box-image--screenshot'
             : 'pblsh--asset-slot__box-image--icon';
 
         // Drag-and-drop handlers for screenshot slots
-        const dragProps = isScreenshot ? {
+        const dragProps = isScreenshot && editable ? {
             onDragOver: (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
@@ -156,7 +162,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         } : {};
 
         // Drag source props (only on the image area of filled screenshot slots)
-        const dragSourceProps = (isScreenshot && hasAsset) ? {
+        const dragSourceProps = (isScreenshot && hasAsset && editable) ? {
             draggable: true,
             onDragStart: (e) => {
                 e.dataTransfer.setData('text/plain', String(screenshotN));
@@ -179,7 +185,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             className: classNames,
             ...dragProps,
         },
-            createElement('input', {
+            editable && createElement('input', {
                 ref: (el) => { fileInputRefs.current[slotKey] = el; },
                 type: 'file',
                 accept: def.accept,
@@ -229,7 +235,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                         : createElement('div', { className: 'pblsh--asset-slot__box-empty' },
                             createElement('div', { className: 'pblsh--asset-slot__box-empty-title' }, def.label),
                             createElement('div', { className: 'pblsh--asset-slot__box-empty-expected' }, getExpectedText(raw)),
-                            createElement(Button, {
+                            editable && createElement(Button, {
                                 isPrimary: true,
                                 className: 'pblsh--asset-slot__box-upload-btn',
                                 onClick: () => openFilePicker(slot, screenshotN),
@@ -237,7 +243,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                             }, __('Select File', 'peak-publisher')),
                         ),
                 ),
-            hasAsset && createElement('div', { className: 'pblsh--asset-slot__actions' },
+            hasAsset && editable && createElement('div', { className: 'pblsh--asset-slot__actions' },
                 createElement(Button, {
                     isTertiary: true,
                     className: 'has-icon',
@@ -357,7 +363,13 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             ),
         );
 
+        const wporg = isWporg ? assets && assets.wporg : null;
+
         return createElement('div', { className: 'pblsh--card pblsh--assets-card' },
+            // Where the mirror stands — the tab shows wordpress.org's assets as last pulled.
+            wporg && createElement('div', { className: 'pblsh--assets-bar' },
+                createInterpolateElement(getSyncedText(wporg), { time: createElement('time', getTimeTooltipProps(wporg.listed_at)) }),
+            ),
             // Icons group
             createElement('div', { className: 'pblsh--assets-group' },
                 createElement('div', { className: 'pblsh--assets-group__label' }, __('Icons', 'peak-publisher')),
@@ -391,8 +403,17 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                     slots.map(({ n, screenshot, caption }) =>
                         renderAssetBox('screenshot', screenshot, n, caption)
                     ),
-                    newScreenshotBox,
+                    editable && newScreenshotBox,
                 ),
+            ),
+            // Files of assets/ that are no slot here stay as they are on wordpress.org.
+            wporg && wporg.other_files > 0 && createElement('div', { className: 'pblsh--assets-footer' },
+                getOtherFilesText(wporg.other_files), ' · ',
+                createElement('a', {
+                    href: 'https://plugins.svn.wordpress.org/' + encodeURIComponent(pluginData.slug) + '/assets/',
+                    target: '_blank',
+                    rel: 'noreferrer',
+                }, __('Open on wordpress.org', 'peak-publisher')),
             ),
         );
     };

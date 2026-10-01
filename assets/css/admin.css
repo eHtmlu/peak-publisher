@@ -3640,6 +3640,23 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     color: #8c96a0;
 }
 
+/* wordpress.org: where the mirror stands, above the groups. */
+.pblsh--assets-bar {
+    color: #646970;
+    margin-bottom: 2rem;
+}
+
+/* wordpress.org: the files of assets/ the tab does not show, after the groups — closer to
+   the last group than the groups are to each other, set off by a rule. */
+.pblsh--assets-group:has(+ .pblsh--assets-footer) {
+    margin-bottom: 2rem;
+}
+.pblsh--assets-footer {
+    color: #8c96a0;
+    border-top: 1px solid var(--border-color-light);
+    padding-top: 1rem;
+}
+
 /* Decision rows — pinned between header and body. The publish path (channel + slug) and
    the current-release decision share this row anatomy; each row owns its own content
    classes (pblsh--publish-path__*, pblsh--current-release-decision__*). */

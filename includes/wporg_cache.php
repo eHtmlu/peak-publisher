@@ -18,7 +18,7 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
 
     $cached = wporg_decode_json_object((string) $plugin_post->post_content);
     try {
-        $current_revision = WporgOperations::get_plugin_revision($plugin_post->post_name);
+        $revisions = WporgOperations::get_plugin_revisions($plugin_post->post_name);
     } catch (\Throwable $e) {
         wporg_log_cache_error($plugin_post, 'root_revision', $e);
         if (!wporg_has_cached_revision($cached)) {
@@ -27,11 +27,24 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
         return $cached;
     }
 
-    if ($current_revision === null) {
+    if ($revisions === null) {
         if (!wporg_has_cached_revision($cached)) {
             throw new \RuntimeException(__('wordpress.org SVN plugin was not found.', 'peak-publisher'));
         }
         return $cached;
+    }
+    $current_revision = $revisions['revision'];
+
+    // The assets mirror keeps its own anchor — the revision of assets/ it holds (0 = none) —
+    // so a pull that was skipped (a commit held the lock) or failed is caught up by the next
+    // read, fresh cache or not. Warn-only like the trunk readme.
+    if (get_wporg_assets_state((int) $plugin_post->ID)['revision'] !== ($revisions['children']['assets'] ?? 0)) {
+        try {
+            require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
+            (new WporgAssetSync())->pull($plugin_post);
+        } catch (\Throwable $e) {
+            wporg_log_cache_error($plugin_post, 'assets', $e);
+        }
     }
 
     // A cache from before a key existed is refreshed like a stale one (release_count,
@@ -363,6 +376,15 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
         }
 
         refresh_plugin_title_from_reference($created_marker_id);
+
+        // The list shows the plugin's icon right after the import: the first pull fills the
+        // assets mirror. Warn-only — an empty mirror is filled by the next pull.
+        try {
+            require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
+            (new WporgAssetSync())->pull($marker);
+        } catch (\Throwable $e) {
+            wporg_log_import_error($wporg_slug, $e);
+        }
 
         return $created_marker_id;
     } catch (\Throwable $e) {

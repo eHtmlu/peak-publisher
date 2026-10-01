@@ -33,15 +33,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     // failure appears beside it.
     const [refreshingStats, setRefreshingStats] = useState(false);
     const isRefreshingAnyStats = useSelect((select) => select('pblsh/plugins').isRefreshingWporgStats(), []);
-    const validTabs = isWporg ? ['releases'] : ['releases', 'assets'];
+    const validTabs = ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
-
-    useEffect(() => {
-        if (isWporg && activeTab === 'assets') {
-            setActiveTab('releases');
-            if (typeof onTabChange === 'function') onTabChange('releases');
-        }
-    }, [isWporg, activeTab]);
 
     const switchToTab = (tab) => {
         if (!validTabs.includes(tab)) tab = 'releases';
@@ -444,7 +437,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             className: 'pblsh--tab-nav__tab' + (activeTab === 'releases' ? ' pblsh--tab-nav__tab--active' : ''),
             onClick: () => switchToTab('releases'),
         }, __('Releases', 'peak-publisher')),
-        !isWporg && createElement('button', {
+        createElement('button', {
             type: 'button',
             className: 'pblsh--tab-nav__tab' + (activeTab === 'assets' ? ' pblsh--tab-nav__tab--active' : ''),
             onClick: () => switchToTab('assets'),
@@ -461,7 +454,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             renderTabNav(),
                             createElement('div', { className: 'pblsh--tab-panel__body' },
                                 activeTab === 'releases' && renderReleasesTable(),
-                                activeTab === 'assets' && !isWporg && createElement(Pblsh.Components.PluginAssets, { pluginData, refreshPlugin }),
+                                activeTab === 'assets' && createElement(Pblsh.Components.PluginAssets, { pluginData, refreshPlugin }),
                             ),
                         ),
                     ),

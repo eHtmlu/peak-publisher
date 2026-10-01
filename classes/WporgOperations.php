@@ -325,11 +325,20 @@ class WporgOperations {
 
 
     public static function get_plugin_revision(string $wporg_slug): ?int {
-        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
-        $client = self::svn_client();
+        return self::get_plugin_revisions($wporg_slug)['revision'] ?? null;
+    }
 
+    /**
+     * The plugin root's revision and those of its direct children (trunk, tags, assets,
+     * branches) in one listing — a directory's revision bubbles up from every change beneath
+     * it. Null when the plugin does not exist on SVN.
+     *
+     * @return array{revision:int, children:array<string,int>}|null
+     */
+    public static function get_plugin_revisions(string $wporg_slug): ?array {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
         try {
-            $entries = $client->list_directory($wporg_slug . '/', 0);
+            $entries = self::svn_client()->list_directory($wporg_slug . '/', 1);
         } catch (WporgSvnException $e) {
             if ($e->get_error_code() === 'not_found') {
                 return null;
@@ -337,15 +346,23 @@ class WporgOperations {
             throw $e;
         }
 
+        // The listed directory itself comes first when its path does not match literally.
+        $root = $entries[0] ?? [];
         foreach ($entries as $entry) {
             if (self::normalize_path((string) ($entry['path'] ?? '')) === $wporg_slug) {
-                $revision = (int) ($entry['revision'] ?? 0);
-                return $revision > 0 ? $revision : null;
+                $root = $entry;
             }
         }
+        $revision = (int) ($root['revision'] ?? 0);
+        if ($revision <= 0) {
+            return null;
+        }
 
-        $revision = (int) ($entries[0]['revision'] ?? 0);
-        return $revision > 0 ? $revision : null;
+        $children = [];
+        foreach (self::direct_children($entries, $wporg_slug) as $entry) {
+            $children[(string) ($entry['name'] ?? '')] = (int) ($entry['revision'] ?? 0);
+        }
+        return [ 'revision' => $revision, 'children' => $children ];
     }
 
     public static function fetch_tag_data(string $wporg_slug, string $version): array {
@@ -366,20 +383,95 @@ class WporgOperations {
     }
 
     /**
-     * Whether nothing but the named direct children of the plugin root (trunk, tags, assets,
-     * branches) changed since $base_revision — one listing: a directory's revision bubbles up
-     * from every change beneath it. A caller that committed into one child only can keep a
-     * cache fresh at its new revision when this holds.
+     * Whether nothing but the named direct children of the plugin root changed since
+     * $base_revision (get_plugin_revisions()); a vanished plugin counts as changed. A caller
+     * that committed into one child only can keep a cache fresh at its new revision when this
+     * holds.
      */
     public static function plugin_changed_only_in(string $wporg_slug, array $children, int $base_revision): bool {
-        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
-        $entries = self::svn_client()->list_directory($wporg_slug . '/', 1);
-        foreach (self::direct_children($entries, $wporg_slug) as $entry) {
-            if (!in_array((string) ($entry['name'] ?? ''), $children, true) && (int) ($entry['revision'] ?? 0) > $base_revision) {
+        $revisions = self::get_plugin_revisions($wporg_slug);
+        if ($revisions === null) {
+            return false;
+        }
+        foreach ($revisions['children'] as $name => $revision) {
+            if (!in_array((string) $name, $children, true) && $revision > $base_revision) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * The assets/ directory as wordpress.org's import reads it: the direct children bytewise by
+     * name like svn ls, each with size and last-changed revision, and the directory's own
+     * revision (the mirror's anchor). Null when the plugin has no assets/ directory.
+     *
+     * @return array{revision:int, entries:array<int, array{name:string, type:string, size:int|null, revision:int}>}|null
+     */
+    public static function list_assets(string $wporg_slug, ?WporgPluginSvnClient $client = null): ?array {
+        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
+        $base_path = $wporg_slug . '/assets';
+        try {
+            $entries = ($client ?? self::svn_client())->list_directory($base_path . '/', 1);
+        } catch (WporgSvnException $e) {
+            if ($e->get_error_code() === 'not_found') {
+                return null;
+            }
+            throw $e;
+        }
+
+        $revision = 0;
+        foreach ($entries as $entry) {
+            if (self::normalize_path((string) ($entry['path'] ?? '')) === $base_path) {
+                $revision = (int) ($entry['revision'] ?? 0);
+            }
+        }
+        $children = array_map(static fn(array $entry): array => [
+            'name' => (string) ($entry['name'] ?? ''),
+            'type' => (string) ($entry['type'] ?? 'file'),
+            'size' => $entry['size'] ?? null,
+            'revision' => (int) ($entry['revision'] ?? 0),
+        ], self::direct_children($entries, $base_path));
+        usort($children, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
+
+        return [ 'revision' => $revision, 'entries' => $children ];
+    }
+
+    /**
+     * Downloads assets/{filename} into $local_path, streamed; a failure leaves no file behind.
+     * $filename comes from a list_assets() entry that classify_asset_listing() accepted.
+     */
+    public static function download_asset(string $wporg_slug, string $filename, string $local_path, int $size, ?WporgPluginSvnClient $client = null): void {
+        try {
+            ($client ?? self::svn_client())->download_file(self::normalize_slug_or_throw($wporg_slug) . '/assets/' . $filename, $local_path, $size);
+        } catch (\Throwable $e) {
+            if (file_exists($local_path)) {
+                wp_delete_file($local_path);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Runs $fn under the plugin's write lock — the lock every commit takes — or not at all: a
+     * reader skips instead of waiting. Answers false when the lock is held, else what $fn
+     * returns (so $fn answers something other than false).
+     */
+    public static function with_plugin_lock(string $wporg_slug, string $operation, int $plugin_id, callable $fn): mixed {
+        try {
+            $lock = self::acquire_wporg_deploy_lock(self::normalize_slug_or_throw($wporg_slug), '', $operation, $plugin_id);
+        } catch (WporgSvnException $e) {
+            if ($e->get_error_code() === 'deploy_in_progress') {
+                return false;
+            }
+            throw $e;
+        }
+
+        try {
+            return $fn();
+        } finally {
+            self::release_wporg_deploy_lock($lock);
+        }
     }
 
     /**

@@ -2,7 +2,8 @@
 // limits and files — shared by the boxes and the alerts; no state, like
 // utils-installations.js. Sizes and limits are binary units, like wordpress.org's.
 lodash.set(window, 'Pblsh.AssetsUtils', (() => {
-    const { __, sprintf } = wp.i18n;
+    const { __, _n, sprintf } = wp.i18n;
+    const { formatRelativeTime } = Pblsh.Utils;
 
     const MB = 1048576;
     // A limit: '1 MB', '4 MB', '10 MB' (whole binary MB).
@@ -38,11 +39,13 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     }
 
     // The box's figures: "128×128 px · 12.3 KB" — muted fragments, · separated.
-    function getMetaLine(entry) {
+    // A wordpress.org file adds the SVN revision it was last changed in: "· r3670259".
+    function getMetaLine(entry, withRevision = false) {
         const parts = [];
         if (entry.width && entry.height) parts.push(entry.width + '×' + entry.height + ' px');
         const size = formatSize(entry.filesize);
         if (size) parts.push(size);
+        if (withRevision && entry.revision) parts.push('r' + entry.revision);
         return parts.join(' · ');
     }
 
@@ -66,5 +69,24 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     // Screenshots without a single caption: one line instead of the caption details.
     const getNoCaptionsText = () => __('No captions in readme.txt yet', 'peak-publisher');
 
-    return { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText };
+    // Where the mirror of a wordpress.org plugin stands (the server's wporg block): the
+    // revision of assets/ it holds and when it was last confirmed — the moment inside
+    // <time></time> for the caller's exact-timestamp tooltip.
+    function getSyncedText(wporg) {
+        const checked = formatRelativeTime(wporg.listed_at);
+        if (wporg.revision === null || !checked) return __('Not synced with wordpress.org yet', 'peak-publisher');
+        if (wporg.revision === 0) return sprintf(__('wordpress.org has no assets/ directory for this plugin · checked <time>%s</time>', 'peak-publisher'), checked);
+        return sprintf(__('Synced with wordpress.org · r%1$d · checked <time>%2$s</time>', 'peak-publisher'), wporg.revision, checked);
+    }
+
+    // Files of assets/ that no slot of the tab shows — they stay on wordpress.org untouched.
+    function getOtherFilesText(count) {
+        return sprintf(_n(
+            '%d other file in assets/ is not managed here (localized or right-to-left variants, unused sizes, blueprints)',
+            '%d other files in assets/ are not managed here (localized or right-to-left variants, unused sizes, blueprints)',
+            count, 'peak-publisher'
+        ), count);
+    }
+
+    return { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText };
 })());

@@ -315,7 +315,7 @@ class PublicAPI {
 					'caption' => $image['caption'],
 				];
 			},
-			$asset_manager->get_api_screenshots($plugin->post_name, $current_release_content['plugin_readme_txt']['content']['screenshots'] ?? [])
+			$asset_manager->get_api_screenshots($plugin, $current_release_content['plugin_readme_txt']['content']['screenshots'] ?? [])
 		);
 
 		if ( $result['screenshots'] ) {
@@ -354,7 +354,7 @@ class PublicAPI {
 		// @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
 		// NOTE: Intentionally duplicated in handle_update_check() — kept as a 1:1 copy of the wp.org reference.
 		$result['banners'] = array();
-		if ( $banners = $asset_manager->get_plugin_banner($plugin->post_name) ) {
+		if ( $banners = $asset_manager->get_plugin_banner($plugin) ) {
 			if ( isset( $banners['banner'] ) ) {
 				$result['banners']['low'] = $banners['banner'];
 			}
@@ -364,7 +364,7 @@ class PublicAPI {
 		}
 
 		$result['icons'] = array();
-		if ( $icons = $asset_manager->get_plugin_icon($plugin->post_name) ) {
+		if ( $icons = $asset_manager->get_plugin_icon($plugin) ) {
 			if ( ! empty( $icons['icon'] ) && empty( $icons['generated'] ) ) {
 				$result['icons']['1x'] = $icons['icon'];
 			} elseif ( ! empty( $icons['icon'] ) && ! empty( $icons['generated'] ) ) {
@@ -476,7 +476,7 @@ class PublicAPI {
             // @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
             // NOTE: Intentionally duplicated in handle_info() — kept as a 1:1 copy of the wp.org reference.
             $result['banners'] = array();
-            if ( $banners = $asset_manager->get_plugin_banner($plugin->post_name) ) {
+            if ( $banners = $asset_manager->get_plugin_banner($plugin) ) {
                 if ( isset( $banners['banner'] ) ) {
                     $result['banners']['low'] = $banners['banner'];
                 }
@@ -486,7 +486,7 @@ class PublicAPI {
             }
 
             $result['icons'] = array();
-            if ( $icons = $asset_manager->get_plugin_icon($plugin->post_name) ) {
+            if ( $icons = $asset_manager->get_plugin_icon($plugin) ) {
                 if ( ! empty( $icons['icon'] ) && empty( $icons['generated'] ) ) {
                     $result['icons']['1x'] = $icons['icon'];
                 } elseif ( ! empty( $icons['icon'] ) && ! empty( $icons['generated'] ) ) {

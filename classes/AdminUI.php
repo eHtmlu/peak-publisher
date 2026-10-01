@@ -64,6 +64,7 @@ class AdminUI {
             'utils-upload-result.js',
             'utils-current-release.js',
             'utils-installations.js',
+            'utils-assets.js',
             'upload-checks.js',
             'api.js',
             'stores/plugins.js',
@@ -150,7 +151,6 @@ class AdminUI {
             filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs/styles/atom-one-dark.css')
         );
         
-        require_once __DIR__ . '/AssetManager.php';
         wp_localize_script(
             'pblsh-admin',
             'PblshData',
@@ -162,7 +162,7 @@ class AdminUI {
                 // Icon fallback for plugins without directory assets — the endpoint
                 // generates the pattern purely from the slug in the URL.
                 'geopatternIconBase' => geopattern_icon_base_url(),
-                'assetSlots' => AssetManager::get_slots(),
+                'assetSlots' => get_asset_slots(),
                 'channelTexts' => get_channel_texts(),
                 // Facts of the one-time schema upgrade (includes/upgrade.php), null once dismissed.
                 'upgradeNotice' => is_array($upgrade_notice = get_option('pblsh_upgrade_notice')) ? $upgrade_notice : null,

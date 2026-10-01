@@ -3,17 +3,11 @@
 // its state (the manifest, the upload in progress, the drag); the plugin comes with
 // pluginData, a changed icon reaches the header and the list through refreshPlugin.
 lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin }) => {
-    const { __ } = wp.i18n;
+    const { __, sprintf } = wp.i18n;
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { Button, DropdownMenu, MenuItem } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
-
-    const formatFilesize = (bytes) => {
-        if (!bytes || bytes <= 0) return null;
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    };
+    const { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText } = Pblsh.AssetsUtils;
 
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
     const [assetsLoading, setAssetsLoading] = useState(false);
@@ -41,8 +35,22 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         }
     };
 
+    // Every write answers the fresh manifest — no second request; the icon may have changed.
+    const applyAssets = (result) => {
+        setAssets(result.assets);
+        if (typeof refreshPlugin === 'function') refreshPlugin();
+    };
+    // apiFetch and the upload reject with the REST error payload: message leads, the code follows.
+    const reportError = (e, fallback) => Pblsh.Utils.showAlert(((e && e.message) || fallback) + (e && e.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''), 'error');
+
     const handleAssetUpload = async (slot, screenshotN, file) => {
         if (!file || !pluginData || !pluginData.id) return;
+        // The same limit the server enforces — refused before the upload starts.
+        const slotDef = ASSET_SLOTS[slot];
+        if (slotDef && file.size > slotDef.maxBytes) {
+            Pblsh.Utils.showAlert(getTooLargeText(slotDef, file.size), 'error');
+            return;
+        }
         const slotKey = slot === 'screenshot' ? 'screenshot-' + screenshotN : slot;
         setUploadingSlot(slotKey);
         setUploadProgress(0);
@@ -51,17 +59,12 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                 pluginData.id, slot, screenshotN, file,
                 (pct) => setUploadProgress(Math.floor(pct))
             );
-            if (result && result.status === 'ok') {
-                await fetchAssets();
-                if (typeof refreshPlugin === 'function') refreshPlugin();
-                if (result.warnings && result.warnings.length > 0) {
-                    Pblsh.Utils.showAlert(result.warnings.map(w => w.message).join('\n'), 'warning');
-                }
-            } else {
-                Pblsh.Utils.showAlert((result && result.message) || __('Upload failed.', 'peak-publisher'), 'error');
+            applyAssets(result);
+            if (result.warnings && result.warnings.length > 0) {
+                Pblsh.Utils.showAlert(result.warnings.map(w => w.message).join('\n'), 'warning');
             }
         } catch (e) {
-            Pblsh.Utils.showAlert(e.message || __('Upload failed.', 'peak-publisher'), 'error');
+            reportError(e, __('Upload failed.', 'peak-publisher'));
         } finally {
             setUploadingSlot(null);
             setUploadProgress(0);
@@ -72,29 +75,18 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         if (!pluginData || !pluginData.id) return;
         if (!confirm(__('Delete this asset?', 'peak-publisher'))) return;
         try {
-            const result = await Pblsh.API.deletePluginAsset(pluginData.id, slot, screenshotN);
-            if (result && result.assets) {
-                setAssets(result.assets);
-            } else {
-                await fetchAssets();
-            }
-            if (typeof refreshPlugin === 'function') refreshPlugin();
+            applyAssets(await Pblsh.API.deletePluginAsset(pluginData.id, slot, screenshotN));
         } catch (e) {
-            Pblsh.Utils.showAlert(e.message || __('Delete failed.', 'peak-publisher'), 'error');
+            reportError(e, __('Delete failed.', 'peak-publisher'));
         }
     };
 
     const handleScreenshotMove = async (fromN, toN) => {
         if (!pluginData || !pluginData.id || fromN === toN) return;
         try {
-            const result = await Pblsh.API.moveScreenshot(pluginData.id, fromN, toN);
-            if (result && result.assets) {
-                setAssets(result.assets);
-            } else {
-                await fetchAssets();
-            }
+            applyAssets(await Pblsh.API.moveScreenshot(pluginData.id, fromN, toN));
         } catch (e) {
-            Pblsh.Utils.showAlert(e.message || __('Move failed.', 'peak-publisher'), 'error');
+            reportError(e, __('Move failed.', 'peak-publisher'));
         }
     };
 
@@ -130,13 +122,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const isDragging = isScreenshot && draggingN === screenshotN;
         const isDragOver = isScreenshot && dragOverN === screenshotN && draggingN !== screenshotN;
 
-        const parts = [];
-        if (hasAsset && assetData.width && assetData.height) parts.push(assetData.width + '\u00d7' + assetData.height + '\u00a0px');
-        const fs = hasAsset ? formatFilesize(assetData.filesize) : null;
-        if (fs) parts.push(fs);
-
-        const acceptLabel = (raw.exts || []).map(e => e.toUpperCase()).join(' · ');
-        const sizeLabel = def.expectedW && def.expectedH ? def.expectedW + '\u00d7' + def.expectedH + '\u00a0px' : null;
+        const metaLine = hasAsset ? getMetaLine(assetData) : '';
         const imageModClass = def.group === 'banners' ? 'pblsh--asset-slot__box-image--banner'
             : def.group === 'screenshots' ? 'pblsh--asset-slot__box-image--screenshot'
             : 'pblsh--asset-slot__box-image--icon';
@@ -158,7 +144,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                 const fromN = parseInt(e.dataTransfer.getData('text/plain'), 10);
                 if (!fromN || fromN === screenshotN) return;
                 if (hasAsset) {
-                    if (!confirm(__('Replace the existing screenshot at this position?', 'peak-publisher'))) return;
+                    if (!confirm(getSwapConfirmText(fromN, screenshotN))) return;
                 }
                 handleScreenshotMove(fromN, screenshotN);
             },
@@ -217,9 +203,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                     createElement('div', { className: 'pblsh--asset-slot__box-info' },
                         createElement('div', { className: 'pblsh--asset-slot__box-label' }, def.label),
                         createElement('div', { className: 'pblsh--asset-slot__box-filename' }, assetData.filename),
-                        parts.length > 0 && createElement('div', { className: 'pblsh--asset-slot__box-meta' },
-                            parts.join('\u2002\u2022\u2002'),
-                        ),
+                        metaLine && createElement('div', { className: 'pblsh--asset-slot__box-meta' }, metaLine),
                         warnings.length > 0 && createElement('div', { className: 'pblsh--asset-slot__warnings' },
                             warnings.map((w, i) => createElement('div', { key: i, className: 'pblsh--asset-slot__warning', title: w.message },
                                 getSvgIcon('information_outline', { size: 14 }),
@@ -238,9 +222,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                         )
                         : createElement('div', { className: 'pblsh--asset-slot__box-empty' },
                             createElement('div', { className: 'pblsh--asset-slot__box-empty-title' }, def.label),
-                            createElement('div', { className: 'pblsh--asset-slot__box-empty-expected' },
-                                __('Expected:', 'peak-publisher') + ' ' + [acceptLabel, sizeLabel].filter(Boolean).join(' · '),
-                            ),
+                            createElement('div', { className: 'pblsh--asset-slot__box-empty-expected' }, getExpectedText(raw)),
                             createElement(Button, {
                                 isPrimary: true,
                                 className: 'pblsh--asset-slot__box-upload-btn',
@@ -358,7 +340,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--asset-slot__box-empty-title' },
                             __('Screenshot', 'peak-publisher') + ' ' + nextN + ' — ' + __('New', 'peak-publisher'),
                         ),
-                        createElement('div', { className: 'pblsh--asset-slot__box-empty-expected' }, (ASSET_SLOTS.screenshot.exts || []).map(function(e) { return e.toUpperCase(); }).join(' · ')),
+                        createElement('div', { className: 'pblsh--asset-slot__box-empty-expected' }, getExpectedText(ASSET_SLOTS.screenshot)),
                         createElement(Button, {
                             isPrimary: true,
                             className: 'pblsh--asset-slot__box-upload-btn',

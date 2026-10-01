@@ -262,7 +262,7 @@ class AdminAPI {
             'name' => $post->post_title,
             'slug' => $post->post_name,
             'hosting_type' => $hosting_type,
-            'icon_url' => $is_self_hosted ? $this->assets()->get_best_icon_url($post->post_name) : null,
+            'icon_url' => $is_self_hosted ? $this->assets()->get_best_icon_url($post) : null,
             'version' => $current['release'] instanceof \WP_Post ? (string) $current['release']->post_title : null,
             'latest_version' => $current['latest'] instanceof \WP_Post ? (string) $current['latest']->post_title : null,
             'current_release_state' => $current['state'],
@@ -734,7 +734,7 @@ class AdminAPI {
         }
 
         // Delete the plugin's assets directory.
-        $assets_dir = get_plugin_assets_basedir($plugin->post_name);
+        $assets_dir = get_plugin_assets_dir($plugin);
         if (is_dir($assets_dir)) {
             get_wp_filesystem()->delete(trailingslashit($assets_dir), true);
         }
@@ -805,20 +805,14 @@ class AdminAPI {
     }
 
     /**
-     * Get all assets for a plugin.
+     * The editor's view of a plugin's assets.
      */
-    public function handle_get_assets(\WP_REST_Request $request): array|\WP_REST_Response {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
-            return $this->unsupported_asset_hosting_type_response();
+    public function handle_get_assets(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
-        }
-        $result  = $this->assets()->get_all($post->post_name);
-        $result['screenshot_captions'] = $this->get_screenshot_captions($id);
-        return $result;
+        return $this->with_captions($post, $this->assets()->describe($post));
     }
 
     /**
@@ -851,140 +845,77 @@ class AdminAPI {
         return (object) $captions;
     }
 
-    /**
-     * Upload an asset file to a plugin slot.
-     * Expects multipart/form-data with: file (binary), slot (string), screenshot_n (int, optional).
-     */
-    public function handle_upload_asset(\WP_REST_Request $request): array|\WP_REST_Response {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
-            return $this->unsupported_asset_hosting_type_response();
+    /** Uploads a file into a slot: multipart with file, slot and screenshot_n (optional). */
+    public function handle_upload_asset(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
-        }
-
-        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below.
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated by the facade.
         if (empty($_FILES['file']) || (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            $err_code = (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE);
-            return ['status' => 'error', 'message' => 'No file uploaded (error code ' . $err_code . ').'];
+            return $this->rest_error_response($this->make_rest_error('asset_no_file', sprintf(__('No file uploaded (error code %d).', 'peak-publisher'), (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE)), 400));
         }
-
-        $slot         = sanitize_key((string) ($request->get_param('slot') ?? ''));
-        $screenshot_n_raw = $request->get_param('screenshot_n');
-        $screenshot_n = $screenshot_n_raw !== null && $screenshot_n_raw !== '' ? (int) $screenshot_n_raw : null;
-
-        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Passed to AssetManager which validates it.
-        $file_data = $_FILES['file'];
-        $result = $this->assets()->upload($id, $post->post_name, $slot, $screenshot_n, $file_data);
-
-        // Calculate banner average color for geopattern fallback icons.
-        // Based on WordPress.org Plugin Directory.
-        if ( in_array( $slot, [ 'banner_sd', 'banner_hd' ], true ) && ( $result['status'] ?? '' ) !== 'error' ) {
-            $this->update_banner_color( $id, $post->post_name );
-        }
-
-        return $result;
+        $screenshot_n = $request->get_param('screenshot_n');
+        $result = $this->assets()->upload(
+            $post,
+            sanitize_key((string) ($request->get_param('slot') ?? '')),
+            $screenshot_n === null || $screenshot_n === '' ? null : (int) $screenshot_n,
+            $_FILES['file'] // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+        );
+        return $this->asset_write_response($post, $result);
     }
 
-    /**
-     * Delete an asset from a plugin slot.
-     * Expects JSON body: { slot: string, screenshot_n?: int }.
-     */
-    public function handle_delete_asset(\WP_REST_Request $request): array|\WP_REST_Response {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
-            return $this->unsupported_asset_hosting_type_response();
+    /** Deletes a slot: JSON { slot, screenshot_n? }. */
+    public function handle_delete_asset(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
-        }
-
-        $params       = $request->get_json_params();
-        $slot         = sanitize_key((string) ($params['slot'] ?? ''));
-        $screenshot_n_raw = $params['screenshot_n'] ?? null;
-        $screenshot_n = $screenshot_n_raw !== null ? (int) $screenshot_n_raw : null;
-
-        $deleted = $this->assets()->delete($id, $post->post_name, $slot, $screenshot_n);
-
-        // Recalculate banner average color for geopattern fallback icons.
-        // Based on WordPress.org Plugin Directory.
-        if ( in_array( $slot, [ 'banner_sd', 'banner_hd' ], true ) ) {
-            $this->update_banner_color( $id, $post->post_name );
-        }
-
-        $assets  = $this->assets()->get_all($post->post_name);
-        $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
-        return ['status' => 'ok', 'deleted' => $deleted, 'assets' => $assets];
-    }
-
-    /**
-     * Move a screenshot from one position to another.
-     * Expects JSON body: { slot: "screenshot", from: int, to: int }.
-     */
-    public function handle_move_asset(\WP_REST_Request $request): array|\WP_REST_Response {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if ($post instanceof \WP_Post && is_wporg_plugin($post)) {
-            return $this->unsupported_asset_hosting_type_response();
-        }
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
-        }
-
         $params = $request->get_json_params();
-        $from   = isset($params['from']) ? (int) $params['from'] : 0;
-        $to     = isset($params['to'])   ? (int) $params['to']   : 0;
-
-        $result = $this->assets()->move_screenshot($id, $post->post_name, $from, $to);
-        if ($result['status'] === 'error') {
-            return $result;
-        }
-
-        $assets = $this->assets()->get_all($post->post_name);
-        $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
-        return ['status' => 'ok', 'assets' => $assets];
+        $result = $this->assets()->delete(
+            $post,
+            sanitize_key((string) ($params['slot'] ?? '')),
+            isset($params['screenshot_n']) ? (int) $params['screenshot_n'] : null
+        );
+        return $this->asset_write_response($post, $result);
     }
 
-    private function unsupported_asset_hosting_type_response(): \WP_REST_Response {
-        return $this->rest_error_response($this->make_rest_error(
-            'unsupported_hosting_type',
-            __('Plugin assets are only available for self-hosted plugins.', 'peak-publisher'),
-            404
-        ));
+    /** Moves or swaps screenshots: JSON { from, to }; the server decides which and answers `mode`. */
+    public function handle_move_asset(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        $params = $request->get_json_params();
+        $result = $this->assets()->move($post, (int) ($params['from'] ?? 0), (int) ($params['to'] ?? 0));
+        return $this->asset_write_response($post, $result);
     }
 
-    /**
-     * Recalculate and store the banner average color for geopattern fallback icons.
-     *
-     * Based on WordPress.org Plugin Directory.
-     * @see https://github.com/WordPress/wordpress.org — class-tools.php
-     */
-    private function update_banner_color( int $plugin_id, string $plugin_slug ): void {
-        $banner_average_color = '';
-
-        // Find the first available banner file (prefer HD, then SD) via asset meta.
-        foreach ( [ 'banner_hd', 'banner_sd' ] as $slot ) {
-            $info = $this->assets()->find_file_in_slot( $plugin_slug, $slot );
-            if ( $info !== null ) {
-                $filepath = trailingslashit( get_plugin_assets_basedir( $plugin_slug ) ) . $info['filename'];
-                if ( file_exists( $filepath ) ) {
-                    $banner_average_color = get_image_average_color( $filepath );
-                    if ( ! is_string( $banner_average_color ) ) {
-                        $banner_average_color = '';
-                    }
-                }
-                break;
-            }
+    /** The plugin of an asset request: a self-hosted plugin — wordpress.org plugins have no assets tab yet. */
+    private function asset_plugin(\WP_REST_Request $request): \WP_Post|\WP_REST_Response {
+        $post = get_post((int) $request->get_param('id'));
+        if (!is_plugin_post($post)) {
+            return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
         }
-
-        if ( $banner_average_color !== '' ) {
-            update_post_meta( $plugin_id, 'assets_banners_color', wp_slash( $banner_average_color ) );
-        } else {
-            delete_post_meta( $plugin_id, 'assets_banners_color' );
+        if (is_wporg_plugin($post)) {
+            return $this->rest_error_response($this->make_rest_error('unsupported_hosting_type', __('Plugin assets are only available for self-hosted plugins.', 'peak-publisher'), 404));
         }
+        return $post;
+    }
+
+    /** Every write answers the fresh manifest, or the error as it is. */
+    private function asset_write_response(\WP_Post $post, array|\WP_Error $result) {
+        if (is_wp_error($result)) {
+            return $this->rest_error_response($result);
+        }
+        $result['assets'] = $this->with_captions($post, $result['assets']);
+        return [ 'status' => 'ok', ...$result ];
+    }
+
+    /** The view with the screenshot captions of the latest release by date. */
+    private function with_captions(\WP_Post $post, array $assets): array {
+        $assets['screenshot_captions'] = $this->get_screenshot_captions((int) $post->ID);
+        return $assets;
     }
 
     public function get_peak_publisher_settings_rest(): array {

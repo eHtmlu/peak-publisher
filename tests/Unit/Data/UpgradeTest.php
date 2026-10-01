@@ -131,4 +131,39 @@ final class UpgradeTest extends TestCase {
         self::assertSame(PBLSH_SCHEMA_VERSION, get_option('pblsh_schema_version'));
         self::assertFalse(get_option('pblsh_schema_migration_lock'));
     }
+
+    public function test_asset_manifest_entries_get_their_figures_and_lose_local(): void {
+        $plugin = $this->create_plugin('pblsh_plugin', 'plugin-a');
+        $dir = FakeWordPress::$upload_dir . '/pblsh-peak-publisher/plugins/plugin-a/assets';
+        mkdir($dir, 0777, true);
+        file_put_contents($dir . '/icon-128x128.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='));
+        file_put_contents($dir . '/icon.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
+        update_post_meta($plugin->ID, 'assets_icons', [
+            'icon-128x128.png' => [ 'filename' => 'icon-128x128.png', 'revision' => 1700000000, 'resolution' => '128x128', 'local' => '' ],
+            'icon.svg' => [ 'filename' => 'icon.svg', 'revision' => 1700000001, 'resolution' => false, 'local' => false ],
+        ]);
+        update_post_meta($plugin->ID, 'assets_screenshots', [
+            'screenshot-1.png' => [ 'filename' => 'screenshot-1.png', 'revision' => 1700000002, 'resolution' => '1', 'local' => '' ],
+        ]);
+        $migrated = [ 'banner-772x250.png' => [ 'filename' => 'banner-772x250.png', 'revision' => 1700000003, 'resolution' => '772x250', 'filesize' => 5, 'width' => 772, 'height' => 250 ] ];
+        update_post_meta($plugin->ID, 'assets_banners', $migrated);
+
+        maybe_upgrade_schema();
+
+        self::assertSame(
+            [ 'filename' => 'icon-128x128.png', 'revision' => 1700000000, 'resolution' => '128x128', 'filesize' => 70, 'width' => 1, 'height' => 1 ],
+            get_post_meta($plugin->ID, 'assets_icons', true)['icon-128x128.png']
+        );
+        self::assertSame(
+            [ 'filename' => 'icon.svg', 'revision' => 1700000001, 'resolution' => false, 'filesize' => 41, 'width' => null, 'height' => null ],
+            get_post_meta($plugin->ID, 'assets_icons', true)['icon.svg']
+        );
+        self::assertSame(
+            [ 'filename' => 'screenshot-1.png', 'revision' => 1700000002, 'resolution' => '1', 'filesize' => 0, 'width' => null, 'height' => null ],
+            get_post_meta($plugin->ID, 'assets_screenshots', true)['screenshot-1.png'],
+            'a missing file: size 0, no measurements — the editor warns about it when reading'
+        );
+        self::assertSame($migrated, get_post_meta($plugin->ID, 'assets_banners', true), 'an entry with figures is left alone');
+        self::assertArrayNotHasKey('asset_manifest', get_option('pblsh_upgrade_notice')['topics'] ?? [], 'nothing for the operator to decide');
+    }
 }

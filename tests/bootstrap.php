@@ -25,4 +25,6 @@ require_once PBLSH_PLUGIN_DIR . 'includes/wporg_api.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_stats.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_log.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/functions.php';
+require_once PBLSH_PLUGIN_DIR . 'includes/uploads.php';
+require_once PBLSH_PLUGIN_DIR . 'includes/assets.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/upgrade.php';

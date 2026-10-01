@@ -167,7 +167,7 @@ class UploadWorkflow {
 
         // Move the ZIP into the plugin's releases dir — flat like the wordpress.org download
         // host, the filename {slug}.{version}.zip carries the full identity. releases/ is the
-        // UploadWorkflow-owned sibling of the AssetManager-owned assets/ dir.
+        // UploadWorkflow-owned sibling of the LocalAssetStore-owned assets/ dir.
         $target_dir = trailingslashit(peak_publisher_upload_basedir()) . 'plugins/' . $plugin_slug . '/releases/';
         wp_mkdir_p($target_dir);
         $target_zip = $target_dir . basename($release_zip);

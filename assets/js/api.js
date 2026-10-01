@@ -178,8 +178,8 @@ lodash.set(window, 'Pblsh.API', {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     resolve(xhr.response || {});
                 } else {
-                    const msg = xhr.response && xhr.response.message ? xhr.response.message : 'Upload failed (status ' + xhr.status + ')';
-                    reject(new Error(msg));
+                    // Like apiFetch: the REST error payload (code, message) is the rejection.
+                    reject(xhr.response && xhr.response.code ? xhr.response : new Error('Upload failed (status ' + xhr.status + ')'));
                 }
             };
             xhr.onerror = () => reject(new Error('Network error during asset upload.'));
@@ -199,11 +199,12 @@ lodash.set(window, 'Pblsh.API', {
             body: { slot, screenshot_n: screenshotN !== undefined ? screenshotN : null },
         });
     },
-    // Move a screenshot from one position to another
+    // Move a screenshot to another position — onto an occupied one the server swaps the two
+    // and answers mode 'swap'
     moveScreenshot: async (pluginId, fromN, toN) => {
         return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/move', {
             method: 'POST',
-            body: { slot: 'screenshot', from: fromN, to: toN },
+            body: { from: fromN, to: toN },
         });
     },
 });

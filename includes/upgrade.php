@@ -73,10 +73,13 @@ function acquire_schema_migration_lock(): bool {
  * current schema through this one function). Each section is its own function, named
  * after what it does; its docblock names the schema version that introduced it, and what
  * it does and why. Independent changes of the same schema version are separate sections.
- * A section returns the facts the one-time admin notice reports under its topic key, or
- * null when it has nothing to say.
+ * A section the operator may need to know about returns the facts the one-time admin notice
+ * reports under its topic key, or null when it has nothing to say this time; a section that
+ * never concerns the operator returns nothing.
  */
 function upgrade_schema_from_live(): void {
+    upgrade_asset_manifest_entries();
+
     $topics = array_filter([
         'release_drafts' => upgrade_release_drafts_to_pointer(),
         'readme_conversion' => upgrade_drop_readme_conversion_setting(),
@@ -210,4 +213,57 @@ function upgrade_drop_readme_conversion_setting(): ?array {
     unset($settings['readme_txt_convert_to_utf8_without_bom']);
     update_option('pblsh_settings', $settings, false);
     return $was_disabled ? [ 'was_disabled' => true ] : null;
+}
+
+
+/**
+ * Schema version 1 (ships with the release after 1.3.1): an assets manifest entry carries the
+ * file's size and pixel dimensions and loses the never-read key `local`.
+ *
+ * Why: the editor reads size and dimensions from the manifest instead of measuring the disk on
+ * every read, and the entry is wordpress.org's shape — filename, revision, resolution, size,
+ * dimensions — for every plugin.
+ *
+ * What: every entry of assets_icons / assets_banners / assets_screenshots of a self-hosted
+ * plugin without a `filesize` key gets filesize (0 when the file is missing), width and height
+ * (null for SVG or when unmeasurable) from the file on disk and loses `local`. A repeated run
+ * finds nothing to do. Nothing for the notice — the operator has nothing to decide. The
+ * generated icon's color is not recomputed: it is a cache the store refreshes with the next
+ * banner change.
+ */
+function upgrade_asset_manifest_entries(): void {
+    $plugins = get_posts([
+        'post_type' => 'pblsh_plugin',
+        'post_status' => 'any',
+        'posts_per_page' => -1,
+    ]);
+    foreach ($plugins as $plugin) {
+        $assets_dir = get_plugin_assets_dir($plugin);
+        foreach (PBLSH_ASSET_META_KEYS as $meta_key) {
+            $manifest = get_post_meta((int) $plugin->ID, $meta_key, true);
+            if (!is_array($manifest)) {
+                continue;
+            }
+            $changed = false;
+            foreach ($manifest as $filename => $entry) {
+                if (!is_array($entry) || array_key_exists('filesize', $entry)) {
+                    continue;
+                }
+                $path = $assets_dir . '/' . $filename;
+                $exists = is_file($path);
+                $size = $exists ? @getimagesize($path) : false;
+                unset($entry['local']);
+                $manifest[$filename] = [
+                    ...$entry,
+                    'filesize' => $exists ? (int) filesize($path) : 0,
+                    'width' => $size === false ? null : (int) $size[0],
+                    'height' => $size === false ? null : (int) $size[1],
+                ];
+                $changed = true;
+            }
+            if ($changed) {
+                update_post_meta((int) $plugin->ID, $meta_key, $manifest);
+            }
+        }
+    }
 }

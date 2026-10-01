@@ -25,6 +25,8 @@ namespace Pblsh\Tests {
         /** @var array<int, array{url:string, args:array}> Every wp_remote_get() call, in order. */
         public static array $http_requests = [];
         public static int $next_post_id = 1;
+        /** The uploads base directory of this test — a fresh temp directory per test. */
+        public static string $upload_dir = '';
 
         public static function reset(): void {
             self::$posts = [];
@@ -34,6 +36,18 @@ namespace Pblsh\Tests {
             self::$http_responses = [];
             self::$http_requests = [];
             self::$next_post_id = 1;
+            if (self::$upload_dir !== '' && is_dir(self::$upload_dir)) {
+                self::remove_directory(self::$upload_dir);
+            }
+            self::$upload_dir = sys_get_temp_dir() . '/pblsh-tests-' . getmypid() . '-' . bin2hex(random_bytes(4));
+            mkdir(self::$upload_dir, 0777, true);
+        }
+
+        private static function remove_directory(string $dir): void {
+            foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST) as $file) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
+            rmdir($dir);
         }
     }
 }
@@ -208,6 +222,32 @@ namespace {
     function add_action(string $hook, callable $callback, int $priority = 10, int $accepted_args = 1): bool {
         FakeWordPress::$actions[] = [ 'hook' => $hook, 'callback' => $callback, 'priority' => $priority ];
         return true;
+    }
+
+    /** Filters pass the value through — no test registers one. */
+    function apply_filters(string $hook, $value, ...$args) {
+        return $value;
+    }
+
+    function sanitize_file_name(string $filename): string {
+        return preg_replace('/[^A-Za-z0-9._-]/', '-', basename($filename));
+    }
+
+    function trailingslashit(string $value): string {
+        return rtrim($value, '/\\') . '/';
+    }
+
+    /** The uploads directory: the test's temp directory (see FakeWordPress::$upload_dir). */
+    function wp_upload_dir(): array {
+        return [ 'basedir' => FakeWordPress::$upload_dir, 'baseurl' => 'https://example.test/wp-content/uploads', 'error' => false ];
+    }
+
+    function wp_mkdir_p(string $dir): bool {
+        return is_dir($dir) || mkdir($dir, 0777, true);
+    }
+
+    function rest_url(string $path = ''): string {
+        return 'https://example.test/wp-json/' . ltrim($path, '/');
     }
 
     function __(string $text, string $domain = 'default'): string {

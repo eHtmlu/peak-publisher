@@ -38,20 +38,42 @@ function peak_publisher_upload_basedir(): string {
 
 
 /**
- * Gets the assets directory for a specific plugin slug.
+ * A plugin's assets directory per channel and layer: self-hosted `plugins/{slug}/assets`;
+ * a wordpress.org plugin keeps the mirror of its SVN assets/ under
+ * `wporg-plugins/{slug}/mirror/assets` and the pending changes under
+ * `wporg-plugins/{slug}/pending/assets` — a channel tree of its own, because the same slug
+ * may exist on both channels.
+ *
+ * @param 'shipped'|'pending' $layer shipped = what sites and the plugin page get (the
+ *        self-hosted directory, the wordpress.org mirror)
  */
-function get_plugin_assets_basedir(string $plugin_slug): string {
-    return trailingslashit(peak_publisher_upload_basedir()) . 'plugins/' . sanitize_file_name($plugin_slug) . '/assets';
+function get_plugin_assets_dir(\WP_Post $plugin, string $layer = 'shipped'): string {
+    return peak_publisher_upload_basedir() . '/' . plugin_assets_relative_dir($plugin, $layer);
+}
+
+
+function get_plugin_assets_url(\WP_Post $plugin, string $layer = 'shipped'): string {
+    return peak_publisher_upload_dir()['baseurl'] . '/' . plugin_assets_relative_dir($plugin, $layer);
+}
+
+
+function plugin_assets_relative_dir(\WP_Post $plugin, string $layer): string {
+    $slug = sanitize_file_name($plugin->post_name);
+    if (is_wporg_plugin($plugin)) {
+        return 'wporg-plugins/' . $slug . '/' . ($layer === 'pending' ? 'pending' : 'mirror') . '/assets';
+    }
+    return 'plugins/' . $slug . '/assets';
 }
 
 
 /**
- * Ensures the assets directory for a plugin slug exists and is publicly accessible.
- * Assets are served as direct static files (not via REST API).
+ * Creates a plugin's assets directory and makes it publicly readable for images only —
+ * assets are served as direct static files; the uploads base keeps denying everything else.
  * Writes .htaccess to override the parent "Deny all" for Apache; Nginx serves files directly.
  */
-function ensure_plugin_assets_dir(string $plugin_slug): void {
-    $basedir  = get_plugin_assets_basedir($plugin_slug);
+function ensure_plugin_assets_dir(\WP_Post $plugin, string $layer = 'shipped'): void {
+    ensure_upload_dir_is_ready_and_secured();
+    $basedir = get_plugin_assets_dir($plugin, $layer);
     wp_mkdir_p($basedir);
     if (!file_exists($basedir . '/index.php')) {
         file_put_contents($basedir . '/index.php', '<?php exit;');

@@ -4,7 +4,8 @@ Live: schema version 0 (Peak Publisher 1.3.1, released 2026-04-04 on wordpress.o
 
 Two schemas exist, never more. The **live schema** is the one publicly rolled out — the data on
 users' sites: Peak Publisher 1.3.1 knows no schema version option (`pblsh_schema_version` absent
-= live) and keeps release posts with status `publish`/`draft`. The **current schema** is what the
+= live), keeps release posts with status `publish`/`draft` and assets manifest entries
+`{filename, revision, resolution, local}`. The **current schema** is what the
 code in this repository creates today:
 
 - **Posts:** `pblsh_plugin` (self-hosted plugin, `post_name` = slug, status Public/Draft = the
@@ -15,7 +16,10 @@ code in this repository creates today:
   `{tag_revision, plugin_data, plugin_info, plugin_readme_txt}`; status always `publish`).
 - **Post meta:** plugin `_pblsh_current_release` (version string of the current release, `''` =
   none; written only by finalize, the flip and the migration), the assets manifest
-  `assets_icons` / `assets_banners` / `assets_screenshots` (`AssetManager`),
+  `assets_icons` / `assets_banners` / `assets_screenshots` (keyed by filename, one entry per
+  slot: `{filename, revision, resolution, filesize, width, height}` — revision is the time of
+  the last change; `includes/assets.php`), `assets_banners_color` (the average color of the
+  first banner file, for the generated icon),
   `_pblsh_installations` (24-hour counting cache, regenerable, not declared); marker
   `_pblsh_wporg_account_username`, `_pblsh_wporg_operations` (the operations log: every SVN
   write Peak Publisher committed, newest first, unbounded — `{operation, at, user {id, login},

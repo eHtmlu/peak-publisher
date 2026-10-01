@@ -881,43 +881,6 @@ function get_image_average_color( string $file_path ) {
 
 
 /**
- * Retrieve the Geopattern SVG URL for a given plugin.
- *
- * Based on WordPress.org Plugin Directory.
- * @see https://github.com/WordPress/wordpress.org — class-template.php
- *
- * @param \WP_Post|int|string $post   Post object, ID, or plugin slug.
- * @param string|null         $color  Optional hex color (6 chars, no #). If null, read from post meta.
- * @return string Geopattern icon URL.
- */
-function get_geopattern_icon_url( $post = null, ?string $color = null ): string {
-    if ( is_string( $post ) ) {
-        // Treat as slug — look up the post.
-        $plugin = get_page_by_path( $post, OBJECT, 'pblsh_plugin' );
-    } else {
-        $plugin = get_post( $post );
-    }
-
-    if ( ! $plugin ) {
-        return '';
-    }
-
-    if ( is_null( $color ) ) {
-        $color = get_post_meta( $plugin->ID, 'assets_banners_color', true );
-    }
-
-    if ( strlen( $color ) === 6 && strspn( $color, 'abcdef0123456789' ) === 6 ) {
-        $color = "_{$color}";
-    } else {
-        $color = '';
-    }
-
-    // The slug + color combine to form the cache buster, like on wordpress.org.
-    return geopattern_icon_base_url() . $plugin->post_name . $color . '.svg';
-}
-
-
-/**
  * Base URL of the public geopattern-icon endpoint (route registered in PublicAPI).
  */
 function geopattern_icon_base_url(): string {

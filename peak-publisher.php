@@ -35,6 +35,7 @@ require_once __DIR__ . '/includes/wporg_api.php';
 require_once __DIR__ . '/includes/wporg_stats.php';
 require_once __DIR__ . '/includes/wporg_log.php';
 require_once __DIR__ . '/includes/functions.php';
+require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/upgrade.php';
 
 

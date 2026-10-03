@@ -54,13 +54,30 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         return sprintf(__('Swap screenshots %1$d and %2$d?', 'peak-publisher'), fromN, toN);
     }
 
-    // Where the screenshot captions come from — the readme of the release sites receive, else
-    // the latest release's (the server's captions_source: state, version, fallback).
-    function getCaptionsSourceText(source) {
-        if (!source.version) return __('Captions appear once a release with a readme.txt is published.', 'peak-publisher');
-        return source.fallback
+    // Where the screenshot captions come from (the server's captions_source: state, version,
+    // fallback): the readme of the current release; on wordpress.org without a tag pointer the
+    // trunk readme, which is what the plugin page shows then; else the latest release's, a
+    // fallback. The pointer wording follows the editor header (utils-current-release.js).
+    function getCaptionsSourceText(plugin, source) {
+        const isWporg = plugin.hosting_type === 'wporg';
+        switch (source.state) {
+            case 'current':
+                return sprintf(__('Captions from readme.txt of %s (current release)', 'peak-publisher'), source.version);
+            case 'trunk':
+            case 'none':
+                if (isWporg) return __('Captions from readme.txt of trunk (wordpress.org distributes trunk)', 'peak-publisher');
+                break;
+            case 'tag_missing':
+                if (isWporg) return sprintf(__('Captions from readme.txt of trunk (Stable tag %s does not exist — wordpress.org distributes trunk)', 'peak-publisher'), plugin.pointer);
+                break;
+            case 'unknown':
+                if (source.version) return sprintf(__('Captions from readme.txt of %s (latest — trunk/readme.txt could not be read)', 'peak-publisher'), source.version);
+                break;
+        }
+        // Self-hosted without a current release, and wordpress.org with an unreadable pointer and no tag.
+        return source.version
             ? sprintf(__('Captions from readme.txt of %s (latest — no current release)', 'peak-publisher'), source.version)
-            : sprintf(__('Captions from readme.txt of %s (current release)', 'peak-publisher'), source.version);
+            : __('Captions appear once a release with a readme.txt is published.', 'peak-publisher');
     }
 
     // wordpress.org renders captions by position: moving a screenshot leaves its caption behind.

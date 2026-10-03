@@ -393,7 +393,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                 createElement('div', { className: 'pblsh--assets-group__label' }, __('Screenshots', 'peak-publisher')),
                 hasCaptions
                     ? createElement('div', { className: 'pblsh--assets-group__hints' },
-                        createElement('div', null, getCaptionsSourceText(assets.captions_source)),
+                        createElement('div', null, getCaptionsSourceText(pluginData, assets.captions_source)),
                         createElement('div', null, getPositionsHint(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
                     )
                     : screenshots.length > 0 && createElement('div', { className: 'pblsh--assets-group__hints' },

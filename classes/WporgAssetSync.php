@@ -8,15 +8,17 @@ require_once __DIR__ . '/WporgOperations.php';
 
 
 /**
- * The wordpress.org assets of a marker: keeps the mirror in step with SVN. The mirror holds the
- * slot winners under their SVN names; the other files of assets/ are counted, never copied.
+ * The wordpress.org assets of a marker: keeps the mirror in step with SVN, records changes in
+ * the working copy and turns it into one commit. The mirror holds the slot winners under their
+ * SVN names; the other files of assets/ are counted, never copied. Every write runs under the
+ * plugin's commit lock.
  */
 class WporgAssetSync {
 
     /** Pulls under the plugin's lock; false when a commit holds it (the mirror stays as it is). */
     public function pull(\WP_Post $marker): bool {
         raise_wporg_time_limit();
-        return WporgOperations::with_plugin_lock($marker->post_name, 'assets_pull', (int) $marker->ID, function() use ($marker): bool {
+        return WporgOperations::try_under_plugin_lock($marker->post_name, 'assets_pull', (int) $marker->ID, function() use ($marker): bool {
             $this->pull_unlocked($marker);
             return true;
         }) !== false;
@@ -24,11 +26,15 @@ class WporgAssetSync {
 
     /**
      * One listing, then only the slots whose winner changed are downloaded into the mirror,
-     * vanished slots are removed, and the banner color follows its A10 source. The manifest
-     * records every slot that arrived; the anchor (revision, listed_at) moves only when all
-     * did, so a failed download is retried by the next pull. The caller holds the lock.
+     * vanished slots are removed, and the banner color follows its A10 source. A copy entry of
+     * the working copy whose source this pull replaces becomes a put of the old file first, so
+     * it keeps its meaning ("the picture that was in slot 3"). The manifest records every slot
+     * that arrived; the anchor (revision, listed_at) moves only when all did, so a failed
+     * download is retried by the next pull. The caller holds the lock.
+     *
+     * @return array{listing: ?array, complete: bool} listing = list_assets() as read
      */
-    public function pull_unlocked(\WP_Post $marker, ?WporgPluginSvnClient $client = null): void {
+    public function pull_unlocked(\WP_Post $marker, ?WporgPluginSvnClient $client = null): array {
         $listing = WporgOperations::list_assets($marker->post_name, $client);
         $classified = classify_asset_listing($listing['entries'] ?? []);
         $remote = array_map(static fn(array $slot): array => $slot['winner'], $classified['slots']);
@@ -37,6 +43,9 @@ class WporgAssetSync {
 
         ensure_plugin_assets_dir($marker);
         $dir = get_plugin_assets_dir($marker);
+        if (!$this->secure_copy_sources($marker, $remote)) {
+            return [ 'listing' => $listing, 'complete' => false ];
+        }
         foreach ($diff['remove'] as $slot_id) {
             $this->unlink($dir, $manifest[$slot_id]['filename']);
             unset($manifest[$slot_id]);
@@ -75,7 +84,7 @@ class WporgAssetSync {
             $complete = false;
         }
         if (!$complete) {
-            return;
+            return [ 'listing' => $listing, 'complete' => false ];
         }
         update_wporg_assets_state((int) $marker->ID, [
             ...$state,
@@ -84,6 +93,261 @@ class WporgAssetSync {
             'other_files' => $classified['other_files'],
             'color_source' => $classified['color_source'],
         ]);
+        return [ 'listing' => $listing, 'complete' => true ];
+    }
+
+    /**
+     * Copy entries whose source the pull is about to replace or remove become puts of the
+     * source's current mirror file (copy_sources_to_secure()). False when a file could not be
+     * secured — then the pull must not touch the mirror.
+     */
+    private function secure_copy_sources(\WP_Post $marker, array $remote): bool {
+        $state = get_wporg_assets_state((int) $marker->ID);
+        $secure = copy_sources_to_secure($state['pending'], $remote);
+        if ($secure === []) {
+            return true;
+        }
+        ensure_plugin_assets_dir($marker, 'pending');
+        $mirror_dir = get_plugin_assets_dir($marker);
+        $pending_dir = get_plugin_assets_dir($marker, 'pending');
+        foreach ($secure as $slot_id) {
+            $entry = $state['pending'][$slot_id];
+            $file = asset_canonical_filename($slot_id, $entry['ext']);
+            if (!get_wp_filesystem()->copy($mirror_dir . '/' . $entry['from']['filename'], $pending_dir . '/' . $file, true)) {
+                update_wporg_assets_state((int) $marker->ID, $state);
+                return false;
+            }
+            unset($entry['from']);
+            $state['pending'][$slot_id] = [ ...$entry, 'action' => 'put', 'file' => $file ];
+        }
+        update_wporg_assets_state((int) $marker->ID, $state);
+        return true;
+    }
+
+    /**
+     * Records one change in the working copy (apply_asset_change(), which also decides between
+     * move and swap) and does its file work in pending/assets/: the uploaded file of a put under
+     * its canonical name, the removed files, the renames of uploads that moved.
+     *
+     * @return array{mode: ?string}|\WP_Error
+     */
+    public function change(\WP_Post $marker, array $change, ?string $local_path = null): array|\WP_Error {
+        return $this->locked($marker, function() use ($marker, $change, $local_path): array|\WP_Error {
+            $id = (int) $marker->ID;
+            $state = get_wporg_assets_state($id);
+            // The working copy builds on the mirror: before the first pull every entry would
+            // record an empty base, and that pull would then report a conflict on each of them.
+            if ($state['revision'] === null) {
+                return new \WP_Error('wporg_assets_not_synced', __('The assets have not been read from wordpress.org yet, so they cannot be changed. Reload to try again.', 'peak-publisher'), [ 'status' => 409 ]);
+            }
+            $mirror = read_asset_manifest($id);
+            if ($change['action'] === 'move' && effective_asset_entry($state['pending'], $mirror, 'screenshot-' . (int) $change['from']) === null) {
+                return new \WP_Error('asset_not_found', __('Source screenshot not found.', 'peak-publisher'), [ 'status' => 404 ]);
+            }
+            $user = wp_get_current_user();
+            $result = apply_asset_change($state['pending'], $mirror, [ ...$change, 'at' => time(), 'user' => [ 'id' => (int) $user->ID, 'login' => (string) $user->user_login ] ]);
+
+            ensure_plugin_assets_dir($marker, 'pending');
+            $dir = get_plugin_assets_dir($marker, 'pending');
+            $fs = get_wp_filesystem();
+            if ($change['action'] === 'put') {
+                $target = $dir . '/' . $result['pending'][$change['slot']]['file'];
+                $moved = is_uploaded_file((string) $local_path) ? @move_uploaded_file((string) $local_path, $target) : false;
+                if (!$moved && !$fs->move((string) $local_path, $target, true)) {
+                    return new \WP_Error('asset_write_failed', __('Failed to save the uploaded file. Please check server permissions.', 'peak-publisher'), [ 'status' => 500 ]);
+                }
+            }
+            foreach ($result['removes'] as $file) {
+                $this->unlink($dir, $file);
+            }
+            // The renames are a set — a swap of two uploads crosses — so every file takes a temp name first.
+            $temps = [];
+            foreach ($result['renames'] as [ $from, $to ]) {
+                $temps[$to] = $dir . '/.move-' . wp_generate_password(8, false);
+                if (!$fs->move($dir . '/' . $from, $temps[$to], true)) {
+                    return $this->move_failed();
+                }
+            }
+            foreach ($temps as $to => $temp) {
+                if (!$fs->move($temp, $dir . '/' . $to, true)) {
+                    return $this->move_failed();
+                }
+            }
+            update_wporg_assets_state($id, [ ...$state, 'pending' => $result['pending'] ]);
+            return [ 'mode' => $result['mode'] ];
+        });
+    }
+
+    /** Drops every pending change at once — no download: the mirror is the state on wordpress.org. */
+    public function discard(\WP_Post $marker): ?\WP_Error {
+        $result = $this->locked($marker, function() use ($marker): array {
+            get_wp_filesystem()->delete(get_plugin_assets_dir($marker, 'pending'), true);
+            update_wporg_assets_state((int) $marker->ID, [ ...get_wporg_assets_state((int) $marker->ID), 'pending' => [] ]);
+            return [];
+        });
+        return is_wp_error($result) ? $result : null;
+    }
+
+    /**
+     * A conflict decided, or a pending change taken back: theirs drops the entry; mine rebases it
+     * on the current mirror state, so it goes out with the next commit. A delete whose slot is
+     * empty on wordpress.org by now has nothing left to delete and is dropped either way.
+     */
+    public function resolve(\WP_Post $marker, string $slot_id, string $keep): ?\WP_Error {
+        $result = $this->locked($marker, function() use ($marker, $slot_id, $keep): array|\WP_Error {
+            $id = (int) $marker->ID;
+            $state = get_wporg_assets_state($id);
+            $entry = $state['pending'][$slot_id] ?? null;
+            if ($entry === null) {
+                return new \WP_Error('asset_not_found', __('There is no pending change for this asset any more.', 'peak-publisher'), [ 'status' => 404 ]);
+            }
+            $base = wporg_asset_base(read_asset_manifest($id)[$slot_id] ?? null);
+            if ($keep === 'theirs' || ($entry['action'] === 'delete' && $base === null)) {
+                if ($entry['action'] === 'put') {
+                    $this->unlink(get_plugin_assets_dir($marker, 'pending'), $entry['file']);
+                }
+                unset($state['pending'][$slot_id]);
+            } else {
+                $state['pending'][$slot_id]['base'] = $base;
+            }
+            update_wporg_assets_state($id, $state);
+            return [];
+        });
+        return is_wp_error($result) ? $result : null;
+    }
+
+    /**
+     * The working copy as one commit (commit_files(), operation `assets`). Under the lock the
+     * mirror is pulled fresh with the commit's client — an incomplete pull or a conflict stops
+     * the commit before anything is written — and the plan is built from that listing. Still
+     * under the lock, the mirror is then written forward locally (apply_commit_locally()); the
+     * marker cache advances when only assets/ changed since its revision.
+     *
+     * @return array{revision: ?int, committed: bool}|\WP_Error
+     */
+    public function commit(\WP_Post $marker, string $username): array|\WP_Error {
+        $id = (int) $marker->ID;
+        $outcome = [];
+        try {
+            $result = WporgOperations::commit_files(
+                $marker,
+                $username,
+                'assets',
+                function(WporgPluginSvnClient $client, int $base_revision) use ($marker, $id, &$outcome): array {
+                    $pulled = $this->pull_unlocked($marker, $client);
+                    if (!$pulled['complete']) {
+                        throw new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely, so nothing was committed. Try again.', 'peak-publisher'), 502);
+                    }
+                    $state = get_wporg_assets_state($id);
+                    if (asset_conflicts($state['pending'], read_asset_manifest($id)) !== []) {
+                        throw new WporgSvnException('wporg_assets_conflict', __('Some of these assets were changed on wordpress.org as well. Decide for each marked asset, then commit again.', 'peak-publisher'), 409);
+                    }
+                    $plan = build_asset_commit_plan($marker->post_name, $state['pending'], $pulled['listing'], $base_revision, get_plugin_assets_dir($marker, 'pending'));
+                    $outcome = [ 'listing' => $pulled['listing'], 'plan' => $plan, 'pending' => $state['pending'] ];
+                    return $plan;
+                },
+                function(int $revision) use ($marker, &$outcome): void {
+                    $this->apply_commit_locally($marker, $revision, $outcome);
+                }
+            );
+        } catch (WporgSvnException $e) {
+            return $e->to_wp_error();
+        }
+        if (empty($result['committed'])) {
+            return [ 'revision' => null, 'committed' => false ];
+        }
+
+        try {
+            $only_assets = WporgOperations::plugin_changed_only_in($marker->post_name, [ 'assets' ], (int) $result['base_revision']);
+        } catch (\Throwable $e) {
+            $only_assets = false;
+        }
+        if ($only_assets) {
+            advance_wporg_plugin_cache($id, (int) $result['base_revision'], (int) $result['revision'], []);
+        } else {
+            mark_wporg_plugin_cache_stale($id);
+        }
+        return [ 'revision' => (int) $result['revision'], 'committed' => true ];
+    }
+
+    /**
+     * The mirror after the commit, written from the working copy without a download: the new
+     * slot files take temp names first (a swap crosses; a copy's source is still in place), then
+     * the slots' old files go, then the temps take their canonical names. The working copy is
+     * emptied — its changes are on wordpress.org now. The anchor moves to the commit's revision
+     * only when every file arrived; otherwise the next read pulls what is missing.
+     */
+    private function apply_commit_locally(\WP_Post $marker, int $revision, array $outcome): void {
+        $id = (int) $marker->ID;
+        $mirror_dir = get_plugin_assets_dir($marker);
+        $pending_dir = get_plugin_assets_dir($marker, 'pending');
+        $fs = get_wp_filesystem();
+        $complete = true;
+        try {
+            $manifest = read_asset_manifest($id);
+            $staged = [];
+            foreach ($outcome['pending'] as $slot_id => $entry) {
+                if ($entry['action'] === 'delete') {
+                    continue;
+                }
+                $temp = $mirror_dir . '/.commit-' . wp_generate_password(8, false);
+                $ok = $entry['action'] === 'put'
+                    ? $fs->move($pending_dir . '/' . $entry['file'], $temp, true)
+                    : $fs->copy($mirror_dir . '/' . $entry['from']['filename'], $temp, true);
+                if ($ok) {
+                    $staged[$slot_id] = [ $temp, $entry ];
+                } else {
+                    $complete = false;
+                }
+            }
+            foreach (array_keys($outcome['pending']) as $slot_id) {
+                if (isset($manifest[$slot_id])) {
+                    $this->unlink($mirror_dir, $manifest[$slot_id]['filename']);
+                    unset($manifest[$slot_id]);
+                }
+            }
+            $sizes = [];
+            foreach ($staged as $slot_id => [ $temp, $entry ]) {
+                $name = asset_canonical_filename((string) $slot_id, $entry['ext']);
+                if (!$fs->move($temp, $mirror_dir . '/' . $name, true)) {
+                    $this->unlink($mirror_dir, basename($temp));
+                    $complete = false;
+                    continue;
+                }
+                $sizes[$name] = (int) filesize($mirror_dir . '/' . $name);
+                $manifest[$slot_id] = [ 'filename' => $name, 'revision' => $revision, 'resolution' => classify_asset_filename($name)['resolution'], 'filesize' => $sizes[$name], 'width' => $entry['width'], 'height' => $entry['height'] ];
+            }
+            write_asset_manifest($id, $manifest);
+
+            $classified = classify_asset_listing(asset_listing_after_plan($outcome['listing']['entries'] ?? [], $outcome['plan'], $revision, $sizes));
+            $state = get_wporg_assets_state($id);
+            if (!$this->refresh_banner_color($marker, $manifest, $classified['color_source'], $state['color_source'], null)) {
+                $complete = false;
+            }
+        } catch (\Throwable $e) {
+            wporg_log_cache_error($marker, 'assets after commit', $e);
+            $complete = false;
+        }
+
+        $fs->delete($pending_dir, true);
+        $state = get_wporg_assets_state($id);
+        update_wporg_assets_state($id, $complete ? [
+            ...$state,
+            'revision' => $revision,
+            'listed_at' => time(),
+            'other_files' => $classified['other_files'],
+            'color_source' => $classified['color_source'],
+            'pending' => [],
+        ] : [ ...$state, 'pending' => [] ]);
+    }
+
+    /** Runs a change of the working copy under the commit lock; while a commit, a pull or another change holds it, the change is refused (deploy_in_progress, wporg_plugin_busy). */
+    private function locked(\WP_Post $marker, callable $fn): array|\WP_Error {
+        try {
+            return WporgOperations::under_plugin_lock($marker->post_name, 'assets_change', (int) $marker->ID, $fn);
+        } catch (WporgSvnException $e) {
+            return $e->to_wp_error();
+        }
     }
 
     /**
@@ -125,6 +389,10 @@ class WporgAssetSync {
             delete_post_meta($id, PBLSH_ASSETS_COLOR_META);
         }
         return true;
+    }
+
+    private function move_failed(): \WP_Error {
+        return new \WP_Error('asset_write_failed', __('Failed to move the screenshot file.', 'peak-publisher'), [ 'status' => 500 ]);
     }
 
     private function unlink(string $dir, string $filename): void {

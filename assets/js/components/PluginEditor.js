@@ -239,17 +239,17 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         const issue = getCurrentReleaseIssue(pluginData);
         const closed = isWporg ? pluginData.wporg_stats.closed : null;
         return [
-            flipNotice && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--releases-notice' },
+            flipNotice && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--tab-panel__notice' },
                 createElement('p', null, flipNotice),
             ),
             // Closed on wordpress.org — the most important fact of the daily stats fetch:
             // nothing is distributed, whatever the pointer says.
-            closed && createElement(NoticeBox, { key: 'closed', variant: 'warning', className: 'pblsh--releases-notice' },
+            closed && createElement(NoticeBox, { key: 'closed', variant: 'warning', className: 'pblsh--tab-panel__notice' },
                 createElement('p', null, getWporgClosedNotice(closed)),
             ),
             // The fact, then the remedy emphasized on its own line — one paragraph, as the box
             // holds a single thought.
-            issue && createElement(NoticeBox, { key: 'current-release', variant: issue.variant, className: 'pblsh--releases-notice' },
+            issue && createElement(NoticeBox, { key: 'current-release', variant: issue.variant, className: 'pblsh--tab-panel__notice' },
                 createElement('p', null,
                     issue.fact,
                     ...(issue.remedy ? [ createElement('br'), createElement('strong', null, issue.remedy) ] : []),

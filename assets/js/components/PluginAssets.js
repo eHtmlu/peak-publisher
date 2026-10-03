@@ -2,22 +2,31 @@
 // screenshots in fixed slots, uploaded, replaced, deleted and reordered from here. Owns
 // its state (the manifest, the upload in progress, the drag); the plugin comes with
 // pluginData, a changed icon reaches the header and the list through refreshPlugin. A
-// wordpress.org plugin shows its mirror of SVN's assets/ with where the mirror stands.
+// wordpress.org plugin edits a working copy over its mirror of SVN's assets/: the bar says
+// where the mirror stands and commits the changes as one, every box shows what its change
+// does, a conflict box lets the user decide, and wordpress.org's state can be shown alone.
 lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin }) => {
     const { __, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
-    const { Button, DropdownMenu, MenuItem } = wp.components;
+    const { Button, DropdownMenu, MenuItem, Spinner } = wp.components;
     const { getSvgIcon, getTimeTooltipProps } = Pblsh.Utils;
-    const { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText } = Pblsh.AssetsUtils;
-    const { TipLink } = Pblsh.Components;
+    const {
+        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText,
+        getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
+        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText,
+    } = Pblsh.AssetsUtils;
+    const { TipLink, NoticeBox } = Pblsh.Components;
 
     const isWporg = !!pluginData && pluginData.hosting_type === 'wporg';
-    // Transitional: the assets of a wordpress.org plugin are shown read-only until changes go
-    // into its working copy and from there into one commit.
-    const editable = !isWporg;
+    // The working copy waits without an account; only the commit needs one.
+    const account = isWporg ? pluginData.wporg_account : null;
+    const canCommit = !!(account && account.can_write);
 
     const [assets, setAssets]               = useState(null);   // null = not yet loaded
     const [assetsLoading, setAssetsLoading] = useState(false);
+    const [busy, setBusy]                   = useState(null);   // 'committing' | 'working' | null — a working-copy request in flight
+    const [showWporgState, setShowWporgState] = useState(false); // wordpress.org's state alone, read-only
+    const [notice, setNotice]               = useState(null);   // the last commit's outcome
     const [uploadingSlot, setUploadingSlot] = useState(null);   // 'icon_128' | 'screenshot-3' | null
     const [uploadProgress, setUploadProgress] = useState(0);
     const fileInputRefs = useRef({});  // { [slotKey]: HTMLInputElement }
@@ -42,10 +51,12 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         }
     };
 
-    // Every write answers the fresh manifest — no second request; the icon may have changed.
+    // Every write answers the fresh view — no second request. A self-hosted write may change
+    // the icon of header and list; a wordpress.org change does so only once it is committed.
     const applyAssets = (result) => {
+        setNotice(null);
         setAssets(result.assets);
-        if (typeof refreshPlugin === 'function') refreshPlugin();
+        if (!isWporg && typeof refreshPlugin === 'function') refreshPlugin();
     };
     // apiFetch and the upload reject with the REST error payload: message leads, the code follows.
     const reportError = (e, fallback) => Pblsh.Utils.showAlert(((e && e.message) || fallback) + (e && e.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''), 'error');
@@ -80,7 +91,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
 
     const handleAssetDelete = async (slot, screenshotN) => {
         if (!pluginData || !pluginData.id) return;
-        if (!confirm(__('Delete this asset?', 'peak-publisher'))) return;
+        if (!confirm(getDeleteConfirmText(isWporg))) return;
         try {
             applyAssets(await Pblsh.API.deletePluginAsset(pluginData.id, slot, screenshotN));
         } catch (e) {
@@ -96,6 +107,45 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             reportError(e, __('Move failed.', 'peak-publisher'));
         }
     };
+
+    // The working copy of a wordpress.org plugin as one commit. A conflict answers with the view
+    // after the commit's fresh pull: the boxes show what to decide.
+    const handleCommit = async () => {
+        if (!confirm(getCommitConfirmText(assets.wporg.slots))) return;
+        setBusy('committing');
+        try {
+            const result = await Pblsh.API.commitPluginAssets(pluginData.id);
+            setAssets(result.assets);
+            setShowWporgState(false);
+            setNotice(result.committed ? getCommittedText(result.revision) : null);
+            if (typeof refreshPlugin === 'function') refreshPlugin();
+        } catch (e) {
+            if (e && e.assets) setAssets(e.assets);
+            reportError(e, __('Commit failed.', 'peak-publisher'));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const runWorkingCopyRequest = async (request, fallback) => {
+        setBusy('working');
+        try {
+            applyAssets(await request());
+            setShowWporgState(false);
+        } catch (e) {
+            reportError(e, fallback);
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const handleDiscard = () => {
+        if (!confirm(getDiscardConfirmText(assets.wporg.pending_count))) return;
+        runWorkingCopyRequest(() => Pblsh.API.discardPluginAssets(pluginData.id), __('Discard failed.', 'peak-publisher'));
+    };
+
+    // keep 'theirs' drops the slot's change (also the Restore of a delete); 'mine' keeps it over wordpress.org's new file.
+    const handleResolve = (slotKey, keep) => runWorkingCopyRequest(() => Pblsh.API.resolvePluginAsset(pluginData.id, slotKey, keep), __('The decision could not be saved.', 'peak-publisher'));
 
     const openFilePicker = (slot, screenshotN) => {
         const key = slot === 'screenshot' ? 'screenshot-' + (screenshotN !== null && screenshotN !== undefined ? screenshotN : 'new') : slot;
@@ -115,6 +165,58 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     // means a numbering that slipped; without any, one line and the tip say what to do.
     const hasCaptions = !!(assets && assets.screenshot_captions && Object.keys(assets.screenshot_captions).length > 0);
 
+    const wporg = isWporg && assets ? assets.wporg : null;
+    // wordpress.org's state alone means something only while the working copy holds changes.
+    const showingWporgState = showWporgState && !!wporg && wporg.pending_count > 0;
+    // Before the first pull there is nothing to build a change on (the server refuses it too).
+    const notSynced = !!wporg && wporg.revision === null;
+    // Nothing changes while wordpress.org's state is shown, a working-copy request runs or the
+    // mirror was never read.
+    const readOnly = showingWporgState || busy !== null || notSynced;
+
+    // wordpress.org's state: every slot as the mirror holds it, the working copy left out.
+    const wporgStateView = () => {
+        const entryOf = (slotKey) => {
+            const file = wporg.slots[slotKey] && wporg.slots[slotKey].on_wporg;
+            return file ? { ...file, warnings: [] } : null;
+        };
+        const view = { ...assets, screenshots: [] };
+        Object.keys(ASSET_SLOTS).filter((slot) => slot !== 'screenshot').forEach((slot) => { view[slot] = entryOf(slot); });
+        Object.keys(wporg.slots).forEach((slotKey) => {
+            const match = /^screenshot-(\d+)$/.exec(slotKey);
+            const entry = match && entryOf(slotKey);
+            if (entry) view.screenshots.push({ ...entry, screenshot_n: parseInt(match[1], 10) });
+        });
+        view.screenshots.sort((a, b) => a.screenshot_n - b.screenshot_n);
+        return view;
+    };
+
+    // A conflict side: the image or an empty frame, and what it is.
+    const renderCompareSide = (label, url, caption, imageModClass) => createElement('div', { className: 'pblsh--asset-slot__compare-side' },
+        createElement('div', { className: 'pblsh--asset-slot__compare-label' }, label),
+        url
+            ? createElement('div', { className: 'pblsh--asset-slot__box-image ' + imageModClass },
+                createElement('div', { className: 'pblsh--asset-slot__box-image-inner' },
+                    createElement('img', { src: url, alt: caption, className: 'pblsh--asset-slot__box-img', draggable: false }),
+                ),
+            )
+            : createElement('div', { className: 'pblsh--asset-slot__compare-empty' }),
+        createElement('div', { className: 'pblsh--asset-slot__box-meta' }, caption),
+    );
+
+    // Changed here and on wordpress.org: both states side by side and the two decisions.
+    const renderConflict = (slotKey, label, mine, slotInfo, imageModClass) => createElement('div', { className: 'pblsh--asset-slot__conflict' },
+        createElement('div', { className: 'pblsh--asset-slot__box-label' }, label),
+        createElement('div', { className: 'pblsh--asset-slot__compare' },
+            renderCompareSide(__('Mine', 'peak-publisher'), mine && mine.url, mine ? mine.filename : __('Deleted here', 'peak-publisher'), imageModClass),
+            renderCompareSide(__('wordpress.org', 'peak-publisher'), slotInfo.on_wporg && slotInfo.on_wporg.url, getOnWporgText(slotInfo.on_wporg), imageModClass),
+        ),
+        createElement('div', { className: 'pblsh--asset-slot__resolve' },
+            createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: () => handleResolve(slotKey, 'theirs') }, __("Take wordpress.org's version", 'peak-publisher')),
+            createElement(Button, { isPrimary: true, disabled: busy !== null, onClick: () => handleResolve(slotKey, 'mine') }, __('Keep mine', 'peak-publisher')),
+        ),
+    );
+
     const renderAssetBox = (slot, assetData, screenshotN = null, caption = null) => {
         const stripTags = (html) => { const el = document.createElement('div'); el.innerHTML = html; return el.textContent || ''; };
         const screenshotLabel = caption
@@ -128,6 +230,12 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const slotKey = slot === 'screenshot' ? 'screenshot-' + screenshotN : slot;
         const isUploading = uploadingSlot === slotKey;
         const hasAsset = !!(assetData && assetData.filename);
+        // What the working copy does to this slot (wordpress.org) — not while wordpress.org's state is shown.
+        const slotInfo = wporg && !showingWporgState ? wporg.slots[slotKey] || null : null;
+        const conflict = !!(slotInfo && slotInfo.conflict);
+        const pendingDelete = !!(slotInfo && slotInfo.pending === 'delete');
+        const band = conflict ? 'conflict' : pendingDelete ? 'delete' : slotInfo && slotInfo.pending ? 'pending' : null;
+        const editable = !readOnly && !conflict;
         const warnings = (assetData && assetData.warnings) || [];
         const isScreenshot = slot === 'screenshot';
         const isDragging = isScreenshot && draggingN === screenshotN;
@@ -185,6 +293,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             className: classNames,
             ...dragProps,
         },
+            band && createElement('div', { className: 'pblsh--asset-slot__band pblsh--asset-slot__band--' + band }, getBandText(band)),
             editable && createElement('input', {
                 ref: (el) => { fileInputRefs.current[slotKey] = el; },
                 type: 'file',
@@ -192,7 +301,8 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                 className: 'pblsh--hidden-file-input',
                 onChange: (e) => { const file = e.target.files && e.target.files[0]; if (file) handleAssetUpload(slot, screenshotN, file); },
             }),
-            hasAsset
+            conflict ? renderConflict(slotKey, def.label, assetData, slotInfo, imageModClass)
+            : hasAsset
                 ? createElement('div', { className: 'pblsh--asset-slot__box-body' },
                     createElement('div', {
                         className: 'pblsh--asset-slot__box-image ' + imageModClass,
@@ -241,6 +351,13 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                                 onClick: () => openFilePicker(slot, screenshotN),
                                 disabled: isUploading,
                             }, __('Select File', 'peak-publisher')),
+                            // A delete waiting for the commit can be taken back.
+                            pendingDelete && createElement(Button, {
+                                isSecondary: true,
+                                className: 'pblsh--asset-slot__box-upload-btn',
+                                onClick: () => handleResolve(slotKey, 'theirs'),
+                                disabled: busy !== null,
+                            }, __('Restore', 'peak-publisher')),
                         ),
                 ),
             hasAsset && editable && createElement('div', { className: 'pblsh--asset-slot__actions' },
@@ -269,29 +386,39 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
 
     const renderAssetsSection = () => {
         if (assetsLoading && !assets) {
-            return createElement('div', { className: 'pblsh--card pblsh--assets-card' },
+            return createElement('div', { key: 'card', className: 'pblsh--card pblsh--assets-card' },
                 createElement('div', { className: 'pblsh--loading pblsh--loading--small' },
                     createElement('div', { className: 'pblsh--loading__spinner' }),
                 ),
             );
         }
 
+        const view = showingWporgState ? wporgStateView() : assets;
+
         // Build screenshot slot map: { N: assetData } for quick lookup
-        const screenshots = (assets && assets.screenshots) || [];
-        const captions = (assets && assets.screenshot_captions) || {};
+        const screenshots = (view && view.screenshots) || [];
+        const captions = (view && view.screenshot_captions) || {};
         const screenshotMap = {};
         screenshots.forEach(s => { screenshotMap[s.screenshot_n] = s; });
+        // Positions with a pending change stay visible — a deleted screenshot keeps its box until the commit.
+        const changedNs = {};
+        if (wporg && !showingWporgState) {
+            Object.keys(wporg.slots).forEach((slotKey) => {
+                const match = /^screenshot-(\d+)$/.exec(slotKey);
+                if (match && wporg.slots[slotKey].pending) changedNs[parseInt(match[1], 10)] = true;
+            });
+        }
 
         // Determine visible slot range
         const captionKeys = Object.keys(captions).map(Number).filter(n => n > 0);
         const screenshotKeys = screenshots.map(s => s.screenshot_n);
         const maxCaption = captionKeys.length > 0 ? Math.max(...captionKeys) : 0;
         const maxScreenshot = screenshotKeys.length > 0 ? Math.max(...screenshotKeys) : 0;
-        const maxN = Math.max(maxCaption, maxScreenshot);
+        const maxN = Math.max(maxCaption, maxScreenshot, ...Object.keys(changedNs).map(Number));
 
         // Trim trailing empty slots that have no caption
         let visibleMaxN = maxN;
-        while (visibleMaxN > 0 && !screenshotMap[visibleMaxN] && !captions[visibleMaxN]) {
+        while (visibleMaxN > 0 && !screenshotMap[visibleMaxN] && !captions[visibleMaxN] && !changedNs[visibleMaxN]) {
             visibleMaxN--;
         }
 
@@ -363,57 +490,99 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             ),
         );
 
-        const wporg = isWporg ? assets && assets.wporg : null;
+        return [
+            ...renderNotices(),
+            createElement('div', { key: 'card', className: 'pblsh--card pblsh--assets-card' },
+                renderBar(),
+                // Icons group
+                createElement('div', { className: 'pblsh--assets-group' },
+                    createElement('div', { className: 'pblsh--assets-group__label' }, __('Icons', 'peak-publisher')),
+                    createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                        renderAssetBox('icon_svg', view && view.icon_svg),
+                        renderAssetBox('icon_256', view && view.icon_256),
+                        renderAssetBox('icon_128', view && view.icon_128),
+                    ),
+                ),
+                // Banners group
+                createElement('div', { className: 'pblsh--assets-group' },
+                    createElement('div', { className: 'pblsh--assets-group__label' }, __('Banners', 'peak-publisher')),
+                    createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                        renderAssetBox('banner_svg', view && view.banner_svg),
+                        renderAssetBox('banner_hd', view && view.banner_hd),
+                        renderAssetBox('banner_sd', view && view.banner_sd),
+                    ),
+                ),
+                // Screenshots group (slot-based)
+                createElement('div', { className: 'pblsh--assets-group' },
+                    createElement('div', { className: 'pblsh--assets-group__label' }, __('Screenshots', 'peak-publisher')),
+                    hasCaptions
+                        ? createElement('div', { className: 'pblsh--assets-group__hints' },
+                            createElement('div', null, getCaptionsSourceText(pluginData, assets.captions_source)),
+                            createElement('div', null, getPositionsHint(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
+                        )
+                        : screenshots.length > 0 && createElement('div', { className: 'pblsh--assets-group__hints' },
+                            createElement('div', null, getNoCaptionsText(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
+                        ),
+                    createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                        slots.map(({ n, screenshot, caption }) =>
+                            renderAssetBox('screenshot', screenshot, n, caption)
+                        ),
+                        !readOnly && newScreenshotBox,
+                    ),
+                ),
+                // Files of assets/ that are no slot here stay as they are on wordpress.org.
+                wporg && wporg.other_files > 0 && createElement('div', { className: 'pblsh--assets-footer' },
+                    getOtherFilesText(wporg.other_files), ' · ',
+                    createElement('a', {
+                        href: 'https://plugins.svn.wordpress.org/' + encodeURIComponent(pluginData.slug) + '/assets/',
+                        target: '_blank',
+                        rel: 'noreferrer',
+                    }, __('Open on wordpress.org', 'peak-publisher')),
+                ),
+            ),
+        ];
+    };
 
-        return createElement('div', { className: 'pblsh--card pblsh--assets-card' },
-            // Where the mirror stands — the tab shows wordpress.org's assets as last pulled.
-            wporg && createElement('div', { className: 'pblsh--assets-bar' },
-                createInterpolateElement(getSyncedText(wporg), { time: createElement('time', getTimeTooltipProps(wporg.listed_at)) }),
-            ),
-            // Icons group
-            createElement('div', { className: 'pblsh--assets-group' },
-                createElement('div', { className: 'pblsh--assets-group__label' }, __('Icons', 'peak-publisher')),
-                createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                    renderAssetBox('icon_svg', assets && assets.icon_svg),
-                    renderAssetBox('icon_256', assets && assets.icon_256),
-                    renderAssetBox('icon_128', assets && assets.icon_128),
+    // Above the card, flush in the tab panel: the last commit's outcome, the directory's verdict,
+    // and why the commit waits when no account can make it.
+    const renderNotices = () => [
+        notice && createElement(NoticeBox, { key: 'committed', variant: 'info', className: 'pblsh--tab-panel__notice' },
+            createElement('p', null, notice),
+        ),
+        isWporg && pluginData.wporg_stats && pluginData.wporg_stats.closed && createElement(NoticeBox, { key: 'closed', variant: 'warning', className: 'pblsh--tab-panel__notice' },
+            createElement('p', null, getClosedAssetsNotice()),
+        ),
+        wporg && wporg.pending_count > 0 && !canCommit && createElement(NoticeBox, { key: 'account', variant: 'info', className: 'pblsh--tab-panel__notice' },
+            createElement('p', null, getNoAccountCommitText()),
+        ),
+    ].filter(Boolean);
+
+    // wordpress.org: where the mirror stands, or the working copy's changes with commit,
+    // discard and the switch to wordpress.org's state; while committing, only that.
+    const renderBar = () => {
+        if (!wporg) return null;
+        if (busy === 'committing') {
+            return createElement('div', { className: 'pblsh--assets-bar' },
+                createElement('div', { className: 'pblsh--assets-bar__status pblsh--assets-bar__status--busy' }, createElement(Spinner), getCommittingText()),
+            );
+        }
+        if (wporg.pending_count === 0) {
+            return createElement('div', { className: 'pblsh--assets-bar' },
+                createElement('div', { className: 'pblsh--assets-bar__status' },
+                    createInterpolateElement(getSyncedText(wporg), { time: createElement('time', getTimeTooltipProps(wporg.listed_at)) }),
                 ),
+            );
+        }
+        return createElement('div', { className: 'pblsh--assets-bar pblsh--assets-bar--pending' },
+            createElement('div', { className: 'pblsh--assets-bar__status' },
+                createElement('strong', null, getPendingBarText(wporg.pending_count)),
+                wporg.conflict_count > 0 && createElement('div', { className: 'pblsh--assets-bar__conflicts' }, getConflictBarText(wporg.conflict_count)),
+                canCommit && createElement('div', { className: 'pblsh--assets-bar__account' }, getCommitsAsText(account.username)),
             ),
-            // Banners group
-            createElement('div', { className: 'pblsh--assets-group' },
-                createElement('div', { className: 'pblsh--assets-group__label' }, __('Banners', 'peak-publisher')),
-                createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                    renderAssetBox('banner_svg', assets && assets.banner_svg),
-                    renderAssetBox('banner_hd', assets && assets.banner_hd),
-                    renderAssetBox('banner_sd', assets && assets.banner_sd),
-                ),
-            ),
-            // Screenshots group (slot-based)
-            createElement('div', { className: 'pblsh--assets-group' },
-                createElement('div', { className: 'pblsh--assets-group__label' }, __('Screenshots', 'peak-publisher')),
-                hasCaptions
-                    ? createElement('div', { className: 'pblsh--assets-group__hints' },
-                        createElement('div', null, getCaptionsSourceText(pluginData, assets.captions_source)),
-                        createElement('div', null, getPositionsHint(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
-                    )
-                    : screenshots.length > 0 && createElement('div', { className: 'pblsh--assets-group__hints' },
-                        createElement('div', null, getNoCaptionsText(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
-                    ),
-                createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                    slots.map(({ n, screenshot, caption }) =>
-                        renderAssetBox('screenshot', screenshot, n, caption)
-                    ),
-                    editable && newScreenshotBox,
-                ),
-            ),
-            // Files of assets/ that are no slot here stay as they are on wordpress.org.
-            wporg && wporg.other_files > 0 && createElement('div', { className: 'pblsh--assets-footer' },
-                getOtherFilesText(wporg.other_files), ' · ',
-                createElement('a', {
-                    href: 'https://plugins.svn.wordpress.org/' + encodeURIComponent(pluginData.slug) + '/assets/',
-                    target: '_blank',
-                    rel: 'noreferrer',
-                }, __('Open on wordpress.org', 'peak-publisher')),
+            createElement('div', { className: 'pblsh--assets-bar__actions' },
+                createElement(Button, { isPrimary: true, disabled: !canCommit || wporg.conflict_count > 0 || busy !== null, onClick: handleCommit }, __('Commit to wordpress.org', 'peak-publisher')),
+                createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: handleDiscard }, __('Discard', 'peak-publisher')),
+                createElement(Button, { isLink: true, disabled: busy !== null, onClick: () => setShowWporgState(!showingWporgState) }, getShowWporgStateText(showingWporgState)),
             ),
         );
     };

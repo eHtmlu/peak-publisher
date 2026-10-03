@@ -389,6 +389,41 @@ class WporgPluginSvnClient {
         );
     }
 
+    /**
+     * Copies a committed file into the commit — svn copy with history (the log shows
+     * "from path:REV"). The source is pinned to $from_revision through the baseline collection
+     * URL (!svn/bc/), so deletes in the same commit do not touch it; a swap of two files is one
+     * commit without an intermediate name. The target must not exist: delete it first to replace
+     * it. wordpress.org accepts this since it was tried there on 2026-10-01; !svn/ver/ sources
+     * are refused with 405.
+     */
+    public function copy(string $from_path, int $from_revision, string $to_path): void {
+        $this->require_commit_context();
+        $from_path = $this->safe_relative_path($from_path);
+        $to_path = $this->safe_relative_path($to_path);
+        $source = $this->align_url_origin(
+            $this->absolutize_url('/!svn/bc/' . $from_revision . '/' . $this->encode_svn_path($this->commit_slug . '/' . $from_path)),
+            $this->working_root_url
+        );
+
+        $response = $this->request_url('COPY', $source, [
+            'Destination' => $this->working_url($to_path, false),
+            'Depth' => 'infinity',
+            'Overwrite' => 'F',
+        ]);
+        $status = (int) ($response['status'] ?? 0);
+        if ($this->is_success_status($status)) {
+            return;
+        }
+
+        $code = $this->write_error_code_from_response($response);
+        throw new WporgSvnException(
+            $code,
+            $this->write_failure_message($code, __('wordpress.org SVN copy failed.', 'peak-publisher'), $response),
+            $this->write_failure_status($code, $status)
+        );
+    }
+
     public function mkdir(string $path): void {
         $this->require_commit_context();
         $path = $this->safe_relative_path($path);

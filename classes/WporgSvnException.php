@@ -33,4 +33,9 @@ class WporgSvnException extends \RuntimeException {
     public function get_http_status(): int {
         return $this->http_status;
     }
+
+    /** The error as the function modules and the facade return it: code, message and status intact. */
+    public function to_wp_error(): \WP_Error {
+        return new \WP_Error($this->error_code, $this->getMessage(), [ 'status' => $this->http_status ]);
+    }
 }

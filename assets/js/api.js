@@ -207,4 +207,18 @@ lodash.set(window, 'Pblsh.API', {
             body: { from: fromN, to: toN },
         });
     },
+    // The working copy of a wordpress.org plugin's assets: one commit, drop all, or decide one slot.
+    commitPluginAssets: async (pluginId) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/commit', { method: 'POST' });
+    },
+    discardPluginAssets: async (pluginId) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/discard', { method: 'POST' });
+    },
+    // keep: 'mine' (rebase the change on wordpress.org's current file) | 'theirs' (drop the change)
+    resolvePluginAsset: async (pluginId, slot, keep) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/resolve', {
+            method: 'POST',
+            body: { slot, keep },
+        });
+    },
 });

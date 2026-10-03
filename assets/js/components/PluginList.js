@@ -1,6 +1,6 @@
 // PluginList Component
 lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, onExport, onCreateNew, onToggleStatus, pendingPluginStatus }) => {
-    const { __ } = wp.i18n;
+    const { __, _n, sprintf } = wp.i18n;
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
@@ -9,9 +9,13 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
-        const message = plugin && plugin.hosting_type === 'wporg'
+        let message = plugin && plugin.hosting_type === 'wporg'
             ? __('Remove this wordpress.org plugin from Peak Publisher? The plugin on wordpress.org and its SVN repository will remain untouched.', 'peak-publisher')
             : __('Are you sure you want to permanently delete this plugin?', 'peak-publisher');
+        // The working copy lives only here — removing the plugin drops it.
+        if (plugin && plugin.assets_pending > 0) {
+            message += '\n\n' + sprintf(_n('%d asset change that is not on wordpress.org yet will be lost.', '%d asset changes that are not on wordpress.org yet will be lost.', plugin.assets_pending, 'peak-publisher'), plugin.assets_pending);
+        }
 
         if (!confirm(message)) {
             return;

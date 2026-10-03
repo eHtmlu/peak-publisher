@@ -28,6 +28,30 @@ final class WporgAssetsStateTest extends TestCase {
         self::assertArrayNotHasKey('junk', get_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, true));
     }
 
+    public function test_only_entries_of_the_working_copys_shape_survive_the_read(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
+        $actor = [ 'at' => 100, 'user' => [ 'id' => 1, 'login' => 'admin' ] ];
+        $base = [ 'filename' => 'screenshot-1.png', 'revision' => 10 ];
+        $content = [ 'ext' => 'png', 'filesize' => 300, 'width' => 800, 'height' => null ];
+        $valid = [
+            'icon_128' => [ 'action' => 'put', 'file' => 'icon-128x128.png', 'base' => null, ...$content, ...$actor ],
+            'screenshot-2' => [ 'action' => 'copy', 'from' => [ 'slot' => 'screenshot-1', ...$base ], 'base' => null, ...$content, ...$actor ],
+            'screenshot-1' => [ 'action' => 'delete', 'base' => $base, ...$actor ],
+        ];
+        $foreign = [
+            'banner_sd' => [ 'file' => 'banner-772x250.png', 'base' => null, ...$content, ...$actor ],                   // no action
+            'banner_hd' => [ 'action' => 'put', 'base' => null, ...$content, ...$actor ],                                 // a put without its file
+            'screenshot-3' => [ 'action' => 'delete', 'base' => null, ...$actor ],                                        // a delete of nothing
+            'screenshot-4' => [ 'action' => 'copy', 'from' => [ 'slot' => 'screenshot-1' ], 'base' => null, ...$content, ...$actor ], // a source without a state
+            'screenshot-5' => [ 'action' => 'put', 'file' => 'screenshot-5.png', 'base' => [ 'filename' => 'x' ], ...$content, ...$actor ], // a base that is no mirror state
+            'screenshot' => [ 'action' => 'put', 'file' => 'screenshot.png', 'base' => null, ...$content, ...$actor ],    // no slot of the tab
+            'icon_256' => 'garbage',
+        ];
+        update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 7, 'pending' => $valid + $foreign ]);
+
+        self::assertSame($valid, get_wporg_assets_state($marker->ID)['pending']);
+    }
+
     public function test_the_pull_fetches_changed_winners_and_removes_vanished_slots(): void {
         $mirror = [
             'icon_128' => [ 'filename' => 'icon-128x128.png', 'revision' => 5, 'filesize' => 10 ],

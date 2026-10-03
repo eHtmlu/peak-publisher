@@ -18,7 +18,7 @@ require_once __DIR__ . '/WporgSvnException.php';
 class WporgOperations {
     /**
      * The one write path to wordpress.org SVN: every commit Peak Publisher makes — deploy,
-     * stable tag, tag delete, later assets and readme edits — is one Plan committed here
+     * stable tag, tag delete, assets, later readme edits — is one Plan committed here
      * under the plugin's lock. $build_plan builds the Plan *under the lock* from fresh remote
      * reads (never a cache), so its facts hold when the commit lands, and it throws when the
      * remote state contradicts what the caller's dialog showed.
@@ -26,6 +26,8 @@ class WporgOperations {
      * Plan = [
      *   'deletes' => string[]                                  paths relative to the plugin root
      *   'mkdirs'  => string[]                                  directories to create (tolerant)
+     *   'copies'  => array{path:string, from_path:string, from_revision:int}[]
+     *                                                          server-side copies with history
      *   'puts'    => array{path:string, local_path:string}[]   a PUT replaces existing content
      *   'message' => string                                    the commit message
      *   'details' => array                                     the operations log entry's details
@@ -33,14 +35,18 @@ class WporgOperations {
      * ]
      * Every entry counts as a change: a directory is listed only when it may be missing,
      * never one known to exist (creating an existing one is tolerated, but it is no change).
-     * The primitive orders the operations: deletes deep-first, mkdirs shallow-first, puts by
-     * path. An empty plan (no deletes, no mkdirs, no puts) commits nothing: committed false,
-     * revision null, no log entry.
+     * The primitive orders the operations: deletes deep-first, mkdirs shallow-first, then
+     * copies and puts by path. An empty plan (no deletes, mkdirs, copies or puts) commits
+     * nothing: committed false, revision null, no log entry.
      *
-     * @param \WP_Post $marker     The wporg marker (post_name = slug; the log lives on it).
-     * @param string   $operation  deploy | stable_tag | delete_tag | assets | readme — the
-     *                             lock's label and the log entry's operation.
-     * @param callable $build_plan fn(WporgPluginSvnClient $client, int $base_revision): Plan
+     * @param \WP_Post      $marker       The wporg marker (post_name = slug; the log lives on it).
+     * @param string        $operation    deploy | stable_tag | delete_tag | assets | readme — the
+     *                                    lock's label and the log entry's operation.
+     * @param callable      $build_plan   fn(WporgPluginSvnClient $client, int $base_revision): Plan
+     * @param callable|null $after_commit fn(int $revision): void — runs once the commit landed,
+     *                                    still under the lock: local state written from the plan
+     *                                    must not interleave with another writer. It must not
+     *                                    throw; the commit cannot be taken back.
      * @return array{revision:int|null, committed:bool, base_revision:int, details:array}
      *         base_revision = the plugin's revision the plan was built against; a caller whose
      *         cache was fresh there can advance it once plugin_changed_only_in() confirms that
@@ -49,7 +55,7 @@ class WporgOperations {
      * @throws WporgSvnException Credentials, lock, not_found, concurrent change, transport
      *         errors — and whatever $build_plan throws.
      */
-    public static function commit_files(\WP_Post $marker, string $username, string $operation, callable $build_plan): array {
+    public static function commit_files(\WP_Post $marker, string $username, string $operation, callable $build_plan, ?callable $after_commit = null): array {
         raise_wporg_time_limit();
 
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
@@ -76,7 +82,7 @@ class WporgOperations {
             $client = self::svn_client($username, $credentials['password']);
 
             $plan = self::normalize_plan($build_plan($client, $base_revision));
-            if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['puts'] === []) {
+            if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['copies'] === [] && $plan['puts'] === []) {
                 return [ 'revision' => null, 'committed' => false, 'base_revision' => (int) $base_revision, 'details' => $plan['details'] ];
             }
 
@@ -89,6 +95,9 @@ class WporgOperations {
             foreach ($plan['mkdirs'] as $path) {
                 $client->mkdir($path);
             }
+            foreach ($plan['copies'] as $copy) {
+                $client->copy($copy['from_path'], $copy['from_revision'], $copy['path']);
+            }
             foreach ($plan['puts'] as $put) {
                 $client->add_file($put['path'], $put['local_path']);
             }
@@ -98,6 +107,9 @@ class WporgOperations {
             record_wporg_credentials_verdict($username, true);
             $revision = (int) ($commit['revision'] ?? 0);
             record_wporg_operation((int) $marker->ID, $operation, $username, $revision, $plan['details']);
+            if ($after_commit !== null) {
+                $after_commit($revision);
+            }
             return [ 'revision' => $revision, 'committed' => true, 'base_revision' => (int) $base_revision, 'details' => $plan['details'] ];
         } catch (WporgSvnException $e) {
             if ($e->get_error_code() === 'invalid_credentials') {
@@ -453,15 +465,31 @@ class WporgOperations {
     }
 
     /**
-     * Runs $fn under the plugin's write lock — the lock every commit takes — or not at all: a
-     * reader skips instead of waiting. Answers false when the lock is held, else what $fn
-     * returns (so $fn answers something other than false).
+     * Runs $fn under the plugin's write lock — the lock every commit takes — for a local write
+     * that must not interleave with a commit (a change of the assets working copy). Throws the
+     * catalog's deploy_in_progress when a commit holds the lock, wporg_plugin_busy when a pull
+     * or another local write does (acquire_wporg_deploy_lock() decides by the holder).
      */
-    public static function with_plugin_lock(string $wporg_slug, string $operation, int $plugin_id, callable $fn): mixed {
+    public static function under_plugin_lock(string $wporg_slug, string $operation, int $plugin_id, callable $fn): mixed {
+        $lock = self::acquire_wporg_deploy_lock(self::normalize_slug_or_throw($wporg_slug), '', $operation, $plugin_id);
+        try {
+            return $fn();
+        } finally {
+            self::release_wporg_deploy_lock($lock);
+        }
+    }
+
+    /**
+     * Runs $fn under the plugin's write lock — the lock every commit takes — or not at all: a
+     * reader skips instead of waiting, whoever holds the lock. Answers false when the lock is
+     * held, else what $fn returns (so $fn answers something other than false). A write that
+     * must not be skipped uses under_plugin_lock().
+     */
+    public static function try_under_plugin_lock(string $wporg_slug, string $operation, int $plugin_id, callable $fn): mixed {
         try {
             $lock = self::acquire_wporg_deploy_lock(self::normalize_slug_or_throw($wporg_slug), '', $operation, $plugin_id);
         } catch (WporgSvnException $e) {
-            if ($e->get_error_code() === 'deploy_in_progress') {
+            if (in_array($e->get_error_code(), [ 'deploy_in_progress', 'wporg_plugin_busy' ], true)) {
                 return false;
             }
             throw $e;
@@ -1189,13 +1217,16 @@ class WporgOperations {
     private static function normalize_plan(array $plan): array {
         $deletes = array_values(array_filter((array) ($plan['deletes'] ?? []), 'is_string'));
         $mkdirs = array_values(array_filter((array) ($plan['mkdirs'] ?? []), 'is_string'));
+        $copies = array_values(array_filter((array) ($plan['copies'] ?? []), static fn($copy): bool => is_array($copy) && !empty($copy['path']) && !empty($copy['from_path']) && (int) ($copy['from_revision'] ?? 0) > 0));
         $puts = array_values(array_filter((array) ($plan['puts'] ?? []), static fn($put): bool => is_array($put) && !empty($put['path']) && !empty($put['local_path'])));
         usort($deletes, static fn(string $a, string $b): int => substr_count($b, '/') <=> substr_count($a, '/'));
         usort($mkdirs, static fn(string $a, string $b): int => substr_count($a, '/') <=> substr_count($b, '/'));
+        usort($copies, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
         usort($puts, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
         return [
             'deletes' => $deletes,
             'mkdirs' => $mkdirs,
+            'copies' => $copies,
             'puts' => $puts,
             'message' => trim((string) ($plan['message'] ?? '')),
             'details' => is_array($plan['details'] ?? null) ? $plan['details'] : [],
@@ -1250,6 +1281,10 @@ class WporgOperations {
         return trim(trim($base, '/') . '/' . trim($rel, '/'), '/');
     }
 
+    // Lock holders that are over in seconds — the assets pull and a working-copy change, no
+    // commit: a caller that runs into them is told wporg_plugin_busy, not deploy_in_progress.
+    private const LOCAL_LOCK_OPERATIONS = [ 'assets_pull', 'assets_change' ];
+
     private static function acquire_wporg_deploy_lock(string $wporg_slug, string $username, string $operation = 'deploy', ?int $plugin_id = null): array {
         // Acquire a cross-site lock for this wporg slug
         $key = 'pblsh_wporg_deploy_lock_' . $wporg_slug;
@@ -1299,7 +1334,10 @@ class WporgOperations {
                 }
             }
 
-            throw self::exception('deploy_in_progress');
+            // The holder decides the error: a commit takes minutes, a pull or a working-copy
+            // change seconds.
+            $held_by = is_array($existing) ? (string) ($existing['operation'] ?? '') : '';
+            throw self::exception(in_array($held_by, self::LOCAL_LOCK_OPERATIONS, true) ? 'wporg_plugin_busy' : 'deploy_in_progress');
         } finally {
             if ($switched) {
                 restore_current_blog();
@@ -1373,6 +1411,7 @@ class WporgOperations {
             'invalid_svn_path' => [__('The plugin contains a file or folder path that cannot be published to wordpress.org SVN. Remove path segments containing ".." or backslashes and try again.', 'peak-publisher'), 400],
             'invalid_svn_path_segment' => [__('The version cannot be used as a wordpress.org SVN path segment. Remove slashes, backslashes, and ".." from the version.', 'peak-publisher'), 400],
             'deploy_in_progress' => [__('Another change to this plugin is still being written to wordpress.org. Try again in a few minutes.', 'peak-publisher'), 409],
+            'wporg_plugin_busy' => [__("This plugin's assets are being updated right now. Try again in a moment.", 'peak-publisher'), 409],
             'current_release_changed' => [__('The current release on wordpress.org changed in the meantime. Reload and check the decision again.', 'peak-publisher'), 409],
             'wporg_trunk_readme_unreadable' => [__('trunk/readme.txt could not be read from wordpress.org, so the Stable tag cannot be handled safely. Try again.', 'peak-publisher'), 502],
             'wporg_readme_variant_failed' => [__('The readme variant for trunk could not be written on this server.', 'peak-publisher'), 500],

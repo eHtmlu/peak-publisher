@@ -189,6 +189,21 @@ class AdminAPI {
             'callback' => [$this, 'handle_move_asset'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/commit', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_commit_assets'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/discard', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_discard_assets'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/resolve', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_resolve_asset'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
     }
 
     /**
@@ -278,6 +293,8 @@ class AdminAPI {
                 ? serialize_self_hosted_installations((int) $post->ID)
                 : $wporg_figures['installations'],
             'wporg_stats' => $is_self_hosted ? null : $wporg_figures['wporg_stats'],
+            // Asset changes not on wordpress.org yet — deleting the plugin here would lose them.
+            'assets_pending' => $is_self_hosted ? null : count(get_wporg_assets_state((int) $post->ID)['pending']),
         ];
 
         if ($detail) {
@@ -824,7 +841,7 @@ class AdminAPI {
 
     /** Uploads a file into a slot: multipart with file, slot and screenshot_n (optional). */
     public function handle_upload_asset(\WP_REST_Request $request) {
-        $post = $this->asset_plugin($request, true);
+        $post = $this->asset_plugin($request);
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
@@ -844,7 +861,7 @@ class AdminAPI {
 
     /** Deletes a slot: JSON { slot, screenshot_n? }. */
     public function handle_delete_asset(\WP_REST_Request $request) {
-        $post = $this->asset_plugin($request, true);
+        $post = $this->asset_plugin($request);
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
@@ -859,7 +876,7 @@ class AdminAPI {
 
     /** Moves or swaps screenshots: JSON { from, to }; the server decides which and answers `mode`. */
     public function handle_move_asset(\WP_REST_Request $request) {
-        $post = $this->asset_plugin($request, true);
+        $post = $this->asset_plugin($request);
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
@@ -868,16 +885,63 @@ class AdminAPI {
         return $this->asset_write_response($result);
     }
 
-    /** The plugin of an asset request — both channels read; $write marks a change. */
-    private function asset_plugin(\WP_REST_Request $request, bool $write = false): \WP_Post|\WP_REST_Response {
+    /**
+     * Commits the working copy of a wordpress.org plugin's assets as one SVN commit. A conflict
+     * answers 409 with the view after the commit's fresh pull: the boxes show what to decide.
+     */
+    public function handle_commit_assets(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        $username = $this->resolve_wporg_write_account($post);
+        if ($username instanceof \WP_REST_Response) {
+            return $username;
+        }
+        $result = $this->assets()->commit($post, $username);
+        if (is_wp_error($result) && $result->get_error_code() === 'wporg_assets_conflict') {
+            $result = $this->make_rest_error($result->get_error_code(), $result->get_error_message(), 409, null, [ 'assets' => $this->assets()->describe($post) ]);
+        }
+        return $this->asset_write_response($result);
+    }
+
+    /** Drops every pending asset change of a wordpress.org plugin. */
+    public function handle_discard_assets(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        return $this->asset_write_response($this->assets()->discard($post));
+    }
+
+    /** Decides a conflict or takes back one pending change: JSON { slot, keep: mine|theirs }. */
+    public function handle_resolve_asset(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        $params = $request->get_json_params();
+        $keep = (string) ($params['keep'] ?? '');
+        if (!in_array($keep, [ 'mine', 'theirs' ], true)) {
+            return $this->rest_error_response($this->make_rest_error('invalid_request', __('Choose which version to keep: mine or theirs.', 'peak-publisher'), 400, 'keep'));
+        }
+        return $this->asset_write_response($this->assets()->resolve($post, sanitize_key((string) ($params['slot'] ?? '')), $keep));
+    }
+
+    /** The plugin of an asset request — both channels. */
+    private function asset_plugin(\WP_REST_Request $request): \WP_Post|\WP_REST_Response {
         $post = get_post((int) $request->get_param('id'));
         if (!is_plugin_post($post)) {
             return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
         }
-        // Transitional: the assets of a wordpress.org plugin are shown read-only until changes
-        // go into its working copy and from there into one commit.
-        if ($write && is_wporg_plugin($post)) {
-            return $this->rest_error_response($this->make_rest_error('unsupported_hosting_type', __('The assets of wordpress.org plugins cannot be changed here yet.', 'peak-publisher'), 400));
+        return $post;
+    }
+
+    /** The plugin of a working-copy request — only wordpress.org plugins have one. */
+    private function wporg_asset_plugin(\WP_REST_Request $request): \WP_Post|\WP_REST_Response {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_Post && !is_wporg_plugin($post)) {
+            return $this->rest_error_response($this->make_rest_error('unsupported_hosting_type', __('Only wordpress.org plugins commit their assets.', 'peak-publisher'), 400));
         }
         return $post;
     }
@@ -1356,10 +1420,14 @@ class AdminAPI {
         ];
     }
 
-    private function make_rest_error(string $code, string $message, int $status, ?string $field = null): \WP_Error {
+    /** @param array $payload Further facts the client renders with the error (an asset view). */
+    private function make_rest_error(string $code, string $message, int $status, ?string $field = null, array $payload = []): \WP_Error {
         $data = [ 'status' => $status ];
         if ($field !== null && $field !== '') {
             $data['field'] = $field;
+        }
+        if ($payload !== []) {
+            $data['payload'] = $payload;
         }
         return new \WP_Error($code, $message, $data);
     }
@@ -1379,6 +1447,9 @@ class AdminAPI {
         $field = is_array($data) ? (string) ($data['field'] ?? '') : '';
         if ($field !== '') {
             $payload['field'] = $field;
+        }
+        if (is_array($data) && is_array($data['payload'] ?? null)) {
+            $payload += $data['payload'];
         }
 
         return new \WP_REST_Response($payload, $status);

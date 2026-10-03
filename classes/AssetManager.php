@@ -9,12 +9,15 @@ defined('ABSPATH') || exit;
  * The facade over a plugin's assets on both channels. Reading is the same for both: the
  * shipped layer — the self-hosted directory, or the mirror of a wordpress.org plugin's SVN
  * assets/ that WporgAssetSync keeps in step — described by the manifest
- * (read_asset_manifest()). Self-hosted writes go to LocalAssetStore at once; the assets of a
- * wordpress.org plugin are read-only here.
+ * (read_asset_manifest()). Writing goes to the channel's store: self-hosted at once
+ * (LocalAssetStore), wordpress.org into the working copy and from there into one commit
+ * (WporgAssetSync). The list, the editor header and the public API read the shipped layer
+ * only; the assets tab (describe()) shows the working copy over it.
  */
 class AssetManager {
     private static ?self $instance = null;
     private ?LocalAssetStore $local = null;
+    private ?WporgAssetSync $wporg = null;
 
     private function __construct() {}
 
@@ -27,46 +30,104 @@ class AssetManager {
         return $this->local ??= new LocalAssetStore();
     }
 
+    private function wporg(): WporgAssetSync {
+        require_once __DIR__ . '/WporgAssetSync.php';
+        return $this->wporg ??= new WporgAssetSync();
+    }
+
     /**
-     * The editor's view (REST GET): every fixed slot (entry or null), the screenshots by number,
-     * and their captions from the readme of the release sites receive (get_screenshot_captions()).
-     * A wordpress.org plugin adds where its mirror stands: the revision of assets/ it holds,
-     * when it was last confirmed, and how many files of assets/ are no slot of this tab.
+     * The editor's view (REST GET): every fixed slot (entry or null) and the screenshots by
+     * number as they will be — a wordpress.org plugin's working copy applied over its mirror —
+     * and the captions from the readme of the release sites receive (get_screenshot_captions()).
+     * A wordpress.org plugin adds where its mirror stands and, per slot, what the working copy
+     * changes there and what wordpress.org has (wporg_view()).
      */
     public function describe(\WP_Post $plugin): array {
-        $manifest = read_asset_manifest((int) $plugin->ID);
+        $id = (int) $plugin->ID;
+        $manifest = read_asset_manifest($id);
+        $state = is_wporg_plugin($plugin) ? get_wporg_assets_state($id) : null;
+        $pending = $state['pending'] ?? [];
         $out = [];
         foreach (array_keys(get_asset_slots()) as $slot_id) {
             if ($slot_id !== 'screenshot') {
-                $out[$slot_id] = isset($manifest[$slot_id]) ? $this->entry_view($plugin, $slot_id, $manifest[$slot_id], 'shipped') : null;
+                $out[$slot_id] = $this->slot_view($plugin, $slot_id, $pending[$slot_id] ?? null, $manifest);
             }
         }
-        $out['screenshots'] = $this->screenshot_views($plugin, $manifest);
+        $out['screenshots'] = $this->screenshot_views($plugin, $pending, $manifest);
         $captions = get_screenshot_captions($plugin);
         $out['screenshot_captions'] = (object) $captions['captions'];
         $out['captions_source'] = $captions['source'];
-        $out['wporg'] = null;
-        if (is_wporg_plugin($plugin)) {
-            $state = get_wporg_assets_state((int) $plugin->ID);
-            $out['wporg'] = [
-                'revision' => $state['revision'],
-                'listed_at' => $state['listed_at'] > 0 ? gmdate('Y-m-d\TH:i:s\Z', $state['listed_at']) : null,
-                'other_files' => $state['other_files'],
-            ];
-        }
+        $out['wporg'] = $state === null ? null : $this->wporg_view($plugin, $state, $manifest);
         return $out;
     }
 
-    /** The screenshot entries of a manifest as views, by number. */
-    private function screenshot_views(\WP_Post $plugin, array $manifest): array {
+    /** The screenshots as views, by number. */
+    private function screenshot_views(\WP_Post $plugin, array $pending, array $manifest): array {
         $views = [];
-        foreach ($manifest as $slot_id => $entry) {
+        foreach (array_unique([ ...array_keys($manifest), ...array_keys($pending) ]) as $slot_id) {
             if (preg_match('/^screenshot-(\d+)$/', (string) $slot_id, $m)) {
-                $views[(int) $m[1]] = [ ...$this->entry_view($plugin, (string) $slot_id, $entry, 'shipped'), 'screenshot_n' => (int) $m[1] ];
+                $view = $this->slot_view($plugin, (string) $slot_id, $pending[$slot_id] ?? null, $manifest);
+                if ($view !== null) {
+                    $views[(int) $m[1]] = [ ...$view, 'screenshot_n' => (int) $m[1] ];
+                }
             }
         }
         ksort($views);
         return array_values($views);
+    }
+
+    /**
+     * A slot as the tab shows it: the shipped file, or with a pending entry what the entry
+     * brings — the uploaded file of a put, the mirror file of a copy, nothing for a delete. A
+     * pending file has no revision yet: it is not on wordpress.org.
+     */
+    private function slot_view(\WP_Post $plugin, string $slot_id, ?array $entry, array $manifest): ?array {
+        if ($entry === null) {
+            return isset($manifest[$slot_id]) ? $this->entry_view($plugin, $slot_id, $manifest[$slot_id], 'shipped') : null;
+        }
+        if ($entry['action'] === 'delete') {
+            return null;
+        }
+        $name = asset_canonical_filename($slot_id, $entry['ext']);
+        $view = [ 'filename' => $name, 'revision' => null, 'resolution' => classify_asset_filename($name)['resolution'], 'filesize' => (int) $entry['filesize'], 'width' => $entry['width'], 'height' => $entry['height'] ];
+        [ $layer, $file, $rev ] = $entry['action'] === 'put'
+            ? [ 'pending', $entry['file'], (int) $entry['at'] ]
+            : [ 'shipped', $entry['from']['filename'], (int) $entry['from']['revision'] ];
+        return [
+            ...$view,
+            'url' => get_plugin_assets_url($plugin, $layer) . '/' . rawurlencode($file) . '?rev=' . $rev,
+            'warnings' => asset_dimension_warnings($view, asset_slot_definition($slot_id)),
+        ];
+    }
+
+    /**
+     * A wordpress.org plugin's mirror and working copy for the tab: where the mirror stands (the
+     * revision of assets/ it holds, when it was last confirmed, the files of assets/ that are no
+     * slot here) and, for every slot with a mirror file or a pending entry, the entry's action,
+     * whether it conflicts, and wordpress.org's file (the mirror entry with its URL — the
+     * conflict box and the state view show it).
+     */
+    private function wporg_view(\WP_Post $plugin, array $state, array $manifest): array {
+        $pending = $state['pending'];
+        $conflicts = asset_conflicts($pending, $manifest);
+        $slots = [];
+        foreach (array_unique([ ...array_keys($manifest), ...array_keys($pending) ]) as $slot_id) {
+            $slots[$slot_id] = [
+                'pending' => $pending[$slot_id]['action'] ?? null,
+                'conflict' => in_array((string) $slot_id, $conflicts, true),
+                'on_wporg' => isset($manifest[$slot_id])
+                    ? [ ...$manifest[$slot_id], 'url' => $this->shipped_url($plugin, $manifest, (string) $slot_id) ]
+                    : null,
+            ];
+        }
+        return [
+            'revision' => $state['revision'],
+            'listed_at' => $state['listed_at'] > 0 ? gmdate('Y-m-d\TH:i:s\Z', $state['listed_at']) : null,
+            'other_files' => $state['other_files'],
+            'pending_count' => count($pending),
+            'conflict_count' => count($conflicts),
+            'slots' => (object) $slots,
+        ];
     }
 
     private function entry_view(\WP_Post $plugin, string $slot_id, array $entry, string $layer): array {
@@ -145,9 +206,18 @@ class AssetManager {
         return $result;
     }
 
-    /** @return array{assets: array, warnings: array}|\WP_Error */
+    /**
+     * A file into a slot, validated the same on both channels: self-hosted at once, wordpress.org
+     * into the working copy. A new screenshot without a number takes the next free position.
+     *
+     * @return array{assets: array, warnings: array}|\WP_Error
+     */
     public function upload(\WP_Post $plugin, string $slot, ?int $screenshot_n, array $file_data): array|\WP_Error {
-        $slot_id = $slot === 'screenshot' ? 'screenshot-' . ($screenshot_n ?? next_screenshot_number(array_keys(read_asset_manifest((int) $plugin->ID)))) : $slot;
+        $id = (int) $plugin->ID;
+        $taken = is_wporg_plugin($plugin)
+            ? effective_asset_slots(get_wporg_assets_state($id)['pending'], read_asset_manifest($id))
+            : array_keys(read_asset_manifest($id));
+        $slot_id = $slot === 'screenshot' ? 'screenshot-' . ($screenshot_n ?? next_screenshot_number($taken)) : $slot;
         $definition = asset_slot_definition($slot_id);
         if ($definition === null) {
             return new \WP_Error('asset_unknown_slot', __('Unknown slot.', 'peak-publisher'), [ 'status' => 400 ]);
@@ -160,8 +230,10 @@ class AssetManager {
         if (is_wp_error($facts)) {
             return $facts;
         }
-        $error = $this->local()->put($plugin, $slot_id, asset_canonical_filename($slot_id, $facts['ext']), $tmp_path, $facts);
-        return $error ?? [ 'assets' => $this->describe($plugin), 'warnings' => $facts['warnings'] ];
+        $result = is_wporg_plugin($plugin)
+            ? $this->wporg()->change($plugin, [ 'action' => 'put', 'slot' => $slot_id, 'ext' => $facts['ext'], 'filesize' => $facts['filesize'], 'width' => $facts['width'], 'height' => $facts['height'] ], $tmp_path)
+            : $this->local()->put($plugin, $slot_id, asset_canonical_filename($slot_id, $facts['ext']), $tmp_path, $facts);
+        return is_wp_error($result) ? $result : [ 'assets' => $this->describe($plugin), 'warnings' => $facts['warnings'] ];
     }
 
     /** @return array{assets: array}|\WP_Error */
@@ -170,16 +242,50 @@ class AssetManager {
         if (asset_slot_definition($slot_id) === null) {
             return new \WP_Error('asset_unknown_slot', __('Unknown slot.', 'peak-publisher'), [ 'status' => 400 ]);
         }
-        $error = $this->local()->delete($plugin, $slot_id);
-        return $error ?? [ 'assets' => $this->describe($plugin) ];
+        $result = is_wporg_plugin($plugin)
+            ? $this->wporg()->change($plugin, [ 'action' => 'delete', 'slot' => $slot_id ])
+            : $this->local()->delete($plugin, $slot_id);
+        return is_wp_error($result) ? $result : [ 'assets' => $this->describe($plugin) ];
     }
 
-    /** @return array{mode: string, assets: array}|\WP_Error */
+    /**
+     * A screenshot to another position; onto an occupied one the two swap — the store decides.
+     *
+     * @return array{mode: string, assets: array}|\WP_Error
+     */
     public function move(\WP_Post $plugin, int $from, int $to): array|\WP_Error {
         if ($from < 1 || $to < 1 || $from === $to) {
             return new \WP_Error('asset_unknown_slot', __('Invalid screenshot numbers.', 'peak-publisher'), [ 'status' => 400 ]);
         }
-        $mode = $this->local()->move($plugin, $from, $to);
+        if (is_wporg_plugin($plugin)) {
+            $change = $this->wporg()->change($plugin, [ 'action' => 'move', 'from' => $from, 'to' => $to ]);
+            $mode = is_wp_error($change) ? $change : $change['mode'];
+        } else {
+            $mode = $this->local()->move($plugin, $from, $to);
+        }
         return is_wp_error($mode) ? $mode : [ 'mode' => $mode, 'assets' => $this->describe($plugin) ];
+    }
+
+    /**
+     * The working copy of a wordpress.org plugin as one commit with the account the caller
+     * resolved.
+     *
+     * @return array{revision: ?int, committed: bool, assets: array}|\WP_Error
+     */
+    public function commit(\WP_Post $plugin, string $username): array|\WP_Error {
+        $result = $this->wporg()->commit($plugin, $username);
+        return is_wp_error($result) ? $result : [ ...$result, 'assets' => $this->describe($plugin) ];
+    }
+
+    /** @return array{assets: array}|\WP_Error */
+    public function discard(\WP_Post $plugin): array|\WP_Error {
+        $error = $this->wporg()->discard($plugin);
+        return $error ?? [ 'assets' => $this->describe($plugin) ];
+    }
+
+    /** @return array{assets: array}|\WP_Error */
+    public function resolve(\WP_Post $plugin, string $slot_id, string $keep): array|\WP_Error {
+        $error = $this->wporg()->resolve($plugin, $slot_id, $keep);
+        return $error ?? [ 'assets' => $this->describe($plugin) ];
     }
 }

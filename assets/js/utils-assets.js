@@ -91,7 +91,7 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     // <time></time> for the caller's exact-timestamp tooltip.
     function getSyncedText(wporg) {
         const checked = formatRelativeTime(wporg.listed_at);
-        if (wporg.revision === null || !checked) return __('Not synced with wordpress.org yet', 'peak-publisher');
+        if (wporg.revision === null || !checked) return __('Not synced with wordpress.org yet · reload to try again', 'peak-publisher');
         if (wporg.revision === 0) return sprintf(__('wordpress.org has no assets/ directory for this plugin · checked <time>%s</time>', 'peak-publisher'), checked);
         return sprintf(__('Synced with wordpress.org · r%1$d · checked <time>%2$s</time>', 'peak-publisher'), wporg.revision, checked);
     }
@@ -105,5 +105,54 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         ), count);
     }
 
-    return { getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText };
+    // The working copy of a wordpress.org plugin — the bar while it holds changes.
+    const getPendingBarText = (count) => sprintf(_n('%d change not on wordpress.org yet', '%d changes not on wordpress.org yet', count, 'peak-publisher'), count);
+    const getConflictBarText = (count) => sprintf(_n('%d conflict — resolve it to commit', '%d conflicts — resolve them to commit', count, 'peak-publisher'), count);
+    const getCommittingText = () => __('Committing to wordpress.org…', 'peak-publisher');
+    const getCommitsAsText = (username) => sprintf(__('Commits as "%s"', 'peak-publisher'), username);
+    const getNoAccountCommitText = () => __('Committing assets needs your wordpress.org account — connect one under Settings › wordpress.org. Your changes are kept until then.', 'peak-publisher');
+    const getClosedAssetsNotice = () => __('The plugin is closed on wordpress.org — its page shows a generated icon and no banner until it is reopened.', 'peak-publisher');
+    const getCommittedText = (revision) => sprintf(__('Committed to wordpress.org in r%d.', 'peak-publisher'), revision);
+    const getShowWporgStateText = (showing) => showing ? __('Show my changes', 'peak-publisher') : __("Show wordpress.org's state", 'peak-publisher');
+
+    // The commit's confirm with the tally the commit message will carry: puts are updated,
+    // copies (move, swap) moved, deletes deleted — counted from the server's wporg.slots.
+    function getCommitConfirmText(slots) {
+        const counts = { put: 0, copy: 0, delete: 0 };
+        Object.values(slots || {}).forEach((slot) => { if (slot.pending) counts[slot.pending]++; });
+        const total = counts.put + counts.copy + counts.delete;
+        const parts = [
+            counts.put && sprintf(_n('%d updated', '%d updated', counts.put, 'peak-publisher'), counts.put),
+            counts.copy && sprintf(_n('%d moved', '%d moved', counts.copy, 'peak-publisher'), counts.copy),
+            counts.delete && sprintf(_n('%d deleted', '%d deleted', counts.delete, 'peak-publisher'), counts.delete),
+        ].filter(Boolean);
+        return sprintf(_n('Commit %d change to wordpress.org?', 'Commit %d changes to wordpress.org?', total, 'peak-publisher'), total) + '\n' + parts.join(', ');
+    }
+
+    const getDiscardConfirmText = (count) => sprintf(_n('Discard %d change? The assets return to their state on wordpress.org.', 'Discard %d changes? The assets return to their state on wordpress.org.', count, 'peak-publisher'), count);
+
+    // A wordpress.org plugin's delete waits for the commit; a self-hosted one is gone at once.
+    const getDeleteConfirmText = (isWporg) => isWporg
+        ? __('Delete this asset? It is removed from wordpress.org with the next commit.', 'peak-publisher')
+        : __('Delete this asset?', 'peak-publisher');
+
+    // A box's band: what the working copy does to this slot.
+    function getBandText(kind) {
+        return {
+            pending: __('Not on wordpress.org yet', 'peak-publisher'),
+            delete: __('Will be deleted on wordpress.org', 'peak-publisher'),
+            conflict: __('Changed here and on wordpress.org', 'peak-publisher'),
+        }[kind];
+    }
+
+    // The wordpress.org side of a conflict box: the mirror file, or that the slot is empty there.
+    const getOnWporgText = (onWporg) => onWporg
+        ? sprintf(__('On wordpress.org: %1$s r%2$d', 'peak-publisher'), onWporg.filename, onWporg.revision)
+        : __('Not on wordpress.org', 'peak-publisher');
+
+    return {
+        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText,
+        getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
+        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText,
+    };
 })());

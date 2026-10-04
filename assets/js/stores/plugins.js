@@ -123,6 +123,22 @@
         actions: actions,
         selectors: selectors,
     });
+    // The directory refreshes in the order they were asked for (see refreshWporg).
+    var wporgRefreshes = Promise.resolve();
+    async function runWporgRefresh(pluginId, force) {
+        var dispatch = wp.data.dispatch('pblsh/plugins');
+        dispatch.setRefreshingWporg(true);
+        try {
+            var response = await window.Pblsh.API.refreshWporg(pluginId, force);
+            var stats = response && response.stats ? response.stats : {};
+            var plugins = response && response.plugins ? response.plugins : {};
+            Object.keys(stats).forEach(function(id) { dispatch.patch(Number(id), stats[id]); });
+            Object.keys(plugins).forEach(function(id) { dispatch.patch(Number(id), plugins[id]); });
+            return { stats: stats, plugins: plugins };
+        } finally {
+            dispatch.setRefreshingWporg(false);
+        }
+    }
     // Controllers (async helpers)
     window.Pblsh = window.Pblsh || {};
     window.Pblsh.Controllers = window.Pblsh.Controllers || {};
@@ -152,20 +168,16 @@
         // Asks the server for the due directory refresh (every marker, or one; force skips
         // the daily cut-off and the check interval) and patches every marker it touched: the
         // figures, and the fresh row of a plugin that changed on wordpress.org. Resolves to
-        // the answer's stats map so a caller can compare before and after.
-        refreshWporg: async function(pluginId, options) {
-            var dispatch = wp.data.dispatch('pblsh/plugins');
-            dispatch.setRefreshingWporg(true);
-            try {
-                var response = await window.Pblsh.API.refreshWporg(pluginId || null, !!(options && options.force));
-                var stats = response && response.stats ? response.stats : {};
-                var plugins = response && response.plugins ? response.plugins : {};
-                Object.keys(stats).forEach(function(id) { dispatch.patch(Number(id), stats[id]); });
-                Object.keys(plugins).forEach(function(id) { dispatch.patch(Number(id), plugins[id]); });
-                return stats;
-            } finally {
-                dispatch.setRefreshingWporg(false);
-            }
+        // the answer ({ stats, plugins }) so a caller can react to a changed plugin. One at a
+        // time: a refresh asked for while another runs starts once that one has settled, so
+        // the manual Refresh is never refused and never runs beside the automatic check —
+        // two refreshes of one changed plugin would sync its tags side by side.
+        refreshWporg: function(pluginId, options) {
+            var refresh = wporgRefreshes.then(function() {
+                return runWporgRefresh(pluginId || null, !!(options && options.force));
+            });
+            wporgRefreshes = refresh.catch(function() {});
+            return refresh;
         },
         fetchById: async function(id) {
             var dispatch = wp.data.dispatch('pblsh/plugins');

@@ -101,12 +101,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                     createElement('span', { tabIndex: 0 }, __('Could not be reached', 'peak-publisher'))));
             }
         }
-        // Locked only while a refresh runs — after a failure the user may try again at once.
+        // Locked only while its own refresh runs — after a failure the user may try again at
+        // once, and a click during the automatic check is taken: the store runs it next.
         if (refreshable) {
             fragments.push(createElement(Button, {
                 isLink: true,
                 isBusy: refreshingStats,
-                disabled: refreshingStats || isRefreshingAnyStats,
+                disabled: refreshingStats,
                 onClick: refreshStats,
             }, __('Refresh', 'peak-publisher')));
         }

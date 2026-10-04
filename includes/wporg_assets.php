@@ -226,8 +226,11 @@ function copy_sources_to_secure(array $pending, array $remote_winners): array {
  * writes the slot's canonical file (the PUT replaces it if it exists) and deletes every other
  * member; a copy (move, swap) copies the source from the base revision — the source is fixed,
  * whatever this commit deletes — and needs its target path free, so every member and any file
- * holding the target name goes first (R in the log); a delete removes every member. Message
- * and details in the pattern of every Peak Publisher commit.
+ * holding the target name goes first (R in the log); a delete removes every member. Every
+ * raster file written — put or copy — gets its svn:mime-type set in the same commit: a copy
+ * inherits its source's property, a put over an old file keeps that file's, and the plugin
+ * handbook asks for the image type. Message and details in the pattern of every Peak
+ * Publisher commit.
  *
  * @param array|null $listing WporgOperations::list_assets() — null: assets/ does not exist yet
  */
@@ -238,7 +241,14 @@ function build_asset_commit_plan(string $slug, array $pending, ?array $listing, 
     $deletes = [];
     $copies = [];
     $puts = [];
+    $mime_types = [];
     $done = [ 'updated' => [], 'moved' => [], 'deleted' => [] ];
+    $typed = static function(string $target, string $ext) use (&$mime_types): void {
+        $type = asset_mime_type($ext);
+        if ($type !== null) {
+            $mime_types[] = [ 'path' => 'assets/' . $target, 'type' => $type ];
+        }
+    };
 
     foreach ($pending as $slot_id => $entry) {
         $members = $slots[$slot_id]['members'] ?? [];
@@ -246,11 +256,13 @@ function build_asset_commit_plan(string $slug, array $pending, ?array $listing, 
             $target = asset_canonical_filename((string) $slot_id, $entry['ext']);
             $puts[] = [ 'path' => 'assets/' . $target, 'local_path' => $pending_dir . '/' . $entry['file'] ];
             $deletes = [ ...$deletes, ...array_filter($members, static fn(string $member): bool => $member !== $target) ];
+            $typed($target, $entry['ext']);
             $done['updated'][] = $target;
         } elseif ($entry['action'] === 'copy') {
             $target = asset_canonical_filename((string) $slot_id, $entry['ext']);
             $copies[] = [ 'path' => 'assets/' . $target, 'from_path' => 'assets/' . $entry['from']['filename'], 'from_revision' => $base_revision ];
             $deletes = [ ...$deletes, ...$members, ...(in_array($target, $names, true) ? [ $target ] : []) ];
+            $typed($target, $entry['ext']);
             $done['moved'][] = $target;
         } else {
             $deletes = [ ...$deletes, ...$members ];
@@ -268,6 +280,7 @@ function build_asset_commit_plan(string $slug, array $pending, ?array $listing, 
         'mkdirs' => $listing === null ? [ 'assets' ] : [],
         'copies' => $copies,
         'puts' => $puts,
+        'mime_types' => $mime_types,
         'message' => sprintf('Update assets of %s (%s) via Peak Publisher', $slug, implode(', ', $parts)),
         'details' => $done,
     ];

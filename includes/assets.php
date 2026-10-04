@@ -31,6 +31,19 @@ const PBLSH_ASSET_RASTER_EXTS = [ 'png', 'jpg', 'gif' ];
 
 
 /**
+ * The MIME type a raster asset carries as svn:mime-type on wordpress.org — what the plugin
+ * handbook asks committers to set, so the SVN origin serves the file as an image and SVN
+ * treats it as binary. Null for an SVG: to SVN that is text (diffs, merges), a property not
+ * starting with text/ would turn it binary for nothing — the origin serves .svg as
+ * image/svg+xml by its extension anyway. $ext as the filename rule reads it
+ * (classify_asset_filename(): lowercase, jpeg possible) or as an upload was detected.
+ */
+function asset_mime_type(string $ext): ?string {
+    return [ 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif' ][$ext] ?? null;
+}
+
+
+/**
  * The slots the plugin page consumes (128x128/256x256 icons, icon.svg, 772x250/1544x500
  * banners, numbered screenshots) — the one table behind the editor (PblshData.assetSlots),
  * the validation and the classification. banner.svg is imported by wordpress.org but never

@@ -29,7 +29,14 @@ final class AssetCommitPlanTest extends TestCase {
         self::assertSame([ 'assets/Icon-128x128.PNG', 'assets/icon-128x128.jpeg' ], $plan['deletes'], 'the PUT replaces its own target; the localized variant is no member');
         self::assertSame([], $plan['copies']);
         self::assertSame([], $plan['mkdirs']);
+        self::assertSame([ [ 'path' => 'assets/icon-128x128.png', 'type' => 'image/png' ] ], $plan['mime_types'], 'the type the handbook asks for, from the detected content');
         self::assertSame('Update assets of my-plugin (1 updated) via Peak Publisher', $plan['message']);
+
+        $svg = build_asset_commit_plan('my-plugin', [ 'icon_svg' => [ 'action' => 'put', 'file' => 'icon.svg', 'ext' => 'svg', 'base' => null ] ], self::listing(), 60, '/tmp/pending');
+        self::assertSame([], $svg['mime_types'], 'an SVG stays without a property: it is text to SVN, and the origin types .svg by extension');
+
+        $jpeg = build_asset_commit_plan('my-plugin', [ 'screenshot-1' => self::copy('screenshot-3', 'screenshot-3.jpeg', 'jpeg') ], self::listing('screenshot-3.jpeg'), 60, '/tmp/pending');
+        self::assertSame([ [ 'path' => 'assets/screenshot-1.jpg', 'type' => 'image/jpeg' ] ], $jpeg['mime_types'], 'a copy carries the extension as the filename rule read it');
     }
 
     public function test_swap_with_equal_extensions_replaces_both_paths(): void {
@@ -43,6 +50,7 @@ final class AssetCommitPlanTest extends TestCase {
             [ 'path' => 'assets/screenshot-3.png', 'from_path' => 'assets/screenshot-1.png', 'from_revision' => 60 ],
         ], $plan['copies'], 'both from the base revision — no intermediate name');
         self::assertSame([ 'assets/screenshot-1.png', 'assets/screenshot-3.png' ], $plan['deletes'], 'a COPY needs its target gone first (R in the log)');
+        self::assertSame([ [ 'path' => 'assets/screenshot-1.png', 'type' => 'image/png' ], [ 'path' => 'assets/screenshot-3.png', 'type' => 'image/png' ] ], $plan['mime_types'], 'a copy inherits the source\'s property — set anew');
         self::assertSame('Update assets of my-plugin (2 moved) via Peak Publisher', $plan['message']);
     }
 
@@ -66,7 +74,7 @@ final class AssetCommitPlanTest extends TestCase {
         self::assertSame([ 'assets' ], $first['mkdirs']);
 
         $empty = build_asset_commit_plan('my-plugin', [], self::listing('icon.svg'), 60, '/tmp/pending');
-        self::assertSame([ [], [], [] ], [ $empty['deletes'], $empty['copies'], $empty['puts'] ]);
+        self::assertSame([ [], [], [], [] ], [ $empty['deletes'], $empty['copies'], $empty['puts'], $empty['mime_types'] ]);
     }
 
     public function test_the_listing_after_the_plan_needs_no_second_read(): void {

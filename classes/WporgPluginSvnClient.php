@@ -429,6 +429,33 @@ class WporgPluginSvnClient {
         );
     }
 
+    /**
+     * Sets svn:mime-type on a file of the commit — a PROPPATCH on its working resource, after
+     * the PUT or COPY that wrote it. The property is what the plugin handbook asks committers
+     * to set on images: the SVN origin serves the file under it, and the svn client treats
+     * the file as binary.
+     */
+    public function set_mime_type(string $path, string $mime_type): void {
+        $this->require_commit_context();
+        $path = $this->safe_relative_path($path);
+        $body = '<?xml version="1.0" encoding="utf-8"?>' .
+            '<D:propertyupdate xmlns:D="DAV:" xmlns:S="http://subversion.tigris.org/xmlns/svn/">' .
+            '<D:set><D:prop><S:mime-type>' . htmlspecialchars($mime_type, ENT_QUOTES | ENT_XML1) . '</S:mime-type></D:prop></D:set>' .
+            '</D:propertyupdate>';
+        $response = $this->request_url('PROPPATCH', $this->working_url($path, false), [ 'Content-Type' => 'text/xml; charset=utf-8' ], $body);
+        $status = (int) ($response['status'] ?? 0);
+        if ($this->is_success_status($status) && !$this->multistatus_has_failure((string) ($response['body'] ?? ''))) {
+            return;
+        }
+
+        $code = $this->write_error_code_from_response($response);
+        throw new WporgSvnException(
+            $code,
+            $this->write_failure_message($code, __('wordpress.org SVN property change failed.', 'peak-publisher'), $response),
+            $this->write_failure_status($code, $status)
+        );
+    }
+
     public function mkdir(string $path): void {
         $this->require_commit_context();
         $path = $this->safe_relative_path($path);

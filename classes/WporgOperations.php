@@ -29,6 +29,7 @@ class WporgOperations {
      *   'copies'  => array{path:string, from_path:string, from_revision:int}[]
      *                                                          server-side copies with history
      *   'puts'    => array{path:string, local_path:string}[]   a PUT replaces existing content
+     *   'mime_types' => array{path:string, type:string}[]      svn:mime-type set on the file, after its put or copy
      *   'message' => string                                    the commit message
      *   'details' => array                                     the operations log entry's details
      *   'cleanup' => string[]                                  temp files deleted in finally
@@ -36,8 +37,8 @@ class WporgOperations {
      * Every entry counts as a change: a directory is listed only when it may be missing,
      * never one known to exist (creating an existing one is tolerated, but it is no change).
      * The primitive orders the operations: deletes deep-first, mkdirs shallow-first, then
-     * copies and puts by path. An empty plan (no deletes, mkdirs, copies or puts) commits
-     * nothing: committed false, revision null, no log entry.
+     * copies, puts and mime types by path. An empty plan (none of these) commits nothing:
+     * committed false, revision null, no log entry.
      *
      * @param \WP_Post      $marker       The wporg marker (post_name = slug; the log lives on it).
      * @param string        $operation    deploy | stable_tag | delete_tag | assets | readme — the
@@ -82,7 +83,7 @@ class WporgOperations {
             $client = self::svn_client($username, $credentials['password']);
 
             $plan = self::normalize_plan($build_plan($client, $base_revision));
-            if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['copies'] === [] && $plan['puts'] === []) {
+            if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['copies'] === [] && $plan['puts'] === [] && $plan['mime_types'] === []) {
                 return [ 'revision' => null, 'committed' => false, 'base_revision' => (int) $base_revision, 'details' => $plan['details'] ];
             }
 
@@ -100,6 +101,9 @@ class WporgOperations {
             }
             foreach ($plan['puts'] as $put) {
                 $client->add_file($put['path'], $put['local_path']);
+            }
+            foreach ($plan['mime_types'] as $typed) {
+                $client->set_mime_type($typed['path'], $typed['type']);
             }
             $commit = $client->commit($plan['message']);
 
@@ -1230,15 +1234,18 @@ class WporgOperations {
         $mkdirs = array_values(array_filter((array) ($plan['mkdirs'] ?? []), 'is_string'));
         $copies = array_values(array_filter((array) ($plan['copies'] ?? []), static fn($copy): bool => is_array($copy) && !empty($copy['path']) && !empty($copy['from_path']) && (int) ($copy['from_revision'] ?? 0) > 0));
         $puts = array_values(array_filter((array) ($plan['puts'] ?? []), static fn($put): bool => is_array($put) && !empty($put['path']) && !empty($put['local_path'])));
+        $mime_types = array_values(array_filter((array) ($plan['mime_types'] ?? []), static fn($typed): bool => is_array($typed) && !empty($typed['path']) && !empty($typed['type'])));
         usort($deletes, static fn(string $a, string $b): int => substr_count($b, '/') <=> substr_count($a, '/'));
         usort($mkdirs, static fn(string $a, string $b): int => substr_count($a, '/') <=> substr_count($b, '/'));
         usort($copies, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
         usort($puts, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
+        usort($mime_types, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
         return [
             'deletes' => $deletes,
             'mkdirs' => $mkdirs,
             'copies' => $copies,
             'puts' => $puts,
+            'mime_types' => $mime_types,
             'message' => trim((string) ($plan['message'] ?? '')),
             'details' => is_array($plan['details'] ?? null) ? $plan['details'] : [],
             'cleanup' => array_values(array_filter((array) ($plan['cleanup'] ?? []), 'is_string')),

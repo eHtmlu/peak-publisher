@@ -171,7 +171,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--plugin-grid' },
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, releasesLoaded ? String((releasesFromStore || []).length) : '—')
+                                // From the plugin like the current release beside it — the one payload the header reads.
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String(Number(pluginData?.count_of_releases) || 0))
                             ),
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Current Release', 'peak-publisher')),

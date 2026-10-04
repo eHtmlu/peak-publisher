@@ -51,6 +51,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         },
         [pluginData && pluginData.id]
     );
+    // Subscribed, not read ad hoc: an empty list that finishes loading changes nothing but this flag.
+    const releasesLoaded = useSelect(
+        (select) => !!(pluginData && pluginData.id) && select('pblsh/releases').hasLoadedForPlugin(pluginData.id),
+        [pluginData && pluginData.id]
+    );
 
     // The manual refresh of the wordpress.org stats: force skips the daily cut-off. The
     // patched data says the rest; a failure of the request itself is reported like the

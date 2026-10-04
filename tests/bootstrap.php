@@ -22,7 +22,7 @@ require_once PBLSH_PLUGIN_DIR . 'includes/encryption.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/hosting.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_cache.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_api.php';
-require_once PBLSH_PLUGIN_DIR . 'includes/wporg_stats.php';
+require_once PBLSH_PLUGIN_DIR . 'includes/wporg_directory.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_log.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_import_timing.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_assets.php';

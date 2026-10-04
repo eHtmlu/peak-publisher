@@ -12,7 +12,7 @@
         pendingIds: [],
         error: null,
         lastFetch: 0,
-        isRefreshingWporgStats: false,
+        isRefreshingWporg: false,
     };
     var actions = {
         setList: function(items) {
@@ -39,7 +39,7 @@
         patch: function(id, fields) {
             return { type: 'PATCH', id: id, fields: fields };
         },
-        setRefreshingWporgStats: function(flag) {
+        setRefreshingWporg: function(flag) {
             return { type: 'SET_REFRESHING_WPORG_STATS', flag: !!flag };
         },
     };
@@ -90,7 +90,7 @@
                 return assign({}, state, { byId: assign({}, state.byId, patched) });
             }
             case 'SET_REFRESHING_WPORG_STATS':
-                return assign({}, state, { isRefreshingWporgStats: !!action.flag });
+                return assign({}, state, { isRefreshingWporg: !!action.flag });
             default:
                 return state;
         }
@@ -114,8 +114,8 @@
         getPendingIds: function(state) {
             return state.pendingIds.slice();
         },
-        isRefreshingWporgStats: function(state) {
-            return !!state.isRefreshingWporgStats;
+        isRefreshingWporg: function(state) {
+            return !!state.isRefreshingWporg;
         },
     };
     registerStore('pblsh/plugins', {
@@ -135,12 +135,13 @@
                 var items = Array.isArray(list) ? list : [];
                 dispatch.setList(items);
                 // Stale-while-revalidate: the list renders from the cache, then the server
-                // fetches whatever wordpress.org figures are due (once a day per marker) —
-                // the one trigger for every caller of fetchList. A failed automatic refresh
-                // leaves the cached state in place; the editor's Refresh link reports its
-                // own failures.
+                // refreshes against the directory whatever is due — the figures once a day per
+                // marker, the stamp check every few minutes site-wide, which refreshes a changed
+                // plugin against SVN and answers its fresh row — the one trigger for every caller
+                // of fetchList. A failed automatic refresh leaves the cached state in place; the
+                // editor's Refresh link reports its own failures.
                 if (items.some(function(item) { return item.hosting_type === 'wporg'; })) {
-                    window.Pblsh.Controllers.Plugins.refreshWporgStats().catch(function() {});
+                    window.Pblsh.Controllers.Plugins.refreshWporg().catch(function() {});
                 }
             } catch (e) {
                 dispatch.setError(e && e.message ? e.message : 'Failed to load plugins');
@@ -148,19 +149,22 @@
                 dispatch.setLoadingList(false);
             }
         },
-        // Asks the server for the due wordpress.org figures (every marker, or one; force
-        // skips the daily cut-off) and patches every marker it touched. Resolves to the
-        // answer's stats map so a caller can compare before and after.
-        refreshWporgStats: async function(pluginId, options) {
+        // Asks the server for the due directory refresh (every marker, or one; force skips
+        // the daily cut-off and the check interval) and patches every marker it touched: the
+        // figures, and the fresh row of a plugin that changed on wordpress.org. Resolves to
+        // the answer's stats map so a caller can compare before and after.
+        refreshWporg: async function(pluginId, options) {
             var dispatch = wp.data.dispatch('pblsh/plugins');
-            dispatch.setRefreshingWporgStats(true);
+            dispatch.setRefreshingWporg(true);
             try {
-                var response = await window.Pblsh.API.refreshWporgStats(pluginId || null, !!(options && options.force));
+                var response = await window.Pblsh.API.refreshWporg(pluginId || null, !!(options && options.force));
                 var stats = response && response.stats ? response.stats : {};
+                var plugins = response && response.plugins ? response.plugins : {};
                 Object.keys(stats).forEach(function(id) { dispatch.patch(Number(id), stats[id]); });
+                Object.keys(plugins).forEach(function(id) { dispatch.patch(Number(id), plugins[id]); });
                 return stats;
             } finally {
-                dispatch.setRefreshingWporgStats(false);
+                dispatch.setRefreshingWporg(false);
             }
         },
         fetchById: async function(id) {

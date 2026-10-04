@@ -12,7 +12,7 @@ const InstallationsCount = ({ plugin }) => {
     const { getInstallationsCell } = Pblsh.InstallationsUtils;
     const { Figure } = Pblsh.Components;
 
-    const refreshing = useSelect((select) => select('pblsh/plugins').isRefreshingWporgStats(), []);
+    const refreshing = useSelect((select) => select('pblsh/plugins').isRefreshingWporg(), []);
     if (refreshing && plugin.hosting_type === 'wporg' && plugin.installations.state === 'never') {
         return createElement(Figure, { title: __('Fetching from wordpress.org…', 'peak-publisher') },
             createElement(Spinner, { className: 'pblsh--figure__spinner' }),

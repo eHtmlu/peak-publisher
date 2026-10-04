@@ -162,9 +162,9 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
-        register_rest_route(self::NAMESPACE, '/admin/wporg/refresh-stats', [
+        register_rest_route(self::NAMESPACE, '/admin/wporg/refresh', [
             'methods' => 'POST',
-            'callback' => [$this, 'refresh_wporg_stats_rest'],
+            'callback' => [$this, 'refresh_wporg_rest'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
@@ -235,7 +235,7 @@ class AdminAPI {
     /**
      * Get plugin.
      */
-    public function get_plugin(\WP_REST_Request $request): array|\WP_Error {
+    public function get_plugin(\WP_REST_Request $request): array {
         $id = (int) $request->get_param('id');
         $post = get_post($id);
         if (!is_plugin_post($post)) {
@@ -243,13 +243,14 @@ class AdminAPI {
         }
 
         if (is_wporg_plugin($post)) {
-            $refresh_error = $this->refresh_wporg_plugin_cache($post);
-            if ($refresh_error instanceof \WP_Error) {
-                return $refresh_error;
-            }
-            $post = get_post($id);
-            if (!is_plugin_post($post)) {
-                return [];
+            // No check against wordpress.org here: the list's directory refresh keeps the cache
+            // fresh within minutes, and every write reads fresh under the lock. Only the mirror's
+            // own disk is checked — a file lost there is fetched again.
+            try {
+                require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
+                (new WporgAssetSync())->recover($post);
+            } catch (\Throwable $e) {
+                wporg_log_cache_error($post, 'assets', $e);
             }
             // A forecast still shown is computed anew on load, foreign commits may have moved it —
             // not on the reload right after the own commit that computed it.
@@ -368,20 +369,6 @@ class AdminAPI {
         });
 
         return $releases;
-    }
-
-    private function refresh_wporg_plugin_cache(\WP_Post $post): ?\WP_Error {
-        try {
-            get_wporg_plugin_data($post);
-        } catch (\Throwable $e) {
-            return new \WP_Error(
-                'wporg_cache_refresh_failed',
-                $e->getMessage() ?: __('Could not refresh wordpress.org SVN cache.', 'peak-publisher'),
-                [ 'status' => 502 ]
-            );
-        }
-
-        return null;
     }
 
     /**
@@ -590,12 +577,13 @@ class AdminAPI {
     }
 
     /**
-     * Fetches the due wordpress.org figures — every marker, or one — and answers with
-     * the new state of every marker touched. The client calls it after loading the
-     * list (stale-while-revalidate) and from the editor's Refresh link (force); the
-     * server alone decides what is due (refresh_wporg_stats()).
+     * The list's background refresh against the directory — stale-while-revalidate: the client
+     * calls it after loading the list, and from the editor's Refresh link with force. The due
+     * figures and the stamp check (refresh_wporg_directory(), the server alone decides what is
+     * due); a marker whose stamp moved is refreshed against SVN here — tags, trunk readme,
+     * assets mirror — and answered as a fresh list row.
      */
-    public function refresh_wporg_stats_rest(\WP_REST_Request $request) {
+    public function refresh_wporg_rest(\WP_REST_Request $request) {
         $params = $request->get_json_params();
         $params = is_array($params) ? $params : [];
         $plugin_id = isset($params['plugin_id']) ? (int) $params['plugin_id'] : null;
@@ -603,14 +591,28 @@ class AdminAPI {
             return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
         }
 
+        $result = refresh_wporg_directory($plugin_id, !empty($params['force']));
         $stats = [];
-        foreach (refresh_wporg_stats($plugin_id, !empty($params['force'])) as $id) {
+        foreach ($result['figures'] as $id) {
             $stats[$id] = serialize_wporg_installations($id);
+        }
+        $plugins = [];
+        foreach ($result['changed'] as $id) {
+            $marker = get_post($id);
+            // The SVN refresh of a plugin that changed on wordpress.org — warn-only, the row is served as it is then.
+            try {
+                get_wporg_plugin_data($marker);
+            } catch (\Throwable $e) {
+                wporg_log_cache_error($marker, 'directory', $e);
+            }
+            $marker = get_post($id);
+            $plugins[$id] = $this->serialize_plugin_post($marker, false, fetch_releases_grouped_by_parent([ $id ])[$id] ?? []);
         }
         return [
             'status' => 'ok',
-            // An object even when empty, so the client can always iterate its keys.
+            // Objects even when empty, so the client can always iterate their keys.
             'stats' => (object) $stats,
+            'plugins' => (object) $plugins,
         ];
     }
 

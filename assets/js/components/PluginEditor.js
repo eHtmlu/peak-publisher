@@ -32,7 +32,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     // spinner. Its outcome shows through the data — the fetch age becomes "just now", a
     // failure appears beside it.
     const [refreshingStats, setRefreshingStats] = useState(false);
-    const isRefreshingAnyStats = useSelect((select) => select('pblsh/plugins').isRefreshingWporgStats(), []);
+    const isRefreshingAnyStats = useSelect((select) => select('pblsh/plugins').isRefreshingWporg(), []);
     const validTabs = ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
 
@@ -64,7 +64,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         if (!pluginData || refreshingStats) return;
         setRefreshingStats(true);
         try {
-            await Pblsh.Controllers.Plugins.refreshWporgStats(pluginData.id, { force: true });
+            await Pblsh.Controllers.Plugins.refreshWporg(pluginData.id, { force: true });
         } catch (e) {
             alert((e?.message || __('Could not refresh the wordpress.org figures.', 'peak-publisher'))
                 + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));
@@ -171,7 +171,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--plugin-grid' },
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, !(wp.data.select('pblsh/releases').hasLoadedForPlugin && wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null)) ? '—' : String((releasesFromStore || []).length))
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, releasesLoaded ? String((releasesFromStore || []).length) : '—')
                             ),
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Current Release', 'peak-publisher')),
@@ -265,9 +265,6 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
 
     const renderReleasesTable = () => {
         const releases = Array.isArray(releasesFromStore) ? releasesFromStore : [];
-        const hasLoaded = wp.data.select('pblsh/releases').hasLoadedForPlugin
-            ? wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null)
-            : false;
         // A draft (self-hosted) or closed (wordpress.org) plugin distributes nothing; its
         // current release is what sites get once it does.
         const distributesNothing = pluginData?.status !== 'publish';
@@ -282,7 +279,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             ...renderReleaseNotices(),
             createElement('div', { key: 'table', className: 'pblsh--table-container' },
                 // A spinner only until the first list is in; a reload keeps the list it replaces.
-                !hasLoaded ?
+                !releasesLoaded ?
                     createElement('div', { className: 'pblsh--loading pblsh--loading--table' },
                         createElement('div', { className: 'pblsh--loading__spinner' })
                     )
@@ -297,7 +294,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         ),
                     ),
                     createElement('tbody', null,
-                        (hasLoaded && releases.length === 0)
+                        (releasesLoaded && releases.length === 0)
                             ? createElement('tr', null,
                                 createElement('td', { colSpan: showReleaseInstallations ? 5 : 4 }, __('No releases.', 'peak-publisher')),
                             )

@@ -59,8 +59,8 @@ lodash.set(window, 'Pblsh.API', {
     },
     // Fetch the due wordpress.org figures (every marker, or one); force skips the daily
     // cut-off. Answers { stats: { [id]: { installations, wporg_stats } } } for every marker touched.
-    refreshWporgStats: async (pluginId = null, force = false) => {
-        return await window.Pblsh.API.request('admin/wporg/refresh-stats', {
+    refreshWporg: async (pluginId = null, force = false) => {
+        return await window.Pblsh.API.request('admin/wporg/refresh', {
             method: 'POST',
             body: { plugin_id: pluginId, force },
         });

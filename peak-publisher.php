@@ -32,7 +32,7 @@ require_once __DIR__ . '/includes/uploads.php';
 require_once __DIR__ . '/includes/hosting.php';
 require_once __DIR__ . '/includes/wporg_cache.php';
 require_once __DIR__ . '/includes/wporg_api.php';
-require_once __DIR__ . '/includes/wporg_stats.php';
+require_once __DIR__ . '/includes/wporg_directory.php';
 require_once __DIR__ . '/includes/wporg_log.php';
 require_once __DIR__ . '/includes/wporg_import_timing.php';
 require_once __DIR__ . '/includes/wporg_assets.php';

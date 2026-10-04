@@ -120,9 +120,11 @@ class AssetManager {
                     : null,
             ];
         }
+        // "checked": the later of the mirror's last SVN sync and the directory's last stamp check.
+        $checked_at = max((int) $state['listed_at'], wporg_directory_checked_at());
         return [
             'revision' => $state['revision'],
-            'listed_at' => $state['listed_at'] > 0 ? gmdate('Y-m-d\TH:i:s\Z', $state['listed_at']) : null,
+            'checked_at' => $checked_at > 0 ? gmdate('Y-m-d\TH:i:s\Z', $checked_at) : null,
             'other_files' => $state['other_files'],
             'pending_count' => count($pending),
             'conflict_count' => count($conflicts),

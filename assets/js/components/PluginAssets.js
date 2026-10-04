@@ -564,7 +564,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         if (wporg.pending_count === 0) {
             return createElement('div', { className: 'pblsh--assets-bar' },
                 createElement('div', { className: 'pblsh--assets-bar__status' },
-                    createInterpolateElement(getSyncedText(wporg), { time: createElement('time', getTimeTooltipProps(wporg.listed_at)) }),
+                    createInterpolateElement(getSyncedText(wporg), { time: createElement('time', getTimeTooltipProps(wporg.checked_at)) }),
                 ),
             );
         }

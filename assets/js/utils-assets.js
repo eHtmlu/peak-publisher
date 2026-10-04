@@ -87,10 +87,10 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     const getNoCaptionsText = () => __('No captions in readme.txt yet', 'peak-publisher');
 
     // Where the mirror of a wordpress.org plugin stands (the server's wporg block): the
-    // revision of assets/ it holds and when it was last confirmed — the moment inside
+    // revision of assets/ it holds and when it was last checked — the moment inside
     // <time></time> for the caller's exact-timestamp tooltip.
     function getSyncedText(wporg) {
-        const checked = formatRelativeTime(wporg.listed_at);
+        const checked = formatRelativeTime(wporg.checked_at);
         if (wporg.revision === null || !checked) return __('Not synced with wordpress.org yet · reload to try again', 'peak-publisher');
         if (wporg.revision === 0) return sprintf(__('wordpress.org has no assets/ directory for this plugin · checked <time>%s</time>', 'peak-publisher'), checked);
         return sprintf(__('Synced with wordpress.org · r%1$d · checked <time>%2$s</time>', 'peak-publisher'), wporg.revision, checked);

@@ -1,7 +1,7 @@
 /* Assets Store for Peak Publisher — the editor's view of a plugin's assets (the server's
-   describe() payload), one per plugin id. Loaded when the tab first opens, reloaded with the
-   plugin (refreshPlugin, like the releases) and set by every write's answer; it survives a
-   switch to another tab, so the tab comes back without a request. */
+   describe() payload), one per plugin id. Loaded when the editor opens and reloaded with the
+   plugin (refreshPlugin), like the releases, and set by every write's answer; it survives a
+   switch to another tab, so the tab opens without a request. */
 (function() {
     'use strict';
     var registerStore = wp.data.registerStore;
@@ -61,10 +61,6 @@
             } finally {
                 dispatch.setLoading(pluginId, false);
             }
-        },
-        // The view is reloaded with the plugin only where the tab was opened before.
-        hasLoadedForPlugin: function(pluginId) {
-            return !!wp.data.select('pblsh/assets').getForPlugin(pluginId);
         },
     };
 })();

@@ -69,7 +69,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const [isNew, setIsNew] = useState(false);
         const settingsDialogRef = useRef(null);
-        const isLoadingReleases = useSelect((select) => currentPluginId ? select('pblsh/releases').isLoadingForPlugin(currentPluginId) : false, [currentPluginId]);
         const currentPlugin = useSelect((select) => currentPluginId ? select('pblsh/plugins').getById(currentPluginId) : null, [currentPluginId]);
 
         // Helpers for URL state
@@ -169,15 +168,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 setCurrentPluginId(id);
                 setQuery({ plugin: id, view: null, channel: null, import: null });
                 await window.Pblsh.Controllers.Plugins.fetchById(id);
-                try {
-                    const sel = wp.data.select('pblsh/releases');
-                    const alreadyLoaded = typeof sel.hasLoadedForPlugin === 'function' ? sel.hasLoadedForPlugin(id) : false;
-                    if (!alreadyLoaded) {
-                        await window.Pblsh.Controllers.Releases.fetchForPlugin(id);
-                    }
-                } catch (e) {
-                    showAlert(e.message, 'error');
-                }
+                // The releases and the assets view load behind what the store holds: the plugin
+                // may have changed outside this client since the last visit, and this is the
+                // moment the detail just checked wordpress.org anyway.
+                window.Pblsh.Controllers.Releases.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
+                window.Pblsh.Controllers.Assets.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -300,10 +295,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 await window.Pblsh.Controllers.Plugins.fetchById(currentPluginId);
                 await window.Pblsh.Controllers.Plugins.fetchList();
                 await window.Pblsh.Controllers.Releases.fetchForPlugin(currentPluginId);
-                // The assets view follows the plugin (captions, the mirror after a pull) once the tab was opened.
-                if (window.Pblsh.Controllers.Assets.hasLoadedForPlugin(currentPluginId)) {
-                    await window.Pblsh.Controllers.Assets.fetchForPlugin(currentPluginId);
-                }
+                // The assets view follows the plugin: the captions, the mirror after a pull.
+                await window.Pblsh.Controllers.Assets.fetchForPlugin(currentPluginId);
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -329,7 +322,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     refreshPlugin: refreshCurrentPlugin,
                     onTogglePluginStatus: togglePluginStatus,
                     pendingPluginStatus: pendingPluginStatus,
-                    isLoadingReleases: isLoadingReleases,
                     onBack: handleCancel,
                     initialTab: initialTab,
                     onTabChange: (tab) => setQuery({ tab: tab === 'releases' ? null : tab }),

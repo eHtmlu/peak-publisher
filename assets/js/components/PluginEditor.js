@@ -1,5 +1,5 @@
 // PluginEditor Component (simplified overview + releases list)
-lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onTogglePluginStatus, pendingPluginStatus, isLoadingReleases, onBack, initialTab, onTabChange }) => {
+lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onTogglePluginStatus, pendingPluginStatus, onBack, initialTab, onTabChange }) => {
     const { __, sprintf } = wp.i18n;
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
@@ -166,7 +166,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--plugin-grid' },
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, (isLoadingReleases || !(wp.data.select('pblsh/releases').hasLoadedForPlugin && wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null))) ? '—' : String((releasesFromStore || []).length))
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, !(wp.data.select('pblsh/releases').hasLoadedForPlugin && wp.data.select('pblsh/releases').hasLoadedForPlugin(pluginData && pluginData.id ? pluginData.id : null)) ? '—' : String((releasesFromStore || []).length))
                             ),
                             createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Current Release', 'peak-publisher')),
@@ -276,7 +276,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         return [
             ...renderReleaseNotices(),
             createElement('div', { key: 'table', className: 'pblsh--table-container' },
-                (isLoadingReleases || !hasLoaded) ?
+                // A spinner only until the first list is in; a reload keeps the list it replaces.
+                !hasLoaded ?
                     createElement('div', { className: 'pblsh--loading pblsh--loading--table' },
                         createElement('div', { className: 'pblsh--loading__spinner' })
                     )

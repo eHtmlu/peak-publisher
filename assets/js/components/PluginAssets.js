@@ -1,6 +1,6 @@
 // PluginAssets Component - the assets tab of the plugin editor: icons, banners and
 // screenshots in fixed slots, uploaded, replaced, deleted and reordered from here. The view
-// lives in the store pblsh/assets (loaded when the tab first opens, reloaded with the plugin,
+// lives in the store pblsh/assets (loaded when the editor opens, reloaded with the plugin,
 // kept across tab switches), the upload in progress and the drag are the component's own;
 // the plugin comes with pluginData, a changed icon reaches the header and the list through
 // refreshPlugin. A
@@ -39,10 +39,10 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const [dragOverN, setDragOverN] = useState(null);     // slot N being hovered during drag
     const dragOverTimeout = useRef(null);                   // auto-clear drag-over when cursor leaves
 
-    // The tab mounts when it is opened (also via deep link): the view is loaded once; later
-    // visits find it in the store, and refreshPlugin reloads it with the plugin.
+    // The editor loads the view when it opens; the tab finds it in the store. Only when that
+    // load failed and nothing is in flight does the tab try again.
     useEffect(() => {
-        if (!pluginId || assets) return;
+        if (!pluginId || assets || assetsLoading) return;
         Pblsh.Controllers.Assets.fetchForPlugin(pluginId).catch((e) => reportError(e, __('Loading the assets failed.', 'peak-publisher')));
     }, [pluginId]);
 

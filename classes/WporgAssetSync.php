@@ -16,12 +16,29 @@ require_once __DIR__ . '/WporgOperations.php';
 class WporgAssetSync {
 
     /**
+     * Brings the mirror in step with SVN on a read of the marker: pulls when the mirror is
+     * behind (needs_pull()), else records that it was just confirmed against SVN (listed_at —
+     * the bar's "checked …"). The confirmation is written under the lock like every write of
+     * the state, and skipped while a commit or a change holds it: a timestamp can wait.
+     */
+    public function refresh(\WP_Post $marker, int $assets_revision): void {
+        if ($this->needs_pull($marker, $assets_revision)) {
+            $this->pull($marker);
+            return;
+        }
+        WporgOperations::try_under_plugin_lock($marker->post_name, 'assets_pull', (int) $marker->ID, static function() use ($marker): bool {
+            update_wporg_assets_state((int) $marker->ID, [ ...get_wporg_assets_state((int) $marker->ID), 'listed_at' => time() ]);
+            return true;
+        });
+    }
+
+    /**
      * Whether the mirror needs a pull: it is behind SVN (its anchor is not the revision of
      * assets/, 0 when there is no directory) or behind itself (a file the manifest names is
-     * gone from the disk — a move without the uploads, a restore). The refresh asks this on
-     * every read, so a lost file is back with the next one.
+     * gone from the disk — a move without the uploads, a restore). Asked on every read, so a
+     * lost file is back with the next one.
      */
-    public function needs_pull(\WP_Post $marker, int $assets_revision): bool {
+    private function needs_pull(\WP_Post $marker, int $assets_revision): bool {
         if (get_wporg_assets_state((int) $marker->ID)['revision'] !== $assets_revision) {
             return true;
         }

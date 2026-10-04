@@ -453,11 +453,12 @@ class WporgOperations {
 
     /**
      * Downloads assets/{filename} into $local_path, streamed; a failure leaves no file behind.
-     * $filename comes from a list_assets() entry that classify_asset_listing() accepted.
+     * $filename comes from a list_assets() entry that classify_asset_listing() accepted. With
+     * $revision the file as it was then (a copy source the mirror no longer holds).
      */
-    public static function download_asset(string $wporg_slug, string $filename, string $local_path, int $size, ?WporgPluginSvnClient $client = null): void {
+    public static function download_asset(string $wporg_slug, string $filename, string $local_path, int $size, ?WporgPluginSvnClient $client = null, ?int $revision = null): void {
         try {
-            ($client ?? self::svn_client())->download_file(self::normalize_slug_or_throw($wporg_slug) . '/assets/' . $filename, $local_path, $size);
+            ($client ?? self::svn_client())->download_file(self::normalize_slug_or_throw($wporg_slug) . '/assets/' . $filename, $local_path, $size, $revision);
         } catch (\Throwable $e) {
             if (file_exists($local_path)) {
                 wp_delete_file($local_path);

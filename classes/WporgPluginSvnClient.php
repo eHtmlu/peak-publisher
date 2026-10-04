@@ -98,10 +98,15 @@ class WporgPluginSvnClient {
      * Downloads a file into a local path — the assets mirror's downloads, up to 10 MB each,
      * which the HTTP API streams to disk instead of holding them in memory; the timeout grows
      * with the expected size like the upload's. Status handling is read_file()'s. A failure
-     * may leave a partial file for the caller to remove.
+     * may leave a partial file for the caller to remove. With $revision the file is read as it
+     * was in that revision, through the baseline collection (!svn/bc/) — the history keeps
+     * what the mirror lost.
      */
-    public function download_file(string $path, string $local_path, int $expected_size): void {
-        $this->file_body_from_response($this->request_url('GET', $this->build_url($path), [], null, [
+    public function download_file(string $path, string $local_path, int $expected_size, ?int $revision = null): void {
+        $url = $revision === null
+            ? $this->build_url($path)
+            : self::REPO_URL . '!svn/bc/' . $revision . '/' . $this->encode_svn_path($path);
+        $this->file_body_from_response($this->request_url('GET', $url, [], null, [
             'stream' => true,
             'filename' => $local_path,
             'timeout' => max(30, min(300, (int) ceil($expected_size / 100000))),

@@ -251,8 +251,9 @@ class AdminAPI {
             if (!is_plugin_post($post)) {
                 return [];
             }
-            // A forecast still shown is recomputed on load: foreign commits may have moved it.
-            if (serialize_wporg_import($id, time()) !== null) {
+            // A forecast still shown is computed anew on load, foreign commits may have moved it —
+            // not on the reload right after the own commit that computed it.
+            if (wporg_import_forecast_due($id, time())) {
                 refresh_wporg_import_forecast($post);
             }
         }

@@ -126,14 +126,31 @@ function predict_wporg_import(array $commits, int $now): ?array {
 }
 
 
-/** The stored forecast for the REST payload, while it lasts; expected_at as ISO 8601 UTC. */
-function serialize_wporg_import(int $marker_id, int $now): ?array {
+/** The stored forecast while it lasts — re-validation when reading back from persistence. */
+function stored_wporg_import(int $marker_id, int $now): ?array {
     $stored = get_post_meta($marker_id, PBLSH_WPORG_IMPORT_META, true);
-    // Re-validation when reading back from persistence.
     if (!is_array($stored) || !isset($stored['expected_at'], $stored['reason']) || (int) $stored['expected_at'] + PBLSH_WPORG_IMPORT_SHOWN_AFTER <= $now) {
         return null;
     }
-    return [ 'expected_at' => gmdate('Y-m-d\TH:i:s\Z', (int) $stored['expected_at']), 'reason' => (string) $stored['reason'] ];
+    return $stored;
+}
+
+
+/** The stored forecast for the REST payload, while it lasts; expected_at as ISO 8601 UTC. */
+function serialize_wporg_import(int $marker_id, int $now): ?array {
+    $stored = stored_wporg_import($marker_id, $now);
+    return $stored === null ? null : [ 'expected_at' => gmdate('Y-m-d\TH:i:s\Z', (int) $stored['expected_at']), 'reason' => (string) $stored['reason'] ];
+}
+
+
+/**
+ * Whether the plugin's load should compute the forecast anew: one is still shown and it is
+ * older than the watcher's interval. The reload right after an own commit finds one seconds
+ * old, and wordpress.org cannot have acted on anything newer in that time.
+ */
+function wporg_import_forecast_due(int $marker_id, int $now): bool {
+    $stored = stored_wporg_import($marker_id, $now);
+    return $stored !== null && (int) ($stored['computed_at'] ?? 0) + PBLSH_WPORG_IMPORT_WATCHER_DELAY <= $now;
 }
 
 

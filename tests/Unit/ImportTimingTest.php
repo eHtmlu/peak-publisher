@@ -7,6 +7,7 @@ namespace Pblsh\Tests\Unit;
 use function Pblsh\predict_wporg_import;
 use function Pblsh\serialize_wporg_import;
 use function Pblsh\wporg_commits_from_log;
+use function Pblsh\wporg_import_forecast_due;
 
 use const Pblsh\PBLSH_WPORG_IMPORT_META;
 
@@ -102,5 +103,15 @@ final class ImportTimingTest extends TestCase {
 
         update_post_meta($marker->ID, PBLSH_WPORG_IMPORT_META, 'garbage');
         self::assertNull(serialize_wporg_import($marker->ID, self::T), 're-validation when reading back from persistence');
+    }
+
+    public function test_a_shown_forecast_is_recomputed_on_load_once_it_is_older_than_the_watchers_interval(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
+        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T), 'nothing stored');
+
+        update_post_meta($marker->ID, PBLSH_WPORG_IMPORT_META, [ 'expected_at' => self::T + 600, 'reason' => 'assets', 'computed_at' => self::T ]);
+        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T + 10), 'the reload right after the own commit');
+        self::assertTrue(wporg_import_forecast_due($marker->ID, self::T + 30));
+        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T + 600 + 180), 'no longer shown');
     }
 }

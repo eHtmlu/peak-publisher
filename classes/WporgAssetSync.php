@@ -25,10 +25,12 @@ class WporgAssetSync {
     }
 
     /**
-     * One listing, then only the slots whose winner changed are downloaded into the mirror,
-     * vanished slots are removed, and the banner color follows its A10 source. A copy entry of
-     * the working copy whose source this pull replaces becomes a put of the old file first, so
-     * it keeps its meaning ("the picture that was in slot 3"). The manifest records every slot
+     * One listing, then only the slots whose winner changed are downloaded into the mirror —
+     * and the slots whose file the disk lost (a move without the uploads, a restore): the
+     * mirror heals itself —, vanished slots are removed, and the banner color follows its A10
+     * source. A copy entry of the working copy whose source this pull replaces becomes a put of
+     * the old file first, so it keeps its meaning ("the picture that was in slot 3"); when the
+     * mirror file is gone, the SVN history still has it. The manifest records every slot
      * that arrived; the anchor (revision, listed_at) moves only when all did, so a failed
      * download is retried by the next pull. The caller holds the lock.
      *
@@ -43,7 +45,14 @@ class WporgAssetSync {
 
         ensure_plugin_assets_dir($marker);
         $dir = get_plugin_assets_dir($marker);
-        if (!$this->secure_copy_sources($marker, $remote)) {
+        // The diff knows names and revisions, not the disk: a mirror file lost there is fetched
+        // again while SVN still fills its slot.
+        foreach ($manifest as $slot_id => $entry) {
+            if (isset($remote[$slot_id]) && !in_array((string) $slot_id, $diff['fetch'], true) && !file_exists($dir . '/' . $entry['filename'])) {
+                $diff['fetch'][] = (string) $slot_id;
+            }
+        }
+        if (!$this->secure_copy_sources($marker, $remote, $client)) {
             return [ 'listing' => $listing, 'complete' => false ];
         }
         foreach ($diff['remove'] as $slot_id) {
@@ -98,10 +107,12 @@ class WporgAssetSync {
 
     /**
      * Copy entries whose source the pull is about to replace or remove become puts of the
-     * source's current mirror file (copy_sources_to_secure()). False when a file could not be
-     * secured — then the pull must not touch the mirror.
+     * source's current mirror file (copy_sources_to_secure()) — or, when the disk lost that
+     * file, of the file as the SVN history holds it at the entry's revision. False when a file
+     * could not be secured (a transport failure, logged) — then the pull must not touch the
+     * mirror, and the next one tries again.
      */
-    private function secure_copy_sources(\WP_Post $marker, array $remote): bool {
+    private function secure_copy_sources(\WP_Post $marker, array $remote, ?WporgPluginSvnClient $client): bool {
         $state = get_wporg_assets_state((int) $marker->ID);
         $secure = copy_sources_to_secure($state['pending'], $remote);
         if ($secure === []) {
@@ -113,7 +124,20 @@ class WporgAssetSync {
         foreach ($secure as $slot_id) {
             $entry = $state['pending'][$slot_id];
             $file = asset_canonical_filename($slot_id, $entry['ext']);
-            if (!get_wp_filesystem()->copy($mirror_dir . '/' . $entry['from']['filename'], $pending_dir . '/' . $file, true)) {
+            $source = $mirror_dir . '/' . $entry['from']['filename'];
+            $failure = null;
+            try {
+                if (file_exists($source)) {
+                    $secured = get_wp_filesystem()->copy($source, $pending_dir . '/' . $file, true);
+                } else {
+                    WporgOperations::download_asset($marker->post_name, $entry['from']['filename'], $pending_dir . '/' . $file, (int) $entry['filesize'], $client, (int) $entry['from']['revision']);
+                    $secured = true;
+                }
+            } catch (\Throwable $failure) {
+                $secured = false;
+            }
+            if (!$secured) {
+                wporg_log_cache_error($marker, 'assets secure ' . $slot_id, $failure ?? new \RuntimeException('The mirror file could not be copied into the working copy.'));
                 update_wporg_assets_state((int) $marker->ID, $state);
                 return false;
             }

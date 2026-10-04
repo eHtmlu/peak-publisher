@@ -5,6 +5,16 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The REST API of the admin app (namespace pblsh-admin/v1, every route requires
+ * manage_options): plugins and releases, the current release, the assets tab, the upload
+ * workflow, the settings, and wordpress.org accounts, import and refresh. It is the boundary
+ * of the admin side: it validates the request and hands the work to the function modules,
+ * UploadWorkflow, AssetManager and WporgOperations, each loaded where it is needed. Errors
+ * are answered through rest_error_response(), code, message and status travelling together;
+ * the upload routes answer in UploadWorkflow's own format. Loaded only for REST requests
+ * whose URI contains pblsh-admin.
+ */
 class AdminAPI {
     private static $instance = null;
 

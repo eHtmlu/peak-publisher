@@ -5,6 +5,13 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The admin page: registers the Peak Publisher menu entry, renders the mount point of the
+ * single-page app (#pblsh-app) and enqueues its scripts and styles — the JS files one by one
+ * in load order ($script_files; there is no bundler), with PblshData carrying the server's
+ * facts for the app. Loaded for admin requests only; everything the app does afterwards goes
+ * through AdminAPI.
+ */
 class AdminUI {
     private static $instance = null;
 

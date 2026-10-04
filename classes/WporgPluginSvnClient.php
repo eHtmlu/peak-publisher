@@ -7,6 +7,16 @@ defined('ABSPATH') || exit;
 require_once __DIR__ . '/WporgSvnException.php';
 
 
+/**
+ * The HTTP/WebDAV transport to the wordpress.org plugin SVN — the protocol spoken directly,
+ * no svn binary. Reads: directory listings, file contents, downloads streamed to disk, the
+ * log with its changed paths; single requests go through the WordPress HTTP API, batched
+ * reads through curl_multi. Writes: one commit transaction at a time — begin_commit(), the
+ * changes, then commit() or abort() — with file contents streamed by cURL. Plus the
+ * credential and access probes. The client knows the protocol, not what a commit means: what
+ * is written and when is WporgOperations' business (commit_files(), the only caller of the
+ * write methods). Failures arrive as WporgSvnException.
+ */
 class WporgPluginSvnClient {
     private const REPO_URL = 'https://plugins.svn.wordpress.org/';
 

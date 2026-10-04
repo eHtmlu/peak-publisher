@@ -5,6 +5,17 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The upload of a plugin version, from the uploaded ZIP to the published release; one instance
+ * per request, created by AdminAPI's upload routes. process() runs the phases the client
+ * steps through, finalize() publishes to the chosen target — self-hosted: the final ZIP and
+ * the plugin and release posts; wordpress.org: a deploy of the workspace through
+ * WporgOperations, no ZIP —, discard_upload() drops the upload. Between the requests an
+ * upload lives in its working directory under tmp/: the files and cache.json with the upload
+ * state $data, which finalize persists verbatim with the release as the record of what
+ * happened. The server enforces hard facts only; the checklist and its decisions are the
+ * client's.
+ */
 class UploadWorkflow {
     /**
      * Absolute path to the current upload temp directory (pblsh/tmp/<upload_id>/).

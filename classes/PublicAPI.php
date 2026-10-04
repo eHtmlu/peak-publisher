@@ -5,6 +5,14 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The REST API the client sites talk to (namespace pblsh/v1): update check, plugin info and
+ * ZIP download of the self-hosted plugins, and the generated geopattern icon. Everything but
+ * the icon passes check_permission() — the IP whitelist of the settings, open while the list
+ * is empty. A request without a version means the current release (resolve_current_release());
+ * a draft plugin serves nothing. The update check also records the installation. Loaded for
+ * every REST request that is not the admin API's.
+ */
 class PublicAPI {
     private static $instance = null;
 

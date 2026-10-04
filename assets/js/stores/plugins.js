@@ -150,15 +150,9 @@
                 var list = await window.Pblsh.API.getPlugins();
                 var items = Array.isArray(list) ? list : [];
                 dispatch.setList(items);
-                // Stale-while-revalidate: the list renders from the cache, then the server
-                // refreshes against the directory whatever is due — the figures once a day per
-                // marker, the stamp check every few minutes site-wide, which refreshes a changed
-                // plugin against SVN and answers its fresh row — the one trigger for every caller
-                // of fetchList. A failed automatic refresh leaves the cached state in place; the
-                // editor's Refresh link reports its own failures.
-                if (items.some(function(item) { return item.hosting_type === 'wporg'; })) {
-                    window.Pblsh.Controllers.Plugins.refreshWporg().catch(function() {});
-                }
+                // The directory refresh (refreshWporg) is not triggered here: admin.js asks for it
+                // whenever the list is shown, a plugin is opened or the browser tab comes back into
+                // view — every look at wordpress.org data, not every load of the list.
             } catch (e) {
                 dispatch.setError(e && e.message ? e.message : 'Failed to load plugins');
             } finally {

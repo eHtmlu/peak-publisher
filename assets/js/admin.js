@@ -48,6 +48,26 @@ document.addEventListener('DOMContentLoaded', function() {
         );
     };
 
+    // A plugin's tabs — its releases and its assets view — loaded behind what the stores hold;
+    // a failure is reported like any load.
+    const loadPluginTabs = (id) => {
+        window.Pblsh.Controllers.Releases.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
+        window.Pblsh.Controllers.Assets.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
+    };
+
+    // The directory refresh of every caller — the automatic check and the editor's Refresh link
+    // (force). The store patches the rows the server answers; a plugin that changed on
+    // wordpress.org also gets its tabs reloaded, so its header and its tabs show the same state.
+    // Which plugins that concerns is decided when the answer arrives: every one whose tabs the
+    // client holds or is loading by then, whichever view the request started from.
+    const refreshWporg = async (pluginId = null, options = {}) => {
+        const answer = await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId, options);
+        const releases = wp.data.select('pblsh/releases');
+        Object.keys(answer.plugins).map(Number)
+            .filter((id) => releases.hasLoadedForPlugin(id) || releases.isLoadingForPlugin(id))
+            .forEach(loadPluginTabs);
+    };
+
     // Main App Component
     const PeakPublisherApp = () => {
         // Block the entire app when permalinks are set to "Plain"
@@ -70,6 +90,24 @@ document.addEventListener('DOMContentLoaded', function() {
         const [isNew, setIsNew] = useState(false);
         const settingsDialogRef = useRef(null);
         const currentPlugin = useSelect((select) => currentPluginId ? select('pblsh/plugins').getById(currentPluginId) : null, [currentPluginId]);
+
+        // Every look at wordpress.org data asks the server whether the directory moved: showing
+        // the list, opening a plugin, the browser tab coming back into view on either. The server
+        // answers from its own clock (a stamp check at most every five minutes, site-wide), so in
+        // between this costs wordpress.org nothing. A failed check stays quiet — the cached state
+        // stands, the editor's Refresh link reports its own.
+        const showsWporgData = hasLoadedList && (view === 'list' || view === 'editor')
+            && plugins.some((plugin) => plugin.hosting_type === 'wporg');
+        const checkWporg = wp.element.useCallback(() => {
+            if (!showsWporgData || wp.data.select('pblsh/plugins').isRefreshingWporg()) return;
+            refreshWporg().catch(() => {});
+        }, [showsWporgData]);
+        useEffect(() => { checkWporg(); }, [view, currentPluginId, checkWporg]);
+        useEffect(() => {
+            const onVisible = () => { if (document.visibilityState === 'visible') checkWporg(); };
+            document.addEventListener('visibilitychange', onVisible);
+            return () => document.removeEventListener('visibilitychange', onVisible);
+        }, [checkWporg]);
 
         // Helpers for URL state
         const parseQuery = () => {
@@ -168,11 +206,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 setCurrentPluginId(id);
                 setQuery({ plugin: id, view: null, channel: null, import: null });
                 await window.Pblsh.Controllers.Plugins.fetchById(id);
-                // The releases and the assets view load behind what the store holds: the plugin
-                // may have changed outside this client since the last visit, and this is the
-                // moment the detail just checked wordpress.org anyway.
-                window.Pblsh.Controllers.Releases.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
-                window.Pblsh.Controllers.Assets.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
+                // The plugin may have changed outside this client since the last visit. What the
+                // server holds comes with this load; whether wordpress.org moved since is the
+                // directory check's to find out (checkWporg, asked by this very open) — its
+                // answer reloads the tabs again.
+                loadPluginTabs(id);
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -320,6 +358,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     pluginData: currentPlugin,
                     isNew,
                     refreshPlugin: refreshCurrentPlugin,
+                    refreshWporg,
                     onTogglePluginStatus: togglePluginStatus,
                     pendingPluginStatus: pendingPluginStatus,
                     onBack: handleCancel,

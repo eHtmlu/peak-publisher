@@ -1,5 +1,5 @@
 // PluginEditor Component (simplified overview + releases list)
-lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, onTogglePluginStatus, pendingPluginStatus, onBack, initialTab, onTabChange }) => {
+lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, refreshWporg, onTogglePluginStatus, pendingPluginStatus, onBack, initialTab, onTabChange }) => {
     const { __, sprintf } = wp.i18n;
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
@@ -57,14 +57,15 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         [pluginData && pluginData.id]
     );
 
-    // The manual refresh of the wordpress.org stats: force skips the daily cut-off. The
-    // patched data says the rest; a failure of the request itself is reported like the
-    // flip's.
+    // The manual refresh of the wordpress.org stats: force skips the daily cut-off and the
+    // check interval — a plugin that changed on wordpress.org comes back whole, tabs included
+    // (refreshWporg). The patched data says the rest; a failure of the request itself is
+    // reported like the flip's.
     const refreshStats = async () => {
         if (!pluginData || refreshingStats) return;
         setRefreshingStats(true);
         try {
-            await Pblsh.Controllers.Plugins.refreshWporg(pluginData.id, { force: true });
+            await refreshWporg(pluginData.id, { force: true });
         } catch (e) {
             alert((e?.message || __('Could not refresh the wordpress.org figures.', 'peak-publisher'))
                 + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));

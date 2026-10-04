@@ -442,6 +442,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             className: 'pblsh--tab-nav__tab' + (activeTab === 'assets' ? ' pblsh--tab-nav__tab--active' : ''),
             onClick: () => switchToTab('assets'),
         }, __('Assets', 'peak-publisher')),
+        // wordpress.org: when the plugin page shows the last commit — plugin-wide, so beside the tabs.
+        isWporg && pluginData && createElement(Pblsh.Components.ImportForecast, { forecast: pluginData.wporg_import, slug: pluginData.slug }),
     );
 
     return createElement('div', { className: 'pblsh--editor' },

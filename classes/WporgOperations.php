@@ -107,6 +107,8 @@ class WporgOperations {
             record_wporg_credentials_verdict($username, true);
             $revision = (int) ($commit['revision'] ?? 0);
             record_wporg_operation((int) $marker->ID, $operation, $username, $revision, $plan['details']);
+            // Every own commit changes when the plugin page shows it: the forecast follows the log entry.
+            refresh_wporg_import_forecast($marker, $client);
             if ($after_commit !== null) {
                 $after_commit($revision);
             }
@@ -462,6 +464,14 @@ class WporgOperations {
             }
             throw $e;
         }
+    }
+
+    /**
+     * The plugin's last $limit commits with their changed paths — the import forecast's input
+     * (includes/wporg_import_timing.php). Newest first; empty when the plugin does not exist.
+     */
+    public static function fetch_log_entries(string $wporg_slug, int $limit, ?WporgPluginSvnClient $client = null): array {
+        return ($client ?? self::svn_client())->get_log_entries(self::normalize_slug_or_throw($wporg_slug), $limit);
     }
 
     /**

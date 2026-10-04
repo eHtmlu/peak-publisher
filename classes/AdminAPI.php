@@ -251,6 +251,10 @@ class AdminAPI {
             if (!is_plugin_post($post)) {
                 return [];
             }
+            // A forecast still shown is recomputed on load: foreign commits may have moved it.
+            if (serialize_wporg_import($id, time()) !== null) {
+                refresh_wporg_import_forecast($post);
+            }
         }
 
         $releases_by_parent = fetch_releases_grouped_by_parent([(int) $post->ID]);
@@ -309,6 +313,8 @@ class AdminAPI {
                 'username' => $username,
                 'can_write' => $username !== null,
             ];
+            // When the plugin page shows the last commit, while the forecast lasts (includes/wporg_import_timing.php).
+            $out['wporg_import'] = $is_self_hosted ? null : serialize_wporg_import((int) $post->ID, time());
         }
 
         return $out;

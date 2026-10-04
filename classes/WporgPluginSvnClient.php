@@ -889,60 +889,95 @@ class WporgPluginSvnClient {
     }
 
     /**
-     * Returns the path's oldest log entry (creation commit), or null when it cannot
-     * be determined. wordpress.org creates every plugin repository with the fixed
-     * message "Adding {title} by {user_login}." — their own SVN watcher parses this
-     * format, which makes it a reliable ownership hint for freshly approved plugins.
+     * The path's log as items — a log REPORT from the node's last-changed revision downward
+     * (newest first) or from revision 0 upward, $limit items, with the changed paths when
+     * asked: revision, SVN's date string, author, message, and the paths with their action
+     * A|M|D|R. The one place that builds and reads a log report. Empty when the node does not
+     * exist.
      *
-     * @return array{revision:string, date:string, message:string}|null date is ISO 8601.
+     * @return array<int, array{revision:int, date:string, author:string, message:string, paths:array<string, string>}>
+     * @throws WporgSvnException svn_read_failed for an unexpected log response; transport errors as they are
      */
-    public function get_initial_log_entry(string $path): ?array {
+    private function log_items(string $path, int $limit, bool $newest_first, bool $with_paths): array {
         $path = trim($path, '/');
-        if ($path === '') {
-            return null;
+        if ($path === '' || $limit < 1) {
+            throw new \RuntimeException('invalid_svn_log_request');
         }
         $root_path = $path . '/';
+        // The log report needs numeric revisions — the node's last-changed revision stands in for HEAD.
+        $head = $this->first_prop((string) ($this->propfind($root_path, 0)['body'] ?? ''), 'version-name');
+        if ($head === '' || !ctype_digit($head)) {
+            return [];
+        }
 
-        try {
-            // The log report needs a numeric end revision — the node's last-changed revision.
-            $lookup = $this->propfind($root_path, 0);
-            $lookup_status = (int) ($lookup['status'] ?? 0);
-            if (!$this->is_success_status($lookup_status) && $lookup_status !== 207) {
-                return null;
-            }
-            $head = $this->first_prop((string) ($lookup['body'] ?? ''), 'version-name');
-            if ($head === '' || !ctype_digit($head)) {
-                return null;
-            }
+        [ $start, $end ] = $newest_first ? [ $head, '0' ] : [ '0', $head ];
+        $body = '<?xml version="1.0" encoding="utf-8"?>' .
+            '<S:log-report xmlns:S="svn:">' .
+            '<S:start-revision>' . $start . '</S:start-revision>' .
+            '<S:end-revision>' . $end . '</S:end-revision>' .
+            '<S:limit>' . $limit . '</S:limit>' .
+            ($with_paths ? '<S:discover-changed-paths/>' : '') .
+            '<S:path></S:path>' .
+            '</S:log-report>';
+        $report = $this->request('REPORT', $root_path, [ 'Content-Type' => 'text/xml; charset=utf-8' ], $body);
+        if (!$this->is_success_status((int) ($report['status'] ?? 0))) {
+            throw new WporgSvnException('svn_read_failed', __('wordpress.org SVN returned an unexpected log response.', 'peak-publisher'), 502);
+        }
 
-            $body = '<?xml version="1.0" encoding="utf-8"?>' .
-                '<S:log-report xmlns:S="svn:">' .
-                '<S:start-revision>0</S:start-revision>' .
-                '<S:end-revision>' . $head . '</S:end-revision>' .
-                '<S:limit>1</S:limit>' .
-                '<S:path></S:path>' .
-                '</S:log-report>';
-            $report = $this->request('REPORT', $root_path, [
-                'Content-Type' => 'text/xml; charset=utf-8',
-            ], $body);
-            if (!$this->is_success_status((int) ($report['status'] ?? 0))) {
-                return null;
+        $items = [];
+        preg_match_all('~<[^>]*:?log-item>(.*?)</[^>]*:?log-item>~s', (string) ($report['body'] ?? ''), $matches);
+        foreach ($matches[1] as $item) {
+            $paths = [];
+            preg_match_all('~<(?:[A-Za-z]+:)?(added|modified|deleted|replaced)-path[^>]*>([^<]*)</(?:[A-Za-z]+:)?\1-path>~', $item, $changes, PREG_SET_ORDER);
+            foreach ($changes as $change) {
+                $paths[html_entity_decode($change[2], ENT_QUOTES | ENT_XML1)] = [ 'added' => 'A', 'modified' => 'M', 'deleted' => 'D', 'replaced' => 'R' ][$change[1]];
             }
-
-            $xml = (string) ($report['body'] ?? '');
-            $message = $this->first_prop($xml, 'comment');
-            if ($message === '') {
-                return null;
-            }
-
-            return [
-                'revision' => $this->first_prop($xml, 'version-name'),
-                'date' => $this->first_prop($xml, 'date'),
-                'message' => $message,
+            $items[] = [
+                'revision' => (int) $this->first_prop($item, 'version-name'),
+                'date' => $this->first_prop($item, 'date'),
+                'author' => $this->first_prop($item, 'creator-displayname'),
+                'message' => $this->first_prop($item, 'comment'),
+                'paths' => $paths,
             ];
+        }
+        return $items;
+    }
+
+    /**
+     * The path's oldest log entry (the creation commit), or null when it cannot be read.
+     * wordpress.org creates every plugin repository with the fixed message "Adding {title} by
+     * {user_login}." — their own SVN watcher parses this format, which makes it a reliable
+     * ownership hint for freshly approved plugins.
+     *
+     * @return array{revision:int, date:string, message:string}|null date is SVN's ISO 8601 string
+     */
+    public function get_initial_log_entry(string $path): ?array {
+        try {
+            $first = $this->log_items($path, 1, false, false)[0] ?? null;
         } catch (\Throwable $e) {
             return null;
         }
+        if ($first === null || $first['message'] === '') {
+            return null;
+        }
+        return [ 'revision' => $first['revision'], 'date' => $first['date'], 'message' => $first['message'] ];
+    }
+
+    /**
+     * The path's last $limit log entries with their changed paths — what wordpress.org's SVN
+     * watcher reads to schedule imports. Paths are repository-absolute
+     * (/slug/trunk/readme.txt), the action A|M|D|R. Newest first; empty when the node does
+     * not exist.
+     *
+     * @return array<int, array{revision:int, time:int, paths:array<string, string>}>
+     * @throws WporgSvnException svn_read_failed for an unexpected log response; transport errors as they are
+     */
+    public function get_log_entries(string $path, int $limit): array {
+        return array_map(static fn(array $item): array => [
+            'revision' => $item['revision'],
+            'time' => (int) strtotime($item['date']),
+            'paths' => $item['paths'],
+        ], $this->log_items($path, $limit, true, true));
     }
 
     /**
@@ -954,52 +989,18 @@ class WporgPluginSvnClient {
      * @return string[]|null
      */
     public function get_recent_log_authors(string $path, int $limit = 200): ?array {
-        $path = trim($path, '/');
-        if ($path === '' || $limit < 1) {
-            return null;
-        }
-        $root_path = $path . '/';
-
         try {
-            // The log report needs a numeric start revision — the node's last-changed revision.
-            $lookup = $this->propfind($root_path, 0);
-            $lookup_status = (int) ($lookup['status'] ?? 0);
-            if (!$this->is_success_status($lookup_status) && $lookup_status !== 207) {
-                return null;
-            }
-            $head = $this->first_prop((string) ($lookup['body'] ?? ''), 'version-name');
-            if ($head === '' || !ctype_digit($head)) {
-                return null;
-            }
-
-            $body = '<?xml version="1.0" encoding="utf-8"?>' .
-                '<S:log-report xmlns:S="svn:">' .
-                '<S:start-revision>' . $head . '</S:start-revision>' .
-                '<S:end-revision>0</S:end-revision>' .
-                '<S:limit>' . (int) $limit . '</S:limit>' .
-                '<S:path></S:path>' .
-                '</S:log-report>';
-            $report = $this->request('REPORT', $root_path, [
-                'Content-Type' => 'text/xml; charset=utf-8',
-            ], $body);
-            if (!$this->is_success_status((int) ($report['status'] ?? 0))) {
-                return null;
-            }
-
-            if (!preg_match_all('~<[^>]*:?creator-displayname[^>]*>(.*?)</[^>]*:?creator-displayname>~s', (string) ($report['body'] ?? ''), $matches)) {
-                return null;
-            }
-            $authors = [];
-            foreach ($matches[1] as $author) {
-                $author = trim(html_entity_decode(strip_tags($author), ENT_QUOTES | ENT_XML1));
-                if ($author !== '') {
-                    $authors[$author] = true;
-                }
-            }
-            return array_keys($authors);
+            $items = $this->log_items($path, $limit, true, false);
         } catch (\Throwable $e) {
             return null;
         }
+        $authors = [];
+        foreach ($items as $item) {
+            if ($item['author'] !== '') {
+                $authors[$item['author']] = true;
+            }
+        }
+        return $authors === [] ? null : array_keys($authors);
     }
 
     private function options_activity_collection(string $path): array {

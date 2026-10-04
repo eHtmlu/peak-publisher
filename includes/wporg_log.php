@@ -11,9 +11,10 @@ defined('ABSPATH') || exit;
  * did it, with which wordpress.org account, in which revision, with the operation's own
  * details. The WordPress actor is not in the public SVN log and only recorded here. Newest
  * first and unbounded — a record is never truncated silently; flips and asset commits are
- * rare. Written by WporgOperations::commit_files() after a successful commit; the reader
- * for the editor comes later. The upload state stays the record of a release, this is the
- * record of the plugin.
+ * rare. Written by WporgOperations::commit_files() after a successful commit; read by the
+ * import forecast (wporg_operation_revisions(): the Stable tag flips); the reader for the
+ * editor comes later. The upload state stays the record of a release, this is the record of
+ * the plugin.
  */
 const PBLSH_WPORG_OPERATIONS_META = '_pblsh_wporg_operations';
 
@@ -31,4 +32,23 @@ function record_wporg_operation(int $marker_id, string $operation, string $usern
         'details' => $details,
     ]);
     update_post_meta($marker_id, PBLSH_WPORG_OPERATIONS_META, $log);
+}
+
+
+/**
+ * The revisions of the marker's own commits of one operation, newest first — the import
+ * forecast recognizes a Stable tag flip only by them.
+ *
+ * @return int[]
+ */
+function wporg_operation_revisions(int $marker_id, string $operation): array {
+    $log = get_post_meta($marker_id, PBLSH_WPORG_OPERATIONS_META, true);
+    $revisions = [];
+    foreach (is_array($log) ? $log : [] as $entry) {
+        // Re-validation when reading back from persistence: only well-formed entries count.
+        if (is_array($entry) && ($entry['operation'] ?? null) === $operation && (int) ($entry['revision'] ?? 0) > 0) {
+            $revisions[] = (int) $entry['revision'];
+        }
+    }
+    return $revisions;
 }

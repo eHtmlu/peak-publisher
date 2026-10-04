@@ -31,7 +31,8 @@ code in this repository creates today:
   `_pblsh_wporg_account_username`, `_pblsh_wporg_operations` (the operations log: every SVN
   write Peak Publisher committed, newest first, unbounded — `{operation, at, user {id, login},
   username, revision, details}`), `_pblsh_wporg_stats` (daily cache of the wordpress.org info
-  API figures, regenerable, not declared); release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
+  API figures, regenerable, not declared), `_pblsh_wporg_import` (the import forecast
+  `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
   wporg `_pblsh_upload_state` (the deploy's upload state).
 - **Options:** `pblsh_settings` (settings incl. `wporg_accounts` with AES-256-GCM encrypted
   passwords and verdict stamps), `pblsh_secret_salt`, `pblsh_encryption_context_id`,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pblsh\Tests\Unit;
 
 use function Pblsh\record_wporg_operation;
+use function Pblsh\wporg_operation_revisions;
 
 use const Pblsh\PBLSH_WPORG_OPERATIONS_META;
 
@@ -38,5 +39,16 @@ final class WporgOperationsLogTest extends TestCase {
         record_wporg_operation($marker->ID, 'delete_tag', 'wporguser', 5, [ 'version' => '1.0.0' ]);
 
         self::assertCount(1, get_post_meta($marker->ID, PBLSH_WPORG_OPERATIONS_META, true));
+    }
+
+    public function test_the_revisions_of_one_operation_are_read_newest_first(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
+        record_wporg_operation($marker->ID, 'stable_tag', 'wporguser', 5, []);
+        record_wporg_operation($marker->ID, 'deploy', 'wporguser', 6, []);
+        record_wporg_operation($marker->ID, 'stable_tag', 'wporguser', 7, []);
+
+        self::assertSame([ 7, 5 ], wporg_operation_revisions($marker->ID, 'stable_tag'));
+        self::assertSame([], wporg_operation_revisions($marker->ID, 'assets'));
+        self::assertSame([], wporg_operation_revisions($this->create_plugin('pblsh_wporg_plugin', 'other')->ID, 'stable_tag'));
     }
 }

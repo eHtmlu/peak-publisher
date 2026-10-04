@@ -15,6 +15,25 @@ require_once __DIR__ . '/WporgOperations.php';
  */
 class WporgAssetSync {
 
+    /**
+     * Whether the mirror needs a pull: it is behind SVN (its anchor is not the revision of
+     * assets/, 0 when there is no directory) or behind itself (a file the manifest names is
+     * gone from the disk — a move without the uploads, a restore). The refresh asks this on
+     * every read, so a lost file is back with the next one.
+     */
+    public function needs_pull(\WP_Post $marker, int $assets_revision): bool {
+        if (get_wporg_assets_state((int) $marker->ID)['revision'] !== $assets_revision) {
+            return true;
+        }
+        $dir = get_plugin_assets_dir($marker);
+        foreach (read_asset_manifest((int) $marker->ID) as $entry) {
+            if (!file_exists($dir . '/' . $entry['filename'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Pulls under the plugin's lock; false when a commit holds it (the mirror stays as it is). */
     public function pull(\WP_Post $marker): bool {
         raise_wporg_time_limit();

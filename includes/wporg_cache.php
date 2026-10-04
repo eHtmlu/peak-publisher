@@ -37,11 +37,13 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
 
     // The assets mirror keeps its own anchor — the revision of assets/ it holds (0 = none) —
     // so a pull that was skipped (a commit held the lock) or failed is caught up by the next
-    // read, fresh cache or not. Warn-only like the trunk readme.
-    if (get_wporg_assets_state((int) $plugin_post->ID)['revision'] !== ($revisions['children']['assets'] ?? 0)) {
+    // read, fresh cache or not; so is a mirror file the disk lost. Warn-only like the trunk
+    // readme.
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
+    $assets = new WporgAssetSync();
+    if ($assets->needs_pull($plugin_post, (int) ($revisions['children']['assets'] ?? 0))) {
         try {
-            require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
-            (new WporgAssetSync())->pull($plugin_post);
+            $assets->pull($plugin_post);
         } catch (\Throwable $e) {
             wporg_log_cache_error($plugin_post, 'assets', $e);
         }

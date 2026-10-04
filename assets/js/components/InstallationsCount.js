@@ -9,11 +9,11 @@ const InstallationsCount = ({ plugin }) => {
     const { useSelect } = wp.data;
     const { Spinner } = wp.components;
     const { __ } = wp.i18n;
-    const { getInstallationsCell } = Pblsh.InstallationsUtils;
+    const { getInstallationsCell, isFirstFetchRunning } = Pblsh.InstallationsUtils;
     const { Figure } = Pblsh.Components;
 
     const refreshing = useSelect((select) => select('pblsh/plugins').isRefreshingWporg(), []);
-    if (refreshing && plugin.hosting_type === 'wporg' && plugin.installations.state === 'never') {
+    if (isFirstFetchRunning(plugin, refreshing)) {
         return createElement(Figure, { title: __('Fetching from wordpress.org…', 'peak-publisher') },
             createElement(Spinner, { className: 'pblsh--figure__spinner' }),
         );

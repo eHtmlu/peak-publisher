@@ -42,6 +42,14 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
         return sprintf(__('wordpress.org could not be reached %1$s: %2$s', 'peak-publisher'), formatRelativeTime(lastError.at), lastError.message);
     }
 
+    // Whether a wordpress.org plugin's first figures are on their way: a directory refresh
+    // runs and the server has never tried this plugin — then its figures are due. Any other
+    // refresh may leave the plugin untouched, so it must not read as "fetching".
+    function isFirstFetchRunning(plugin, refreshing) {
+        return refreshing && plugin.hosting_type === 'wporg'
+            && plugin.installations.state === 'never' && !plugin.installations.attempted_at;
+    }
+
     // The cell of the list and the editor header, one vocabulary for both channels — the
     // row shows the channel, the cell says what the figure is. A failed fetch does not
     // touch the cell: the figures keep their last state, the editor's header row tells.
@@ -97,5 +105,5 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
         };
     }
 
-    return { formatWporgActiveInstalls, getInstallationsCell, getWporgClosedFact, getWporgClosedNotice, getLastErrorText, getDownloads, getRating };
+    return { formatWporgActiveInstalls, isFirstFetchRunning, getInstallationsCell, getWporgClosedFact, getWporgClosedNotice, getLastErrorText, getDownloads, getRating };
 })());

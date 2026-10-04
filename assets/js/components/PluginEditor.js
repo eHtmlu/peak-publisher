@@ -6,7 +6,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { Tooltip, Button, Spinner } = wp.components;
     const { getSvgIcon, formatRelativeTime, getTimeTooltipProps, getPluginStatus } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
-    const { getLastErrorText, getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
+    const { getLastErrorText, getDownloads, getRating, getWporgClosedNotice, isFirstFetchRunning } = Pblsh.InstallationsUtils;
     const { NoticeBox, CurrentVersion, InstallationsCount, Figure } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
@@ -86,7 +86,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         if (inst.state === 'never' && inst.last_error) {
             fragments.push(createElement(Tooltip, { text: getLastErrorText(inst.last_error) },
                 createElement('span', { tabIndex: 0 }, __('wordpress.org could not be reached from this server', 'peak-publisher'))));
-        } else if (inst.state === 'never' && isRefreshingAnyStats) {
+        } else if (isFirstFetchRunning(pluginData, isRefreshingAnyStats)) {
             fragments.push(__('Fetching stats…', 'peak-publisher'));
             refreshable = false;
         } else {

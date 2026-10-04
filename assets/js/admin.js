@@ -300,6 +300,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 await window.Pblsh.Controllers.Plugins.fetchById(currentPluginId);
                 await window.Pblsh.Controllers.Plugins.fetchList();
                 await window.Pblsh.Controllers.Releases.fetchForPlugin(currentPluginId);
+                // The assets view follows the plugin (captions, the mirror after a pull) once the tab was opened.
+                if (window.Pblsh.Controllers.Assets.hasLoadedForPlugin(currentPluginId)) {
+                    await window.Pblsh.Controllers.Assets.fetchForPlugin(currentPluginId);
+                }
             } catch (error) {
                 showAlert(error.message, 'error');
             }

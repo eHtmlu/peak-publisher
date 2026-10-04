@@ -1,13 +1,16 @@
 // PluginAssets Component - the assets tab of the plugin editor: icons, banners and
-// screenshots in fixed slots, uploaded, replaced, deleted and reordered from here. Owns
-// its state (the manifest, the upload in progress, the drag); the plugin comes with
-// pluginData, a changed icon reaches the header and the list through refreshPlugin. A
+// screenshots in fixed slots, uploaded, replaced, deleted and reordered from here. The view
+// lives in the store pblsh/assets (loaded when the tab first opens, reloaded with the plugin,
+// kept across tab switches), the upload in progress and the drag are the component's own;
+// the plugin comes with pluginData, a changed icon reaches the header and the list through
+// refreshPlugin. A
 // wordpress.org plugin edits a working copy over its mirror of SVN's assets/: the bar says
 // where the mirror stands and commits the changes as one, every box shows what its change
 // does, a conflict box lets the user decide, and wordpress.org's state can be shown alone.
 lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin }) => {
     const { __, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
+    const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Spinner } = wp.components;
     const { getSvgIcon, getTimeTooltipProps } = Pblsh.Utils;
     const {
@@ -22,8 +25,10 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const account = isWporg ? pluginData.wporg_account : null;
     const canCommit = !!(account && account.can_write);
 
-    const [assets, setAssets]               = useState(null);   // null = not yet loaded
-    const [assetsLoading, setAssetsLoading] = useState(false);
+    const pluginId = pluginData ? pluginData.id : null;
+    const assets = useSelect((select) => pluginId ? select('pblsh/assets').getForPlugin(pluginId) : null, [pluginId]);   // null = not yet loaded
+    const assetsLoading = useSelect((select) => pluginId ? select('pblsh/assets').isLoadingForPlugin(pluginId) : false, [pluginId]);
+    const setAssets = (view) => wp.data.dispatch('pblsh/assets').setView(pluginId, view);
     const [busy, setBusy]                   = useState(null);   // 'committing' | 'working' | null — a working-copy request in flight
     const [showWporgState, setShowWporgState] = useState(false); // wordpress.org's state alone, read-only
     const [notice, setNotice]               = useState(null);   // the last commit's outcome
@@ -34,22 +39,12 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const [dragOverN, setDragOverN] = useState(null);     // slot N being hovered during drag
     const dragOverTimeout = useRef(null);                   // auto-clear drag-over when cursor leaves
 
-    // The tab mounts when it is opened (also via deep link) — load once per plugin.
-    useEffect(() => { fetchAssets(); }, [pluginData && pluginData.id]);
-
-    const fetchAssets = async () => {
-        if (!pluginData || !pluginData.id) return;
-        setAssetsLoading(true);
-        try {
-            const data = await Pblsh.API.getPluginAssets(pluginData.id);
-            setAssets(data);
-        } catch (e) {
-            // Non-fatal: just show empty asset state
-            setAssets({});
-        } finally {
-            setAssetsLoading(false);
-        }
-    };
+    // The tab mounts when it is opened (also via deep link): the view is loaded once; later
+    // visits find it in the store, and refreshPlugin reloads it with the plugin.
+    useEffect(() => {
+        if (!pluginId || assets) return;
+        Pblsh.Controllers.Assets.fetchForPlugin(pluginId).catch((e) => reportError(e, __('Loading the assets failed.', 'peak-publisher')));
+    }, [pluginId]);
 
     // Every write answers the fresh view — no second request. A self-hosted write may change
     // the icon of header and list; a wordpress.org change does so only once it is committed.

@@ -69,6 +69,7 @@ class AdminUI {
             'api.js',
             'stores/plugins.js',
             'stores/releases.js',
+            'stores/assets.js',
             'stores/settings.js',
             'components/Checklist.js',
             'components/FaqLink.js',

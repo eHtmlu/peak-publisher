@@ -322,23 +322,16 @@ class AdminAPI {
     }
 
     /**
-     * Get releases list for a plugin.
+     * The releases of a plugin, as stored. No check against wordpress.org of its own: the
+     * client requests the list only right after the plugin detail (get_plugin()), which has
+     * just refreshed the marker cache — a second check would cost wordpress.org a request
+     * for nothing.
      */
     public function get_plugin_releases(\WP_REST_Request $request): array|\WP_Error {
         $id = (int) $request->get_param('id');
         $post = get_post($id);
         if (!is_plugin_post($post)) {
             return [];
-        }
-        if (is_wporg_plugin($post)) {
-            $refresh_error = $this->refresh_wporg_plugin_cache($post);
-            if ($refresh_error instanceof \WP_Error) {
-                return $refresh_error;
-            }
-            $post = get_post($id);
-            if (!is_plugin_post($post)) {
-                return [];
-            }
         }
         $is_wporg = is_wporg_plugin($post);
 

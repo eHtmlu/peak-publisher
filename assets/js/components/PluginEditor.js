@@ -29,9 +29,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const [flippingReleaseId, setFlippingReleaseId] = useState(null);
     const [flipNotice, setFlipNotice] = useState(null);
     useEffect(() => { setFlipNotice(null); }, [pluginData && pluginData.id]);
-    // The manual refresh from wordpress.org: while it runs, the three figures show a spinner.
-    // Its outcome shows through the data — the status line reads "just now", a check that
-    // failed stands beside it, and what changed on wordpress.org is told in the notice.
+    // The manual refresh from wordpress.org: while it runs, its link is busy and the status
+    // line says so — for everything it brings, figures, releases and assets alike; what is
+    // shown stays until the answer replaces it. Its outcome shows through the data: the status
+    // line reads "just now", a check that failed stands beside it, and what changed on
+    // wordpress.org is told in the notice.
     const [refreshingWporg, setRefreshingWporg] = useState(false);
     const wporgChanges = useSelect(
         (select) => pluginData && pluginData.id ? select('pblsh/plugins').getWporgChanges(pluginData.id) : null,
@@ -79,10 +81,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
 
     const renderInfoBox = () => {
         // The wordpress.org dashboard figures beside Installations; each names its source
-        // and its age in the tooltip. During the manual refresh a figure gives way to a
-        // spinner; the automatic check keeps showing the cached values.
+        // and its age in the tooltip.
         const wporgFigures = isWporg ? { downloads: getDownloads(pluginData), rating: getRating(pluginData) } : null;
-        const wporgFigure = (figure) => refreshingWporg ? createElement(Spinner, { className: 'pblsh--plugin-grid__spinner' }) : figure;
         return [
                 createElement('div', { className: 'pblsh--card pblsh--card--plugin-info' },
                 createElement('div', { className: 'pblsh--plugin-info__row' },
@@ -162,12 +162,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             // the setting defaults to on); wordpress.org figures are always there.
                             pluginData && pluginData.installations.state !== 'disabled' && createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, wporgFigure(createElement(InstallationsCount, { plugin: pluginData }))),
+                                createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(InstallationsCount, { plugin: pluginData })),
                             ),
                             wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Downloads', 'peak-publisher')),
                                 createElement('div', { className: 'pblsh--plugin-grid__value' },
-                                    wporgFigure(createElement(Figure, { title: wporgFigures.downloads.title }, wporgFigures.downloads.text)),
+                                    createElement(Figure, { title: wporgFigures.downloads.title }, wporgFigures.downloads.text),
                                 ),
                             ),
                             // Stars with the number of ratings beside them, the way the plugin installer
@@ -175,14 +175,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
                                 createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Rating', 'peak-publisher')),
                                 createElement('div', { className: 'pblsh--plugin-grid__value' },
-                                    wporgFigure(createElement(Figure, { title: wporgFigures.rating.title },
+                                    createElement(Figure, { title: wporgFigures.rating.title },
                                         wporgFigures.rating.stars
                                             ? createElement('span', { className: 'pblsh--rating-stars', 'aria-hidden': 'true' },
                                                 ...wporgFigures.rating.stars.map((icon, index) => createElement('span', { key: index, className: 'pblsh--rating-stars__star' }, getSvgIcon(icon, { size: 32 }))),
                                                 createElement('span', { className: 'pblsh--rating-stars__count' }, '(' + wporgFigures.rating.count + ')'),
                                             )
                                             : wporgFigures.rating.text,
-                                    )),
+                                    ),
                                 ),
                             ),
                         )

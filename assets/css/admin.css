@@ -2513,12 +2513,6 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     vertical-align: middle;
 }
 
-/* The wordpress.org figures while the manual stats refresh runs */
-.pblsh--plugin-grid__value .pblsh--plugin-grid__spinner.components-spinner {
-    margin: 0;
-    vertical-align: middle;
-}
-
 /* Rating in the editor header, inside a Figure: five stars in half steps like the
    directory shows them (getRating() in utils-installations.js). The icons carry
    whitespace of their own, so the stars overlap their boxes slightly. */

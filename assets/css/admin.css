@@ -2187,7 +2187,8 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 .pblsh--list {
     margin: 1.25rem 0; /* 20px */
 }
-/* The freshness of the wordpress.org rows, right-aligned over the table it speaks for */
+/* The freshness of the wordpress.org rows while a check failed, right-aligned over the table
+   it speaks for */
 .pblsh--list__check {
     text-align: right;
 }

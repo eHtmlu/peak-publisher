@@ -1,9 +1,10 @@
 // WporgCheckStatus Component - how fresh the wordpress.org data on screen is: when the
 // plugins it speaks for were last brought in step with wordpress.org (the oldest of them),
 // "Checking wordpress.org…" while a refresh runs, and the last failed check with its reason
-// in the tooltip. Above the plugin list for every wordpress.org plugin, in the editor header
-// for the one — there with the Refresh link, which the caller passes as the child. Muted
-// fragments, ' · ' separated, no period. Wording from Pblsh.WporgCheckUtils.
+// in the tooltip. In the editor header for its plugin, with the Refresh link the caller
+// passes as the child; above the plugin list for every wordpress.org plugin, where the list
+// shows it only while a check failed. Muted fragments, ' · ' separated, no period. Wording
+// from Pblsh.WporgCheckUtils.
 const WporgCheckStatus = ({ plugins, children = null }) => {
     const { createElement, createInterpolateElement, useState, useEffect } = wp.element;
     const { useSelect } = wp.data;

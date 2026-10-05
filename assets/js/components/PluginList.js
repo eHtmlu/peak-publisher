@@ -6,6 +6,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
     const { showAlert, getSvgIcon, getPluginStatus } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus } = Pblsh.Components;
+    const { getCheck } = Pblsh.WporgCheckUtils;
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
@@ -39,6 +40,10 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     // on, wordpress.org always (its figure is public); the setting is not read here.
     const showInstallations = plugins.some((plugin) => plugin.installations.state !== 'disabled');
     const wporgPlugins = plugins.filter((plugin) => plugin.hosting_type === 'wporg');
+    // The list says nothing about its checks while they pass — its rows are at most one
+    // interval old, and a plugin's own status line is in its editor. A check that failed is
+    // said here: the rows would age without a word.
+    const checkFailed = wporgPlugins.length > 0 && !!getCheck(wporgPlugins).error;
 
     return createElement('div', { className: 'pblsh--list' },
         !hasLoadedList
@@ -49,8 +54,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
         plugins.length === 0 
             ? createElement('p', { className: 'pblsh--no-plugins' }, __('No plugins created yet.', 'peak-publisher'))
             : createElement(wp.element.Fragment, null,
-              // How fresh the wordpress.org rows are — the oldest check among them.
-              wporgPlugins.length > 0 && createElement('div', { className: 'pblsh--list__check' },
+              checkFailed && createElement('div', { className: 'pblsh--list__check' },
                 createElement(WporgCheckStatus, { plugins: wporgPlugins }),
               ),
               createElement('div', { className: 'pblsh--table-container' },

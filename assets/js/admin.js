@@ -60,13 +60,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // store takes the rows the server answers; a plugin that moved also gets its tabs reloaded,
     // so its header and its tabs show the same state. Which plugins that concerns is decided
     // when the answer arrives: every one whose tabs the client holds or is loading by then,
-    // whichever view the request started from.
+    // whichever view the request started from. A wordpress.org plugin added or removed
+    // elsewhere — another tab, another admin — is no row's news: the list is loaded anew.
     const refreshWporg = async (pluginId = null) => {
         const answer = await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId);
         const releases = wp.data.select('pblsh/releases');
         Object.keys(answer.plugins).map(Number)
             .filter((id) => releases.hasLoadedForPlugin(id) || releases.isLoadingForPlugin(id))
             .forEach(loadPluginTabs);
+        if (answer.list_outdated) {
+            window.Pblsh.Controllers.Plugins.fetchList().catch((e) => showAlert(e.message, 'error'));
+        }
     };
 
     // Main App Component
@@ -235,6 +239,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 setCurrentPluginId(id);
                 setQuery({ plugin: id, view: null, channel: null, import: null });
                 await window.Pblsh.Controllers.Plugins.fetchById(id);
+                // Not there — removed elsewhere, or a link to a plugin that is gone: nothing to
+                // load, the effect on the open plugin says so and returns to the list.
+                if (!wp.data.select('pblsh/plugins').getById(id)) return;
                 // The plugin may have changed outside this client since the last visit. What the
                 // server holds comes with this load; whether wordpress.org moved since is the
                 // directory check's to find out (checkWporg, asked by this very open) — its
@@ -267,6 +274,15 @@ document.addEventListener('DOMContentLoaded', function() {
             setActiveUploadContext({});
             setQuery({ plugin: null, view: null, tab: null, channel: null, import: null });
         };
+
+        // The open plugin is gone from the list — removed elsewhere while it stood open, or a
+        // link to one that no longer exists: said once, then back to the list.
+        useEffect(() => {
+            if (view === 'editor' && currentPluginId && hasLoadedList && !currentPlugin) {
+                showAlert(__('This plugin no longer exists. It was removed in the meantime.', 'peak-publisher'), 'warning');
+                handleCancel();
+            }
+        }, [view, currentPluginId, currentPlugin, hasLoadedList]);
 
 
         const openSettings = () => {
@@ -401,7 +417,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         createElement('p', null, createElement(Button, { isLink: true, onClick: loadApp }, __('Try again', 'peak-publisher'))),
                     );
                 }
-                if (isLoading || !hasLoadedList) {
+                // A spinner only until the first list is in; a reload keeps the list it replaces.
+                if (!hasLoadedList) {
                     return createElement('div', { className: 'pblsh--loading' },
                         createElement('div', { className: 'pblsh--loading__spinner' })
                     );

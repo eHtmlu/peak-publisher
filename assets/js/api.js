@@ -59,7 +59,8 @@ lodash.set(window, 'Pblsh.API', {
     },
     // Bring the wordpress.org plugins up to date: every marker with whatever is due, or one —
     // the editor's Refresh, straight against SVN. `known` are the tokens of the rows the client
-    // holds ({ [id]: wporg_token }). Answers { stats, plugins, changes, next_check_in }.
+    // holds ({ [id]: wporg_token }). Answers { stats, plugins, changes, next_check_in,
+    // list_outdated }.
     refreshWporg: async (pluginId = null, known = {}) => {
         return await window.Pblsh.API.request('admin/wporg/refresh', {
             method: 'POST',

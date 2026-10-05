@@ -605,7 +605,9 @@ class AdminAPI {
      * scope —, `plugins` — the list row of every marker that moved underneath the client's
      * copy, whoever moved it: the client sends the tokens of its rows as `known`
      * (wporg_sync_token()) —, `changes` — what this request's SVN refreshes changed in what
-     * the editor shows — and `next_check_in`, the seconds until the stamp check is due again.
+     * the editor shows —, `next_check_in`, the seconds until the stamp check is due again, and
+     * `list_outdated`: the client's list names a marker that is gone or misses one, removed or
+     * added elsewhere — no row can say that, the client reloads its list.
      */
     public function refresh_wporg_rest(\WP_REST_Request $request) {
         $params = $request->get_json_params();
@@ -648,6 +650,11 @@ class AdminAPI {
         foreach ($outdated as $marker) {
             $plugins[$marker->ID] = $this->serialize_plugin_post($marker, false, $releases_by_parent[(int) $marker->ID] ?? []);
         }
+        // The automatic look names every wordpress.org plugin the client holds: the two sets
+        // are compared as they are.
+        $known_ids = array_map('intval', array_keys($known));
+        $marker_ids = array_map('intval', wp_list_pluck($markers, 'ID'));
+        $list_outdated = $plugin_id === null && (array_diff($known_ids, $marker_ids) !== [] || array_diff($marker_ids, $known_ids) !== []);
         return [
             'status' => 'ok',
             // Objects even when empty, so the client can always iterate their keys.
@@ -655,6 +662,7 @@ class AdminAPI {
             'plugins' => (object) $plugins,
             'changes' => (object) $changes,
             'next_check_in' => wporg_directory_next_check_in(time()),
+            'list_outdated' => $list_outdated,
         ];
     }
 

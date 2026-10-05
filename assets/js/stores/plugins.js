@@ -13,6 +13,7 @@
         error: null,
         lastFetch: 0,
         isRefreshingWporg: false,
+        nextWporgCheckAt: 0,   // when to ask the server again (this client's clock, ms); 0 = not asked yet
     };
     var actions = {
         setList: function(items) {
@@ -36,9 +37,12 @@
         // The answer of a directory refresh in one step: the figures and check of every marker
         // (stats) and the fresh row of each that moved (plugins) merge into the plugins the
         // store holds — unknown ids are ignored, an answer may name a plugin deleted
-        // meanwhile.
-        applyWporgRefresh: function(answer) {
-            return { type: 'APPLY_WPORG_REFRESH', answer: answer };
+        // meanwhile —, and the next check is due when the server said.
+        applyWporgRefresh: function(answer, now) {
+            return { type: 'APPLY_WPORG_REFRESH', answer: answer, now: now };
+        },
+        setNextWporgCheckAt: function(at) {
+            return { type: 'SET_NEXT_WPORG_CHECK_AT', at: at };
         },
         setRefreshingWporg: function(flag) {
             return { type: 'SET_REFRESHING_WPORG_STATS', flag: !!flag };
@@ -91,8 +95,13 @@
                         if (refreshedById[pluginId]) refreshedById[pluginId] = assign({}, refreshedById[pluginId], fieldsById[pluginId]);
                     });
                 });
-                return assign({}, state, { byId: refreshedById });
+                return assign({}, state, {
+                    byId: refreshedById,
+                    nextWporgCheckAt: action.now + action.answer.next_check_in * 1000,
+                });
             }
+            case 'SET_NEXT_WPORG_CHECK_AT':
+                return assign({}, state, { nextWporgCheckAt: action.at });
             case 'SET_REFRESHING_WPORG_STATS':
                 return assign({}, state, { isRefreshingWporg: !!action.flag });
             default:
@@ -121,6 +130,9 @@
         isRefreshingWporg: function(state) {
             return !!state.isRefreshingWporg;
         },
+        getNextWporgCheckAt: function(state) {
+            return state.nextWporgCheckAt;
+        },
     };
     registerStore('pblsh/plugins', {
         reducer: reducer,
@@ -140,8 +152,12 @@
         dispatch.setRefreshingWporg(true);
         try {
             var answer = await window.Pblsh.API.refreshWporg(pluginId, known);
-            dispatch.applyWporgRefresh(answer);
+            dispatch.applyWporgRefresh(answer, Date.now());
             return answer;
+        } catch (e) {
+            // A question the server did not answer is asked again in a minute, not at once.
+            dispatch.setNextWporgCheckAt(Date.now() + 60000);
+            throw e;
         } finally {
             dispatch.setRefreshingWporg(false);
         }

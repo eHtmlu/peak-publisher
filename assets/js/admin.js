@@ -92,22 +92,38 @@ document.addEventListener('DOMContentLoaded', function() {
         const settingsDialogRef = useRef(null);
         const currentPlugin = useSelect((select) => currentPluginId ? select('pblsh/plugins').getById(currentPluginId) : null, [currentPluginId]);
 
-        // Every look at wordpress.org data asks the server whether the directory moved: showing
-        // the list, opening a plugin, the browser tab coming back into view on either. The server
-        // answers from its own clock (a stamp check at most every five minutes, site-wide), so in
-        // between this costs wordpress.org nothing. A failed check stays quiet — the cached state
-        // stands, the editor's Refresh link reports its own.
+        // While the list or a plugin is in view, what it shows of wordpress.org is at most one
+        // check interval old. The server keeps the one clock — a stamp check at most every five
+        // minutes, site-wide — and names with every answer when the next check is due; the client
+        // asks then and not before, so in between this costs neither server a request. That
+        // moment is the timer's to find, and every look's that comes after it: showing the list,
+        // opening a plugin, the browser tab coming back into view or getting the focus. A hidden
+        // tab asks nothing. A failed check stays quiet — the cached state stands, the editor's
+        // Refresh link reports its own.
+        const nextWporgCheckAt = useSelect((select) => select('pblsh/plugins').getNextWporgCheckAt(), []);
         const showsWporgData = hasLoadedList && (view === 'list' || view === 'editor')
             && plugins.some((plugin) => plugin.hosting_type === 'wporg');
-        const checkWporg = wp.element.useCallback(() => {
-            if (!showsWporgData || wp.data.select('pblsh/plugins').isRefreshingWporg()) return;
+        const askWporg = wp.element.useCallback(() => {
+            if (!showsWporgData || document.visibilityState !== 'visible' || wp.data.select('pblsh/plugins').isRefreshingWporg()) return;
             refreshWporg().catch(() => {});
         }, [showsWporgData]);
+        // The timer asks when it fires — its running out is the moment, whatever a clock read a
+        // millisecond early would say; a look asks when the moment has passed.
+        useEffect(() => {
+            const timer = setTimeout(askWporg, Math.max(0, nextWporgCheckAt - Date.now()));
+            return () => clearTimeout(timer);
+        }, [nextWporgCheckAt, askWporg]);
+        const checkWporg = wp.element.useCallback(() => {
+            if (Date.now() >= wp.data.select('pblsh/plugins').getNextWporgCheckAt()) askWporg();
+        }, [askWporg]);
         useEffect(() => { checkWporg(); }, [view, currentPluginId, checkWporg]);
         useEffect(() => {
-            const onVisible = () => { if (document.visibilityState === 'visible') checkWporg(); };
-            document.addEventListener('visibilitychange', onVisible);
-            return () => document.removeEventListener('visibilitychange', onVisible);
+            document.addEventListener('visibilitychange', checkWporg);
+            window.addEventListener('focus', checkWporg);
+            return () => {
+                document.removeEventListener('visibilitychange', checkWporg);
+                window.removeEventListener('focus', checkWporg);
+            };
         }, [checkWporg]);
 
         // Helpers for URL state

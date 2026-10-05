@@ -604,8 +604,8 @@ class AdminAPI {
      * Answers what the client then holds: `stats` — figures and check of every marker in
      * scope —, `plugins` — the list row of every marker that moved underneath the client's
      * copy, whoever moved it: the client sends the tokens of its rows as `known`
-     * (wporg_sync_token()) — and `changes`, what this request's SVN refreshes changed in what
-     * the editor shows.
+     * (wporg_sync_token()) —, `changes` — what this request's SVN refreshes changed in what
+     * the editor shows — and `next_check_in`, the seconds until the stamp check is due again.
      */
     public function refresh_wporg_rest(\WP_REST_Request $request) {
         $params = $request->get_json_params();
@@ -654,6 +654,7 @@ class AdminAPI {
             'stats' => (object) $stats,
             'plugins' => (object) $plugins,
             'changes' => (object) $changes,
+            'next_check_in' => wporg_directory_next_check_in(time()),
         ];
     }
 

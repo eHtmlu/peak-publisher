@@ -15,6 +15,7 @@ use function Pblsh\record_wporg_directory_check_error;
 use function Pblsh\refresh_wporg_directory;
 use function Pblsh\serialize_self_hosted_installations;
 use function Pblsh\serialize_wporg_directory;
+use function Pblsh\wporg_directory_next_check_in;
 
 use const Pblsh\PBLSH_WPORG_DIRECTORY_CHECKED_OPTION;
 use const Pblsh\PBLSH_WPORG_DIRECTORY_META;
@@ -397,6 +398,24 @@ final class WporgDirectoryTest extends TestCase {
 
         $this->answer([ 'plugin-a' => $this->closed_listing('plugin-a') ]);
         self::assertSame([ $marker->ID => null ], refresh_wporg_directory([ $marker->ID ], true), 'a listing without a stamp');
+    }
+
+    public function test_a_site_wide_look_without_markers_still_claims_the_check(): void {
+        $this->create_plugin('pblsh_plugin', 'self-hosted');
+
+        self::assertSame([], refresh_wporg_directory());
+
+        self::assertSame([], FakeWordPress::$http_requests);
+        self::assertGreaterThan(0, wporg_directory_next_check_in(time()), 'a client that still asks is told to wait, not to ask again at once');
+    }
+
+    public function test_the_next_check_is_due_five_minutes_after_the_claim(): void {
+        $now = 1_800_000_000;
+        self::assertSame(0, wporg_directory_next_check_in($now), 'never checked: now');
+        update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, $now - 2 * MINUTE_IN_SECONDS);
+        self::assertSame(3 * MINUTE_IN_SECONDS, wporg_directory_next_check_in($now));
+        update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, $now - 6 * MINUTE_IN_SECONDS);
+        self::assertSame(0, wporg_directory_next_check_in($now));
     }
 
     // ---- the REST view ----

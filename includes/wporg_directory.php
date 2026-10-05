@@ -89,9 +89,10 @@ function is_wporg_figures_due(array $directory, int $now): bool {
 
 /**
  * Whether the stamps are due for a comparison: site-wide, at most every
- * PBLSH_WPORG_DIRECTORY_CHECK_INTERVAL — the list asks on every load, the server answers
- * with a request only this often. One clock for all markers; what the comparison found for
- * each is the marker's own record (checked_at, check_error).
+ * PBLSH_WPORG_DIRECTORY_CHECK_INTERVAL — however often clients ask, the server answers with
+ * a request only this often, and tells them when the next one is due
+ * (wporg_directory_next_check_in()). One clock for all markers; what the comparison found
+ * for each is the marker's own record (checked_at, check_error).
  */
 function is_wporg_directory_check_due(int $checked_at, int $now): bool {
     return $checked_at <= $now - PBLSH_WPORG_DIRECTORY_CHECK_INTERVAL;
@@ -145,18 +146,19 @@ function refresh_wporg_directory(?array $plugin_ids = null, bool $force = false)
     $markers = $site_wide
         ? get_posts([ 'post_type' => 'pblsh_wporg_plugin', 'post_status' => 'any', 'posts_per_page' => -1 ])
         : array_values(array_filter(array_map('get_post', $plugin_ids), static fn($post): bool => is_wporg_plugin($post)));
-    if ($markers === []) {
-        return [];
-    }
 
     // The claims: attempted_at per marker and the site-wide checked_at are written before
     // the remote call, so a request dying mid-way (fatal, OOM) does not cause a retry
     // storm — the automatic paths wait. Read-then-write on post meta, not atomic: a rare
-    // second request from a parallel tab is harmless.
+    // second request from a parallel tab is harmless. The site-wide claim is written with
+    // nothing to compare too: the clients ask again when it says so, never at once.
     $now = time();
     $check_due = $site_wide && ($force || is_wporg_directory_check_due(wporg_directory_checked_at(), $now));
     if ($check_due) {
         update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, $now, false);
+    }
+    if ($markers === []) {
+        return [];
     }
     $wanted = [];
     foreach ($markers as $marker) {
@@ -245,6 +247,11 @@ function record_wporg_directory_check_error(int $plugin_id, WporgSvnException $e
     update_post_meta($plugin_id, PBLSH_WPORG_DIRECTORY_META, [ ...get_wporg_directory($plugin_id), 'check_error' => wporg_directory_error($e, time()) ]);
 }
 
+
+/** Seconds until the site-wide stamp check is due again, 0 = now — what the client's timer waits for. */
+function wporg_directory_next_check_in(int $now): int {
+    return max(0, wporg_directory_checked_at() + PBLSH_WPORG_DIRECTORY_CHECK_INTERVAL - $now);
+}
 
 
 /**

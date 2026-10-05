@@ -33,11 +33,12 @@
         setError: function(message) {
             return { type: 'SET_ERROR', message: message };
         },
-        // Merges fields into a plugin the store already holds; unknown ids are ignored
-        // (a refresh answer may name a plugin deleted meanwhile). `upsert` is for
-        // complete items.
-        patch: function(id, fields) {
-            return { type: 'PATCH', id: id, fields: fields };
+        // The answer of a directory refresh in one step: the figures and check of every marker
+        // (stats) and the fresh row of each that moved (plugins) merge into the plugins the
+        // store holds — unknown ids are ignored, an answer may name a plugin deleted
+        // meanwhile.
+        applyWporgRefresh: function(answer) {
+            return { type: 'APPLY_WPORG_REFRESH', answer: answer };
         },
         setRefreshingWporg: function(flag) {
             return { type: 'SET_REFRESHING_WPORG_STATS', flag: !!flag };
@@ -83,11 +84,14 @@
             }
             case 'SET_ERROR':
                 return assign({}, state, { error: action.message || 'Error' });
-            case 'PATCH': {
-                if (!state.byId[action.id]) return state;
-                var patched = {};
-                patched[action.id] = assign({}, state.byId[action.id], action.fields);
-                return assign({}, state, { byId: assign({}, state.byId, patched) });
+            case 'APPLY_WPORG_REFRESH': {
+                var refreshedById = assign({}, state.byId);
+                [ action.answer.stats, action.answer.plugins ].forEach(function(fieldsById) {
+                    Object.keys(fieldsById).forEach(function(pluginId) {
+                        if (refreshedById[pluginId]) refreshedById[pluginId] = assign({}, refreshedById[pluginId], fieldsById[pluginId]);
+                    });
+                });
+                return assign({}, state, { byId: refreshedById });
             }
             case 'SET_REFRESHING_WPORG_STATS':
                 return assign({}, state, { isRefreshingWporg: !!action.flag });
@@ -125,16 +129,19 @@
     });
     // The directory refreshes in the order they were asked for (see refreshWporg).
     var wporgRefreshes = Promise.resolve();
-    async function runWporgRefresh(pluginId, force) {
+    async function runWporgRefresh(pluginId) {
         var dispatch = wp.data.dispatch('pblsh/plugins');
+        // What this client's copies were made from — the server answers the row of every
+        // plugin that moved since, whoever moved it (this refresh, another tab, a commit).
+        var known = {};
+        wp.data.select('pblsh/plugins').getPlugins().forEach(function(plugin) {
+            if (plugin.hosting_type === 'wporg') known[plugin.id] = plugin.wporg_token;
+        });
         dispatch.setRefreshingWporg(true);
         try {
-            var response = await window.Pblsh.API.refreshWporg(pluginId, force);
-            var stats = response && response.stats ? response.stats : {};
-            var plugins = response && response.plugins ? response.plugins : {};
-            Object.keys(stats).forEach(function(id) { dispatch.patch(Number(id), stats[id]); });
-            Object.keys(plugins).forEach(function(id) { dispatch.patch(Number(id), plugins[id]); });
-            return { stats: stats, plugins: plugins };
+            var answer = await window.Pblsh.API.refreshWporg(pluginId, known);
+            dispatch.applyWporgRefresh(answer);
+            return answer;
         } finally {
             dispatch.setRefreshingWporg(false);
         }
@@ -159,16 +166,16 @@
                 dispatch.setLoadingList(false);
             }
         },
-        // Asks the server for the due directory refresh (every marker, or one; force skips
-        // the daily cut-off and the check interval) and patches every marker it touched: the
-        // figures, and the fresh row of a plugin that changed on wordpress.org. Resolves to
-        // the answer ({ stats, plugins }) so a caller can react to a changed plugin. One at a
-        // time: a refresh asked for while another runs starts once that one has settled, so
-        // the manual Refresh is never refused and never runs beside the automatic check —
-        // two refreshes of one changed plugin would sync its tags side by side.
-        refreshWporg: function(pluginId, options) {
+        // Brings the wordpress.org plugins up to date — every marker with whatever is due, or
+        // one straight against SVN (the editor's Refresh) — and takes the answer into the
+        // store (applyWporgRefresh). Resolves to the answer, whose `plugins` are the rows that
+        // moved, so a caller can reload what else it holds of them. One at a time: a refresh
+        // asked for while another runs starts once that one has settled, so the manual Refresh
+        // is never refused and never runs beside the automatic check — two refreshes of one
+        // changed plugin would sync its tags side by side.
+        refreshWporg: function(pluginId) {
             var refresh = wporgRefreshes.then(function() {
-                return runWporgRefresh(pluginId || null, !!(options && options.force));
+                return runWporgRefresh(pluginId || null);
             });
             wporgRefreshes = refresh.catch(function() {});
             return refresh;

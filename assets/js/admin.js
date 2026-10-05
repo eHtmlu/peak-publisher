@@ -55,13 +55,14 @@ document.addEventListener('DOMContentLoaded', function() {
         window.Pblsh.Controllers.Assets.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
     };
 
-    // The directory refresh of every caller — the automatic check and the editor's Refresh link
-    // (force). The store patches the rows the server answers; a plugin that changed on
-    // wordpress.org also gets its tabs reloaded, so its header and its tabs show the same state.
-    // Which plugins that concerns is decided when the answer arrives: every one whose tabs the
-    // client holds or is loading by then, whichever view the request started from.
-    const refreshWporg = async (pluginId = null, options = {}) => {
-        const answer = await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId, options);
+    // The refresh against wordpress.org of every caller — the automatic check (every plugin,
+    // whatever is due) and the editor's Refresh link (that plugin, straight against SVN). The
+    // store takes the rows the server answers; a plugin that moved also gets its tabs reloaded,
+    // so its header and its tabs show the same state. Which plugins that concerns is decided
+    // when the answer arrives: every one whose tabs the client holds or is loading by then,
+    // whichever view the request started from.
+    const refreshWporg = async (pluginId = null) => {
+        const answer = await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId);
         const releases = wp.data.select('pblsh/releases');
         Object.keys(answer.plugins).map(Number)
             .filter((id) => releases.hasLoadedForPlugin(id) || releases.isLoadingForPlugin(id))

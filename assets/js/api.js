@@ -57,12 +57,13 @@ lodash.set(window, 'Pblsh.API', {
             body: { version, expected_pointer: expectedPointer },
         });
     },
-    // Fetch the due wordpress.org figures (every marker, or one); force skips the daily
-    // cut-off. Answers { stats: { [id]: { installations, wporg_stats } } } for every marker touched.
-    refreshWporg: async (pluginId = null, force = false) => {
+    // Bring the wordpress.org plugins up to date: every marker with whatever is due, or one —
+    // the editor's Refresh, straight against SVN. `known` are the tokens of the rows the client
+    // holds ({ [id]: wporg_token }). Answers { stats, plugins, changes }.
+    refreshWporg: async (pluginId = null, known = {}) => {
         return await window.Pblsh.API.request('admin/wporg/refresh', {
             method: 'POST',
-            body: { plugin_id: pluginId, force },
+            body: { plugin_id: pluginId, known },
         });
     },
     // Dismiss the one-time notice about the schema upgrade (includes/upgrade.php)

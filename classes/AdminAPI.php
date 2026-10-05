@@ -278,7 +278,8 @@ class AdminAPI {
      * the one sites receive — `latest_version` the highest; both null when absent.
      * `installations` is the channel's figure with its state (self-hosted the exact
      * 24-hour count or 'disabled', wordpress.org the cached public figure), `wporg_stats`
-     * the wordpress.org dashboard figures (null self-hosted).
+     * the wordpress.org dashboard figures, `wporg_check` and `wporg_token` the state of the
+     * copy against wordpress.org (all three null self-hosted).
      *
      * @param \WP_Post[] $releases The plugin's release posts.
      */
@@ -286,7 +287,7 @@ class AdminAPI {
         $hosting_type = get_plugin_hosting_type($post);
         $is_self_hosted = $hosting_type === 'self_hosted';
         $current = resolve_current_release($post, $releases);
-        $wporg_figures = $is_self_hosted ? null : serialize_wporg_installations((int) $post->ID);
+        $wporg_directory = $is_self_hosted ? null : serialize_wporg_directory((int) $post->ID);
 
         $out = [
             'id' => $post->ID,
@@ -303,12 +304,16 @@ class AdminAPI {
             'pointer' => $current['pointer'],
             // The distribution switch: self-hosted the post status, wordpress.org the
             // directory's verdict — 'closed' there means nothing is distributed.
-            'status' => !$is_self_hosted && $wporg_figures['wporg_stats']['closed'] !== null ? 'closed' : $post->post_status,
+            'status' => !$is_self_hosted && $wporg_directory['wporg_stats']['closed'] !== null ? 'closed' : $post->post_status,
             'count_of_releases' => count($releases),
             'installations' => $is_self_hosted
                 ? serialize_self_hosted_installations((int) $post->ID)
-                : $wporg_figures['installations'],
-            'wporg_stats' => $is_self_hosted ? null : $wporg_figures['wporg_stats'],
+                : $wporg_directory['installations'],
+            'wporg_stats' => $is_self_hosted ? null : $wporg_directory['wporg_stats'],
+            // When the plugin was last brought in step with wordpress.org, and what its copy
+            // here was made from — sent back with the next refresh (wporg_sync_token()).
+            'wporg_check' => $is_self_hosted ? null : $wporg_directory['wporg_check'],
+            'wporg_token' => $is_self_hosted ? null : wporg_sync_token($post),
             // Asset changes not on wordpress.org yet — deleting the plugin here would lose them.
             'assets_pending' => $is_self_hosted ? null : count(get_wporg_assets_state((int) $post->ID)['pending']),
         ];
@@ -587,11 +592,20 @@ class AdminAPI {
     }
 
     /**
-     * The list's background refresh against the directory — stale-while-revalidate: the client
-     * calls it after loading the list, and from the editor's Refresh link with force. The due
-     * figures and the stamp check (refresh_wporg_directory(), the server alone decides what is
-     * due); a marker whose stamp moved is refreshed against SVN here — tags, trunk readme,
-     * assets mirror — and answered as a fresh list row.
+     * Brings the client's wordpress.org plugins up to date, in two forms. Without `plugin_id`
+     * the automatic look: the due figures and the stamp check (refresh_wporg_directory(), the
+     * server alone decides what is due), and the SVN refresh of every marker whose stamp moved
+     * — tags, trunk readme, assets mirror. With `plugin_id` the editor's Refresh: that
+     * plugin's figures and its SVN refresh whatever the directory says, which lags SVN by
+     * wordpress.org's import. A marker's check completes with its SVN refresh; one that
+     * failed is recorded on the marker and shows through `wporg_check`, never as an error of
+     * this request.
+     *
+     * Answers what the client then holds: `stats` — figures and check of every marker in
+     * scope —, `plugins` — the list row of every marker that moved underneath the client's
+     * copy, whoever moved it: the client sends the tokens of its rows as `known`
+     * (wporg_sync_token()) — and `changes`, what this request's SVN refreshes changed in what
+     * the editor shows.
      */
     public function refresh_wporg_rest(\WP_REST_Request $request) {
         $params = $request->get_json_params();
@@ -601,28 +615,45 @@ class AdminAPI {
             return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
         }
 
-        $result = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], !empty($params['force']));
-        $stats = [];
-        foreach ($result['figures'] as $id) {
-            $stats[$id] = serialize_wporg_installations($id);
-        }
-        $plugins = [];
-        foreach ($result['changed'] as $id) {
-            $marker = get_post($id);
-            // The SVN refresh of a plugin that changed on wordpress.org — warn-only, the row is served as it is then.
+        // The checks the directory left open — a stamp that moved; the editor's Refresh whatever
+        // the directory answered, or failed to — complete with the plugin's SVN refresh.
+        $open = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], $plugin_id !== null);
+        $changes = [];
+        foreach ($plugin_id === null ? $open : [ $plugin_id => $open[$plugin_id] ?? null ] as $id => $stamp) {
             try {
-                get_wporg_plugin_data($marker);
-            } catch (\Throwable $e) {
-                wporg_log_cache_error($marker, 'directory', $e);
+                $outcome = refresh_wporg_plugin_cache(get_post($id));
+                confirm_wporg_directory_check($id, $stamp);
+                if ($outcome['changes'] !== []) {
+                    $changes[$id] = $outcome['changes'];
+                }
+            } catch (WporgSvnException $e) {
+                record_wporg_directory_check_error($id, $e);
             }
-            $marker = get_post($id);
-            $plugins[$id] = $this->serialize_plugin_post($marker, false, fetch_releases_grouped_by_parent([ $id ])[$id] ?? []);
+        }
+
+        $markers = $plugin_id === null
+            ? get_posts([ 'post_type' => 'pblsh_wporg_plugin', 'post_status' => 'any', 'posts_per_page' => -1 ])
+            : [ get_post($plugin_id) ];
+        $known = is_array($params['known'] ?? null) ? $params['known'] : [];
+        $stats = [];
+        $outdated = [];
+        foreach ($markers as $marker) {
+            $stats[$marker->ID] = serialize_wporg_directory((int) $marker->ID);
+            if (isset($known[$marker->ID]) && (string) $known[$marker->ID] !== wporg_sync_token($marker)) {
+                $outdated[] = $marker;
+            }
+        }
+        $releases_by_parent = fetch_releases_grouped_by_parent(array_map('intval', wp_list_pluck($outdated, 'ID')));
+        $plugins = [];
+        foreach ($outdated as $marker) {
+            $plugins[$marker->ID] = $this->serialize_plugin_post($marker, false, $releases_by_parent[(int) $marker->ID] ?? []);
         }
         return [
             'status' => 'ok',
             // Objects even when empty, so the client can always iterate their keys.
             'stats' => (object) $stats,
             'plugins' => (object) $plugins,
+            'changes' => (object) $changes,
         ];
     }
 

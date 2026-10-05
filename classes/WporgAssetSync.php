@@ -16,22 +16,31 @@ require_once __DIR__ . '/WporgOperations.php';
 class WporgAssetSync {
 
     /**
-     * Brings the mirror in step with SVN when the marker cache is refreshed (the directory
-     * said the plugin changed, or an upload is prepared): pulls when the mirror is behind SVN
-     * or lost a file, else records that it was just confirmed against SVN (listed_at — with
-     * the directory's stamp check the bar's "checked …"). The confirmation is written under
-     * the lock like every write of the state, and skipped while a commit or a change holds
-     * it: a timestamp can wait.
+     * Brings the mirror in step with SVN when the marker is refreshed (the directory said the
+     * plugin changed, the editor's Refresh, an upload is prepared): pulls when the mirror is
+     * behind SVN or lost a file, else records that it was just confirmed against SVN
+     * (listed_at — with the directory's stamp check the bar's "checked …"). Answers whether a
+     * pull changed the mirror. A mirror that could not be brought in step is the caller's to
+     * know: the lock's own error while a commit or a change holds it, and
+     * wporg_assets_pull_incomplete when a file did not arrive — the next refresh catches up.
+     * The confirmation alone is skipped while the lock is held: a timestamp can wait.
+     *
+     * @throws WporgSvnException
      */
-    public function refresh(\WP_Post $marker, int $assets_revision): void {
+    public function refresh(\WP_Post $marker, int $assets_revision): bool {
         if ($this->is_behind_svn($marker, $assets_revision) || $this->has_lost_files($marker)) {
-            $this->pull($marker);
-            return;
+            raise_wporg_time_limit();
+            $pulled = WporgOperations::under_plugin_lock($marker->post_name, 'assets_pull', (int) $marker->ID, fn(): array => $this->pull_unlocked($marker));
+            if (!$pulled['complete']) {
+                throw new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely. They are read again with the next check.', 'peak-publisher'), 502);
+            }
+            return $pulled['changed'];
         }
         WporgOperations::try_under_plugin_lock($marker->post_name, 'assets_pull', (int) $marker->ID, static function() use ($marker): bool {
             update_wporg_assets_state((int) $marker->ID, [ ...get_wporg_assets_state((int) $marker->ID), 'listed_at' => time() ]);
             return true;
         });
+        return false;
     }
 
     /**
@@ -79,7 +88,9 @@ class WporgAssetSync {
      * that arrived; the anchor (revision, listed_at) moves only when all did, so a failed
      * download is retried by the next pull. The caller holds the lock.
      *
-     * @return array{listing: ?array, complete: bool} listing = list_assets() as read
+     * @return array{listing: ?array, complete: bool, changed: bool} listing = list_assets()
+     *         as read; changed = wordpress.org's winners differ from the mirror's (a file
+     *         fetched again because the disk lost it is no change)
      */
     public function pull_unlocked(\WP_Post $marker, ?WporgPluginSvnClient $client = null): array {
         $listing = WporgOperations::list_assets($marker->post_name, $client);
@@ -87,6 +98,7 @@ class WporgAssetSync {
         $remote = array_map(static fn(array $slot): array => $slot['winner'], $classified['slots']);
         $manifest = read_asset_manifest((int) $marker->ID);
         $diff = mirror_diff($manifest, $remote);
+        $changed = $diff['fetch'] !== [] || $diff['remove'] !== [];
 
         ensure_plugin_assets_dir($marker);
         $dir = get_plugin_assets_dir($marker);
@@ -98,7 +110,7 @@ class WporgAssetSync {
             }
         }
         if (!$this->secure_copy_sources($marker, $remote, $client)) {
-            return [ 'listing' => $listing, 'complete' => false ];
+            return [ 'listing' => $listing, 'complete' => false, 'changed' => $changed ];
         }
         foreach ($diff['remove'] as $slot_id) {
             $this->unlink($dir, $manifest[$slot_id]['filename']);
@@ -138,7 +150,7 @@ class WporgAssetSync {
             $complete = false;
         }
         if (!$complete) {
-            return [ 'listing' => $listing, 'complete' => false ];
+            return [ 'listing' => $listing, 'complete' => false, 'changed' => $changed ];
         }
         update_wporg_assets_state((int) $marker->ID, [
             ...$state,
@@ -147,7 +159,7 @@ class WporgAssetSync {
             'other_files' => $classified['other_files'],
             'color_source' => $classified['color_source'],
         ]);
-        return [ 'listing' => $listing, 'complete' => true ];
+        return [ 'listing' => $listing, 'complete' => true, 'changed' => $changed ];
     }
 
     /**

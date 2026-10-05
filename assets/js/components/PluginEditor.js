@@ -57,15 +57,14 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         [pluginData && pluginData.id]
     );
 
-    // The manual refresh of the wordpress.org stats: force skips the daily cut-off and the
-    // check interval — a plugin that changed on wordpress.org comes back whole, tabs included
-    // (refreshWporg). The patched data says the rest; a failure of the request itself is
-    // reported like the flip's.
+    // The Refresh link: this plugin's figures and its state straight from SVN, whatever the
+    // directory says — it lags SVN by wordpress.org's import —, tabs included (refreshWporg).
+    // The data says the rest; a failure of the request itself is reported like the flip's.
     const refreshStats = async () => {
         if (!pluginData || refreshingStats) return;
         setRefreshingStats(true);
         try {
-            await refreshWporg(pluginData.id, { force: true });
+            await refreshWporg(pluginData.id);
         } catch (e) {
             alert((e?.message || __('Could not refresh the wordpress.org figures.', 'peak-publisher'))
                 + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));

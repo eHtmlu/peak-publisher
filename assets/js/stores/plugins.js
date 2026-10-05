@@ -10,7 +10,6 @@
         isLoadingList: false,
         loadingIds: [],
         pendingIds: [],
-        error: null,
         lastFetch: 0,
         isRefreshingWporg: false,
         nextWporgCheckAt: 0,   // when to ask the server again (this client's clock, ms); 0 = not asked yet
@@ -31,9 +30,6 @@
         },
         setPending: function(id, flag) {
             return { type: 'SET_PENDING', id: id, flag: !!flag };
-        },
-        setError: function(message) {
-            return { type: 'SET_ERROR', message: message };
         },
         // The answer of a directory refresh in one step: the figures and check of every marker
         // (stats) and the fresh row of each that moved (plugins) merge into the plugins the
@@ -66,7 +62,7 @@
                     map[it.id] = assign({}, state.byId[it.id] || {}, it);
                     ids.push(it.id);
                 });
-                return assign({}, state, { ids: ids, byId: map, lastFetch: Date.now(), error: null });
+                return assign({}, state, { ids: ids, byId: map, lastFetch: Date.now() });
             }
             case 'SET_LOADING_LIST':
                 return assign({}, state, { isLoadingList: !!action.flag });
@@ -91,8 +87,6 @@
                     : state.pendingIds.filter(function(x){ return x !== action.id; });
                 return assign({}, state, { pendingIds: nextPending });
             }
-            case 'SET_ERROR':
-                return assign({}, state, { error: action.message || 'Error' });
             case 'APPLY_WPORG_REFRESH': {
                 var refreshedById = assign({}, state.byId);
                 [ action.answer.stats, action.answer.plugins ].forEach(function(fieldsById) {
@@ -188,7 +182,8 @@
             dispatch.setRefreshingWporg(false);
         }
     }
-    // Controllers (async helpers)
+    // Controllers (async helpers). A request that fails rejects with the server's error, code
+    // and message intact — the caller reports it; the store keeps no error of its own.
     window.Pblsh = window.Pblsh || {};
     window.Pblsh.Controllers = window.Pblsh.Controllers || {};
     window.Pblsh.Controllers.Plugins = {
@@ -202,8 +197,6 @@
                 // The directory refresh (refreshWporg) is not triggered here: admin.js asks for it
                 // whenever the list is shown, a plugin is opened or the browser tab comes back into
                 // view — every look at wordpress.org data, not every load of the list.
-            } catch (e) {
-                dispatch.setError(e && e.message ? e.message : 'Failed to load plugins');
             } finally {
                 dispatch.setLoadingList(false);
             }
@@ -227,9 +220,6 @@
                 dispatch.setPending(id, true);
                 var item = await window.Pblsh.API.getPlugin(id);
                 if (item && item.id) dispatch.upsert(item);
-            } catch (e) {
-                dispatch.setError(e && e.message ? e.message : 'Failed to load plugin');
-                throw e;
             } finally {
                 dispatch.setPending(id, false);
             }
@@ -242,8 +232,6 @@
                 // optimistic: update local
                 var current = wp.data.select('pblsh/plugins').getById(id);
                 if (current) dispatch.upsert(assign({}, current, { status: nextStatus }));
-            } catch (e) {
-                dispatch.setError(e && e.message ? e.message : 'Failed to update status');
             } finally {
                 dispatch.setPending(id, false);
             }
@@ -254,8 +242,6 @@
                 dispatch.setPending(id, true);
                 await window.Pblsh.API.deletePlugin(id);
                 dispatch.remove(id);
-            } catch (e) {
-                dispatch.setError(e && e.message ? e.message : 'Failed to delete plugin');
             } finally {
                 dispatch.setPending(id, false);
             }

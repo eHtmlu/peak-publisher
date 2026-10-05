@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const { useState, useEffect, useRef, createElement, render } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
-    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog, UpgradeNotice } = window.Pblsh.Components;
+    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog, UpgradeNotice, NoticeBox } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
 
     // Permalink check — shown instead of the app when permalinks are set to "Plain"
@@ -159,28 +159,35 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) {}
         };
 
-        // Load plugins on mount + restore view from URL
-        useEffect(() => {
-            (async () => {
-                try { await window.Pblsh.Controllers.Settings.fetch(); } catch (e) {}
+        // What the app starts with: the settings, the plugins, then the view the URL names. A
+        // list that cannot be loaded is told in its place, with the way to try again — nothing
+        // else can start without it.
+        const [listError, setListError] = useState(null);
+        const loadApp = async () => {
+            setListError(null);
+            try { await window.Pblsh.Controllers.Settings.fetch(); } catch (e) {}
+            try {
                 await window.Pblsh.Controllers.Plugins.fetchList();
-                const q = parseQuery();
-                if (q && q.plugin) {
-                    const idNum = Number(q.plugin);
-                    if (!isNaN(idNum)) {
-                        if (q.tab) setInitialTab(q.tab);
-                        await handleEdit(idNum);
-                        return;
-                    }
-                }
-                if (q && q.view === 'addition') {
-                    // Deep link: ?view=addition&channel=wporg&import=open opens the wporg
-                    // import route directly (used by the Settings account card).
-                    handleAddNewPlugin(q.channel || q.import ? { channel: q.channel, importOpen: q.import === 'open' } : null);
+            } catch (error) {
+                setListError(error);
+                return;
+            }
+            const q = parseQuery();
+            if (q && q.plugin) {
+                const idNum = Number(q.plugin);
+                if (!isNaN(idNum)) {
+                    if (q.tab) setInitialTab(q.tab);
+                    await handleEdit(idNum);
                     return;
                 }
-            })();
-        }, []);
+            }
+            if (q && q.view === 'addition') {
+                // Deep link: ?view=addition&channel=wporg&import=open opens the wporg
+                // import route directly (used by the Settings account card).
+                handleAddNewPlugin(q.channel || q.import ? { channel: q.channel, importOpen: q.import === 'open' } : null);
+            }
+        };
+        useEffect(() => { loadApp(); }, []);
 
         
         const togglePluginStatus = async (pluginId, nextStatus) => {
@@ -245,7 +252,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (currentPluginId === plugin.id) setCurrentPluginId(null);
             } catch (error) {
                 showAlert(error.message, 'error');
-                window.Pblsh.Controllers.Plugins.fetchList();
+                // What the server holds now, whatever the failed delete left behind.
+                window.Pblsh.Controllers.Plugins.fetchList().catch((e) => showAlert(e.message, 'error'));
             }
         };
 
@@ -388,6 +396,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     onTabChange: (tab) => setQuery({ tab: tab === 'releases' ? null : tab }),
                 });
             } else {
+                if (listError) {
+                    return createElement(NoticeBox, { variant: 'error', title: __('The plugins could not be loaded', 'peak-publisher'), error: listError },
+                        createElement('p', null, createElement(Button, { isLink: true, onClick: loadApp }, __('Try again', 'peak-publisher'))),
+                    );
+                }
                 if (isLoading || !hasLoadedList) {
                     return createElement('div', { className: 'pblsh--loading' },
                         createElement('div', { className: 'pblsh--loading__spinner' })

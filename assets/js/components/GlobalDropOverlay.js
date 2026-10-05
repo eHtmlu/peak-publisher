@@ -966,10 +966,9 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             return;
         }
         // The freshly imported plugin belongs on the main list right away; the
-        // flow continues inside this dialog, so refresh in the background.
-        try {
-            window.Pblsh?.Controllers?.Plugins?.fetchList?.();
-        } catch (error) {}
+        // flow continues inside this dialog, so refresh in the background — a
+        // failure there costs this flow nothing.
+        window.Pblsh.Controllers.Plugins.fetchList().catch(() => {});
         setIsProcessing(false);
         await refreshTargetContext(upload_id, meta);
     }

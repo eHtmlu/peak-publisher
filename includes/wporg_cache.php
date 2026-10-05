@@ -22,16 +22,11 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
         return [];
     }
 
-    try {
-        return refresh_wporg_plugin_cache($plugin_post)['cache'];
-    } catch (WporgSvnException $e) {
-        // Read anew: the refresh may have written the cache before it failed on the assets.
-        $cached = wporg_decode_json_object((string) get_post((int) $plugin_post->ID)->post_content);
-        if (!wporg_has_cached_revision($cached)) {
-            throw new \RuntimeException($e->getMessage(), 0, $e);
-        }
-        return $cached;
+    $refresh = refresh_wporg_plugin_cache($plugin_post);
+    if ($refresh['failure'] !== null && !wporg_has_cached_revision($refresh['cache'])) {
+        throw new \RuntimeException($refresh['failure']->getMessage(), 0, $refresh['failure']);
     }
+    return $refresh['cache'];
 }
 
 
@@ -39,9 +34,12 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
  * Brings a marker in step with SVN — the cache (tags, trunk readme) when the plugin's
  * revision moved or a key is missing, the assets mirror when it is behind or lost a file —
  * and says what that changed in what the editor shows (wporg_refresh_changes()). One
- * revision listing when nothing moved. Every failure is logged where it happens and thrown
- * with its code and message; a failure of the assets alone is thrown after the cache is
- * written, so the releases are fresh either way.
+ * revision listing when nothing moved.
+ *
+ * A refresh that could not complete says so as its `failure`, the pipeline's error with code
+ * and message, beside what it did change until then: the assets and the cache are two
+ * halves, and the half that arrived is told now — the next refresh finds it in step and
+ * would have nothing left to tell. Every failure is logged where it happens.
  *
  * Under the plugin's lock from the first read to the last write, like every commit and its
  * local write-through: what is read from SVN here is still true when it is written, and no
@@ -49,16 +47,21 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
  * holds the lock, or a local holder that outlasts the wait, is this refresh's failure
  * (deploy_in_progress, wporg_plugin_busy) — the next one catches up.
  *
- * @return array{cache: array, changes: array}
- * @throws WporgSvnException When the marker could not be brought in step completely.
+ * @return array{cache: array, changes: array, failure: ?WporgSvnException} cache = the marker
+ *         cache as it stands now; failure null = the marker is in step completely
  */
 function refresh_wporg_plugin_cache(\WP_Post $plugin_post): array {
     require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
 
-    return WporgOperations::under_plugin_lock($plugin_post->post_name, 'refresh', (int) $plugin_post->ID, static function() use ($plugin_post): array {
-        // Read anew: whoever held the lock until now may have written the marker.
-        return refresh_wporg_plugin_cache_unlocked(get_post((int) $plugin_post->ID));
-    });
+    try {
+        return WporgOperations::under_plugin_lock($plugin_post->post_name, 'refresh', (int) $plugin_post->ID, static function() use ($plugin_post): array {
+            // Read anew: whoever held the lock until now may have written the marker.
+            return refresh_wporg_plugin_cache_unlocked(get_post((int) $plugin_post->ID));
+        });
+    } catch (WporgSvnException $e) {
+        // The lock's own error — the refresh returns its failures: nothing was read or changed.
+        return [ 'cache' => wporg_decode_json_object((string) $plugin_post->post_content), 'changes' => [], 'failure' => $e ];
+    }
 }
 
 
@@ -69,24 +72,29 @@ function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
         $revisions = WporgOperations::get_plugin_revisions($plugin_post->post_name);
     } catch (\Throwable $e) {
         wporg_log_cache_error($plugin_post, 'root_revision', $e);
-        throw wporg_refresh_failure($e, __('Could not refresh wordpress.org SVN cache.', 'peak-publisher'));
+        return [ 'cache' => $cached, 'changes' => [], 'failure' => wporg_refresh_failure($e, __('Could not refresh wordpress.org SVN cache.', 'peak-publisher')) ];
     }
     if ($revisions === null) {
-        throw new WporgSvnException('not_found', __('wordpress.org SVN plugin was not found.', 'peak-publisher'), 404);
+        return [ 'cache' => $cached, 'changes' => [], 'failure' => new WporgSvnException('not_found', __('wordpress.org SVN plugin was not found.', 'peak-publisher'), 404) ];
     }
     $current_revision = $revisions['revision'];
 
     // The assets mirror keeps its own anchor — the revision of assets/ it holds (0 = none) —
     // so a pull that failed is caught up by the next refresh, fresh cache or not; so is a
-    // mirror file the disk lost.
+    // mirror file the disk lost. Its failure does not stop the cache: the releases are fresh
+    // either way.
     $assets_changed = false;
-    $assets_failure = null;
+    $failure = null;
     try {
         require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
-        $assets_changed = (new WporgAssetSync())->refresh_unlocked($plugin_post, (int) ($revisions['children']['assets'] ?? 0));
+        $assets = (new WporgAssetSync())->refresh_unlocked($plugin_post, (int) ($revisions['children']['assets'] ?? 0));
+        $assets_changed = $assets['changed'];
+        if (!$assets['complete']) {
+            $failure = new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely. They are read again with the next check.', 'peak-publisher'), 502);
+        }
     } catch (\Throwable $e) {
         wporg_log_cache_error($plugin_post, 'assets', $e);
-        $assets_failure = wporg_refresh_failure($e, __('The assets could not be read from wordpress.org.', 'peak-publisher'));
+        $failure = wporg_refresh_failure($e, __('The assets could not be read from wordpress.org.', 'peak-publisher'));
     }
 
     // A cache from before a key existed is refreshed like a stale one (release_count,
@@ -110,7 +118,11 @@ function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
             $sync_summary = sync_wporg_release_posts($plugin_post, $current_revision);
         } catch (\Throwable $e) {
             wporg_log_cache_error($plugin_post, 'sync_releases', $e);
-            throw wporg_refresh_failure($e, __('Could not refresh wordpress.org release cache.', 'peak-publisher'));
+            return [
+                'cache' => $cached,
+                'changes' => wporg_refresh_changes([], null, null, $assets_changed),
+                'failure' => wporg_refresh_failure($e, __('Could not refresh wordpress.org release cache.', 'peak-publisher')),
+            ];
         }
 
         $cache = [
@@ -128,12 +140,10 @@ function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
         refresh_plugin_title_from_reference((int) $plugin_post->ID);
     }
 
-    if ($assets_failure !== null) {
-        throw $assets_failure;
-    }
     return [
         'cache' => $cache,
         'changes' => wporg_refresh_changes($sync_summary, $cached['trunk_readme'] ?? null, $cache['trunk_readme'] ?? null, $assets_changed),
+        'failure' => $failure,
     ];
 }
 

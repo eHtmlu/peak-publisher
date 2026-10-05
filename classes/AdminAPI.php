@@ -599,7 +599,7 @@ class AdminAPI {
      * plugin's figures and its SVN refresh whatever the directory says, which lags SVN by
      * wordpress.org's import. A marker's check completes with its SVN refresh; one that
      * failed is recorded on the marker and shows through `wporg_check`, never as an error of
-     * this request.
+     * this request — and what it changed before it failed is told all the same.
      *
      * Answers what the client then holds: `stats` — figures and check of every marker in
      * scope —, `plugins` — the list row of every marker that moved underneath the client's
@@ -620,14 +620,14 @@ class AdminAPI {
         $open = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], $plugin_id !== null);
         $changes = [];
         foreach ($plugin_id === null ? $open : [ $plugin_id => $open[$plugin_id] ?? null ] as $id => $stamp) {
-            try {
-                $outcome = refresh_wporg_plugin_cache(get_post($id));
+            $refresh = refresh_wporg_plugin_cache(get_post($id));
+            if ($refresh['failure'] === null) {
                 confirm_wporg_directory_check($id, $stamp);
-                if ($outcome['changes'] !== []) {
-                    $changes[$id] = $outcome['changes'];
-                }
-            } catch (WporgSvnException $e) {
-                record_wporg_directory_check_error($id, $e);
+            } else {
+                record_wporg_directory_check_error($id, $refresh['failure']);
+            }
+            if ($refresh['changes'] !== []) {
+                $changes[$id] = $refresh['changes'];
             }
         }
 

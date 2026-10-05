@@ -18,22 +18,19 @@ class WporgAssetSync {
     /**
      * Brings the mirror in step with SVN when the marker is refreshed (the directory said the
      * plugin changed, the editor's Refresh, an upload is prepared): pulls when the mirror is
-     * behind SVN or lost a file. Answers whether a pull changed the mirror; one that did not
-     * arrive completely is the caller's to know (wporg_assets_pull_incomplete) — the next
-     * refresh catches up. The caller holds the lock (refresh_wporg_plugin_cache()).
+     * behind SVN or lost a file. Answers what pull_unlocked() does about the mirror: whether
+     * the pull changed it, and whether it arrived completely — one that did not is caught up
+     * by the next refresh. The caller holds the lock (refresh_wporg_plugin_cache()).
      *
-     * @throws WporgSvnException
+     * @return array{changed: bool, complete: bool}
      */
-    public function refresh_unlocked(\WP_Post $marker, int $assets_revision): bool {
+    public function refresh_unlocked(\WP_Post $marker, int $assets_revision): array {
         if (!$this->is_behind_svn($marker, $assets_revision) && !$this->has_lost_files($marker)) {
-            return false;
+            return [ 'changed' => false, 'complete' => true ];
         }
         raise_wporg_time_limit();
         $pulled = $this->pull_unlocked($marker);
-        if (!$pulled['complete']) {
-            throw new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely. They are read again with the next check.', 'peak-publisher'), 502);
-        }
-        return $pulled['changed'];
+        return [ 'changed' => $pulled['changed'], 'complete' => $pulled['complete'] ];
     }
 
     /**

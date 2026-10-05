@@ -20,6 +20,8 @@ namespace Pblsh\Tests {
         public static array $options = [];
         /** @var array<int, array{hook:string, callback:callable, priority:int}> */
         public static array $actions = [];
+        /** @var array<string, callable[]> The filter callbacks per hook, in the order they were added. */
+        public static array $filters = [];
         /** @var array<int, array{code:int, body:string}|\WP_Error> Scripted answers of wp_remote_get(), consumed in order. */
         public static array $http_responses = [];
         /** @var array<int, array{url:string, args:array}> Every wp_remote_get() call, in order. */
@@ -33,6 +35,7 @@ namespace Pblsh\Tests {
             self::$meta = [];
             self::$options = [];
             self::$actions = [];
+            self::$filters = [];
             self::$http_responses = [];
             self::$http_requests = [];
             self::$next_post_id = 1;
@@ -224,8 +227,16 @@ namespace {
         return true;
     }
 
-    /** Filters pass the value through — no test registers one. */
+    function add_filter(string $hook, callable $callback, int $priority = 10, int $accepted_args = 1): bool {
+        FakeWordPress::$filters[$hook][] = $callback;
+        return true;
+    }
+
+    /** The hook's filters in the order they were added (priorities are not modeled); without one the value passes through. */
     function apply_filters(string $hook, $value, ...$args) {
+        foreach (FakeWordPress::$filters[$hook] ?? [] as $callback) {
+            $value = $callback($value, ...$args);
+        }
         return $value;
     }
 

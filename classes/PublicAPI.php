@@ -294,13 +294,7 @@ class PublicAPI {
 		$result['last_updated']             = gmdate( 'Y-m-d g:ia \G\M\T', strtotime( $last_updated ) );
 		$result['added']                    = gmdate( 'Y-m-d', strtotime( $plugin->post_date_gmt ) );
 		$result['homepage']                 = empty($plugin_data['PluginURI']) ? '' : $plugin_data['PluginURI'];
-		$result['sections']                 = array();
-
-        $sections = $current_release_content['plugin_readme_txt']['content']['sections'] ?? [];
-
-        foreach ($sections as $section_key => $section_content) {
-            $result['sections'][$section_key] = apply_filters( 'the_content', $section_content, $section_key);
-        }
+		$result['sections']                 = render_readme_sections($current_release_content['plugin_readme_txt']['content']['sections'] ?? []);
 		$result['sections']['screenshots'] = ''; // placeholder to put screenshots prior to reviews at the end.
 
 		if ( ! empty( $result['sections']['faq'] ) ) {

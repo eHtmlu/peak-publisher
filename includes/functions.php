@@ -600,6 +600,113 @@ function parse_readme_txt(string $content): array {
 
 
 /**
+ * The oEmbed providers a readme may embed from — wordpress.org's whitelist for plugin readmes
+ * (Plugin_Directory::oembed_whitelist()), "limited to providers that add video support to
+ * plugin readme files".
+ *
+ * @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/class-plugin-directory.php
+ *
+ * @param array $providers WP_oEmbed's providers: match mask => [ endpoint URL, is regex ].
+ * @return array The providers of the whitelisted hosts.
+ */
+function readme_oembed_whitelist(array $providers): array {
+    /**
+     * Filters the hosts a readme may embed from. A provider WordPress does not know has to
+     * be registered as well (wp_oembed_add_provider()).
+     *
+     * @param string[] $whitelist Hosts, each matched as part of a provider's endpoint URL.
+     */
+    $whitelist = (array) apply_filters('pblsh_readme_oembed_providers', array(
+        'youtube.com',
+        'vimeo.com',
+        'wordpress.com',
+        'wordpress.tv',
+        'vine.co',
+        'soundcloud.com',
+        'instagram.com',
+        'mixcloud.com',
+        'cloudup.com',
+    ));
+
+    // START - Copy of WordPress.org code, the whitelist above taken out of the callback
+    return array_filter( $providers, function ( $provider ) use ( $whitelist ) {
+        foreach ( $whitelist as $url ) {
+            if ( false !== strpos( $provider[0], $url ) ) {
+                return true;
+            }
+        }
+
+        return false;
+    } );
+    // END - Copy of WordPress.org code
+}
+
+
+/**
+ * Renders readme sections for the plugin information as wordpress.org's API does: through
+ * the_content, under the limits its plugin directory sets for its whole site — no oEmbed
+ * discovery, embeds from the whitelisted providers only, none but the allowed shortcodes,
+ * no [embed]. A readme can thereby make this server contact the whitelisted providers and
+ * nobody else. Unlike there, the limits hold for this rendering alone: the site keeps its
+ * own embeds and shortcodes.
+ *
+ * @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/class-plugin-directory.php
+ *
+ * @param array<string, string> $sections The parsed sections by key.
+ * @return array<string, string> The rendered HTML by key.
+ */
+function render_readme_sections(array $sections): array {
+    global $shortcode_tags;
+
+    // oEmbed whitelisting. WordPress fixes the provider list when it builds its oEmbed object,
+    // so the list is exchanged on the object: an oembed_providers filter added here would come
+    // too late or outlive this rendering.
+    $no_discovery = static fn(): bool => false;
+    add_filter('embed_oembed_discover', $no_discovery, PHP_INT_MAX);
+    $oembed = _wp_oembed_get_object();
+    $site_providers = $oembed->providers;
+    $oembed->providers = readme_oembed_whitelist($site_providers);
+
+    $site_shortcode_tags = $shortcode_tags;
+    /**
+     * Filters the shortcodes a readme may use. The default is wordpress.org's video
+     * shortcodes; WordPress registers neither, they work where a plugin provides them.
+     *
+     * @param string[] $allowed_shortcodes Shortcode tags.
+     */
+    $allowed_shortcodes = (array) apply_filters('pblsh_readme_shortcodes', array(
+        'youtube',
+        'vimeo',
+    ));
+
+    // START - Copy of WordPress.org code (Plugin_Directory::remove_other_shortcodes())
+    $not_allowed_shortcodes = array_diff( array_keys( $shortcode_tags ), $allowed_shortcodes );
+    foreach ( $not_allowed_shortcodes as $tag ) {
+        remove_shortcode( $tag );
+    }
+
+    // remove special embed shortcode handling
+    $embed_shortcode_removed = remove_filter( 'the_content', array( $GLOBALS['wp_embed'], 'run_shortcode' ), 8 );
+    // END - Copy of WordPress.org code
+
+    try {
+        $rendered = [];
+        foreach ($sections as $section_key => $section_content) {
+            $rendered[$section_key] = apply_filters('the_content', $section_content, $section_key);
+        }
+        return $rendered;
+    } finally {
+        remove_filter('embed_oembed_discover', $no_discovery, PHP_INT_MAX);
+        $oembed->providers = $site_providers;
+        $shortcode_tags = $site_shortcode_tags;
+        if ($embed_shortcode_removed) {
+            add_filter('the_content', array($GLOBALS['wp_embed'], 'run_shortcode'), 8);
+        }
+    }
+}
+
+
+/**
  * Sets the `Stable tag:` header of a readme to $value — the one place the pointer is written
  * into a readme: R1 in analyze (the release's readme names its own version), the trunk
  * variant of a deploy, the flip. Works on the header block exactly as wordpress.org's parser

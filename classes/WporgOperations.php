@@ -152,13 +152,18 @@ class WporgOperations {
      * @param array{make_current:bool, relation:string, expected:?string, readme_file_name:string} $pointer
      *        The decision, the relation and the pointer the dialog showed (null = unknown), and
      *        the workspace readme's file name (finalize guarantees one).
+     * @param callable|null $after_commit fn(array $deploy): void — the caller's local
+     *        write-through, run once the commit landed and still under the lock (see
+     *        commit_files()): no refresh of the marker can read SVN between the commit and
+     *        what the caller writes from it. $deploy is what this method returns, without
+     *        commit_files()'s own base_revision and details.
      * @return array{revision:int|null, committed:bool, details:array, touched_trunk:bool,
      *         stable_tag_before:?string, stable_tag_written:?string, pointer_changed:bool, trunk_readme:?array}
      *         stable_tag_before = the live pointer (null = unreadable), stable_tag_written = the
      *         value written to trunk (null = trunk readme untouched), trunk_readme = the cache
      *         entry of the written trunk readme (null = none written).
      */
-    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk, array $pointer): array {
+    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk, array $pointer, ?callable $after_commit = null): array {
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
         $version = self::safe_path_segment($version);
         $root = trailingslashit($root);
@@ -244,6 +249,8 @@ class WporgOperations {
                 ],
                 'cleanup' => $cleanup,
             ];
+        }, $after_commit === null ? null : static function(int $revision) use ($after_commit, $touch_trunk, &$outcome): void {
+            $after_commit([ 'revision' => $revision, 'committed' => true, 'touched_trunk' => $touch_trunk, ...$outcome ]);
         });
 
         return [ ...$result, 'touched_trunk' => $touch_trunk, ...$outcome ];
@@ -481,10 +488,11 @@ class WporgOperations {
 
     /**
      * Runs $fn under the plugin's write lock — the lock every commit takes — for a local write
-     * that must not interleave with a commit (a change of the assets working copy). A holder
-     * that is over in seconds is waited for; throws the catalog's deploy_in_progress when a
-     * commit holds the lock, wporg_plugin_busy when a pull or another local write outlasts
-     * the wait (acquire_wporg_deploy_lock() decides by the holder).
+     * that must not interleave with a commit or another local write (a change of the assets
+     * working copy, the refresh of a marker from SVN). A holder that is over in seconds is
+     * waited for; throws the catalog's deploy_in_progress when a commit holds the lock,
+     * wporg_plugin_busy when a local holder outlasts the wait (acquire_wporg_deploy_lock()
+     * decides by the holder).
      */
     public static function under_plugin_lock(string $wporg_slug, string $operation, int $plugin_id, callable $fn): mixed {
         $lock = self::acquire_wporg_deploy_lock(self::normalize_slug_or_throw($wporg_slug), '', $operation, $plugin_id);
@@ -1300,12 +1308,12 @@ class WporgOperations {
         return trim(trim($base, '/') . '/' . trim($rel, '/'), '/');
     }
 
-    // Lock holders that are over in seconds — the assets pull and a working-copy change, no
-    // commit. A caller that runs into one waits for it (LOCAL_LOCK_WAIT): a click must not
-    // fail because the mirror was being pulled at that moment. One that outlasts the wait is
-    // told wporg_plugin_busy; a commit takes minutes and is told at once, as
-    // deploy_in_progress.
-    private const LOCAL_LOCK_OPERATIONS = [ 'assets_pull', 'assets_change' ];
+    // Lock holders that are over in seconds — the assets pull, a working-copy change and the
+    // refresh of a marker from SVN, no commit. A caller that runs into one waits for it
+    // (LOCAL_LOCK_WAIT): a click must not fail because the background check was reading the
+    // plugin at that moment. One that outlasts the wait is told wporg_plugin_busy; a commit
+    // takes minutes and is told at once, as deploy_in_progress.
+    private const LOCAL_LOCK_OPERATIONS = [ 'assets_pull', 'assets_change', 'refresh' ];
     private const LOCAL_LOCK_WAIT = 10; // seconds
 
     private static function acquire_wporg_deploy_lock(string $wporg_slug, string $username, string $operation = 'deploy', ?int $plugin_id = null, bool $wait = true): array {
@@ -1359,8 +1367,8 @@ class WporgOperations {
                     }
                 }
 
-                // The holder decides: a commit takes minutes and ends the attempt, a pull or a
-                // working-copy change seconds — worth the wait while it lasts.
+                // The holder decides: a commit takes minutes and ends the attempt, a pull, a
+                // working-copy change or a refresh seconds — worth the wait while it lasts.
                 $held_by = is_array($existing) ? (string) ($existing['operation'] ?? '') : '';
                 $local = in_array($held_by, self::LOCAL_LOCK_OPERATIONS, true);
                 if (!$local || microtime(true) >= $deadline) {
@@ -1444,7 +1452,7 @@ class WporgOperations {
             'invalid_svn_path' => [__('The plugin contains a file or folder path that cannot be published to wordpress.org SVN. Remove path segments containing ".." or backslashes and try again.', 'peak-publisher'), 400],
             'invalid_svn_path_segment' => [__('The version cannot be used as a wordpress.org SVN path segment. Remove slashes, backslashes, and ".." from the version.', 'peak-publisher'), 400],
             'deploy_in_progress' => [__('Another change to this plugin is still being written to wordpress.org. Try again in a few minutes.', 'peak-publisher'), 409],
-            'wporg_plugin_busy' => [__("This plugin's assets are being updated right now. Try again in a moment.", 'peak-publisher'), 409],
+            'wporg_plugin_busy' => [__("This plugin's data is being updated right now. Try again in a moment.", 'peak-publisher'), 409],
             'current_release_changed' => [__('The current release on wordpress.org changed in the meantime. Reload and check the decision again.', 'peak-publisher'), 409],
             'wporg_trunk_readme_unreadable' => [__('trunk/readme.txt could not be read from wordpress.org, so the Stable tag cannot be handled safely. Try again.', 'peak-publisher'), 502],
             'wporg_readme_variant_failed' => [__('The readme variant for trunk could not be written on this server.', 'peak-publisher'), 500],

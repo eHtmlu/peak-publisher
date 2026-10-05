@@ -1212,6 +1212,41 @@ class UploadWorkflow {
         // Store the account used for this deploy on the marker
         update_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', $username);
 
+        // The deploy's local write-through: its outcome into the upload state, the written trunk
+        // readme into the cache, the mirror post of the tag with the upload state on it. It runs
+        // under the deploy's own lock, right after the commit landed (deploy_directory()) — a
+        // refresh of the marker in between would read the new tag from SVN and create the same
+        // release post beside this one.
+        $release_id = null;
+        $write_through = static function(array $deploy) use (&$data, &$release_id, $marker, $version, $username, $target, $make_current): void {
+            // Deploy outcome, recorded where it becomes known — the mirror post below is regenerated
+            // from SVN and cannot tell how the tag got there, nor what the decision did to trunk.
+            $data['hosting_type_resolved'] = 'wporg';
+            $data['wporg_deploy'] = [
+                'username' => $username,
+                'deploy_mode' => (string) $target['deploy_mode'],
+                'revision' => $deploy['revision'],
+                'touched_trunk' => !empty($deploy['touched_trunk']),
+                'current_release' => [
+                    'make_current' => $make_current,
+                    'stable_tag_before' => $deploy['stable_tag_before'],
+                    'stable_tag_written' => $deploy['stable_tag_written'],
+                    'pointer_changed' => $deploy['pointer_changed'],
+                ],
+            ];
+
+            // The cache learns the written trunk readme first (write-through), then the mirror post
+            // is upserted and the title follows the reference — otherwise the title would follow
+            // the old pointer. The revision keys are dropped either way; the next read refreshes.
+            mark_wporg_plugin_cache_stale((int) $marker->ID, $deploy['trunk_readme'] !== null ? [ 'trunk_readme' => $deploy['trunk_readme'] ] : []);
+            $release_id = sync_wporg_deployed_release_post($marker, $version);
+            if (!is_wp_error($release_id)) {
+                // The upload state is the forensic record of this deploy. It lives in post meta because the
+                // mirror post's content is regenerated from SVN by the tag sync and must stay that way.
+                update_post_meta((int) $release_id, '_pblsh_upload_state', wp_slash(json_encode($data)));
+            }
+        };
+
         // Deploy the prepared directory to wordpress.org SVN, executing the current-release
         // decision against the live pointer (the analysis fact is the dialog's expectation).
         require_once __DIR__ . '/WporgOperations.php';
@@ -1222,34 +1257,18 @@ class UploadWorkflow {
                 'relation' => (string) $target['current_release']['relation'],
                 'expected' => $target['current_release']['pointer'],
                 'readme_file_name' => (string) ($data['plugin_readme_txt']['file_name'] ?? ''),
-            ]);
+            ], $write_through);
         } catch (WporgSvnException $e) {
             return $this->upload_error($e->get_error_code(), $e->getMessage());
         } catch (\Throwable $e) {
             return $this->upload_error('wporg_deploy_failed', __('Publishing to wordpress.org SVN failed.', 'peak-publisher'));
         }
 
-        // Deploy outcome, recorded where it becomes known — the mirror post below is regenerated
-        // from SVN and cannot tell how the tag got there, nor what the decision did to trunk.
-        $data['hosting_type_resolved'] = 'wporg';
-        $data['wporg_deploy'] = [
-            'username' => $username,
-            'deploy_mode' => (string) $target['deploy_mode'],
-            'revision' => $deploy_result['revision'],
-            'touched_trunk' => !empty($deploy_result['touched_trunk']),
-            'current_release' => [
-                'make_current' => $make_current,
-                'stable_tag_before' => $deploy_result['stable_tag_before'],
-                'stable_tag_written' => $deploy_result['stable_tag_written'],
-                'pointer_changed' => $deploy_result['pointer_changed'],
-            ],
-        ];
-
-        // The cache learns the written trunk readme first (write-through), then the mirror post
-        // is upserted and the title follows the reference — otherwise the title would follow
-        // the old pointer. The revision keys are dropped either way; the next read refreshes.
-        mark_wporg_plugin_cache_stale((int) $marker->ID, $deploy_result['trunk_readme'] !== null ? [ 'trunk_readme' => $deploy_result['trunk_readme'] ] : []);
-        $release_id = sync_wporg_deployed_release_post($marker, $version);
+        // Nothing to commit — the tag held this content already: there was no commit to follow
+        // under its lock, the write-through is still due.
+        if (!$deploy_result['committed']) {
+            $write_through($deploy_result);
+        }
         if (is_wp_error($release_id)) {
             return [
                 'status' => 'error',
@@ -1261,10 +1280,6 @@ class UploadWorkflow {
                 'plugin_id' => (int) $marker->ID,
             ];
         }
-
-        // The upload state is the forensic record of this deploy. It lives in post meta because the
-        // mirror post's content is regenerated from SVN by the tag sync and must stay that way.
-        update_post_meta((int) $release_id, '_pblsh_upload_state', wp_slash(json_encode($data)));
 
         delete_directory_with_race_protection($this->tmp_root);
 

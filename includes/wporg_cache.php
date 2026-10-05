@@ -43,12 +43,27 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
  * with its code and message; a failure of the assets alone is thrown after the cache is
  * written, so the releases are fresh either way.
  *
+ * Under the plugin's lock from the first read to the last write, like every commit and its
+ * local write-through: what is read from SVN here is still true when it is written, and no
+ * second refresh and no deploy creates the same release post beside this one. A commit that
+ * holds the lock, or a local holder that outlasts the wait, is this refresh's failure
+ * (deploy_in_progress, wporg_plugin_busy) — the next one catches up.
+ *
  * @return array{cache: array, changes: array}
  * @throws WporgSvnException When the marker could not be brought in step completely.
  */
 function refresh_wporg_plugin_cache(\WP_Post $plugin_post): array {
     require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
 
+    return WporgOperations::under_plugin_lock($plugin_post->post_name, 'refresh', (int) $plugin_post->ID, static function() use ($plugin_post): array {
+        // Read anew: whoever held the lock until now may have written the marker.
+        return refresh_wporg_plugin_cache_unlocked(get_post((int) $plugin_post->ID));
+    });
+}
+
+
+/** The refresh itself; the caller holds the plugin's lock (refresh_wporg_plugin_cache()). */
+function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
     $cached = wporg_decode_json_object((string) $plugin_post->post_content);
     try {
         $revisions = WporgOperations::get_plugin_revisions($plugin_post->post_name);
@@ -62,13 +77,13 @@ function refresh_wporg_plugin_cache(\WP_Post $plugin_post): array {
     $current_revision = $revisions['revision'];
 
     // The assets mirror keeps its own anchor — the revision of assets/ it holds (0 = none) —
-    // so a pull that could not run (a commit held the lock) or failed is caught up by the next
-    // refresh, fresh cache or not; so is a mirror file the disk lost.
+    // so a pull that failed is caught up by the next refresh, fresh cache or not; so is a
+    // mirror file the disk lost.
     $assets_changed = false;
     $assets_failure = null;
     try {
         require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
-        $assets_changed = (new WporgAssetSync())->refresh($plugin_post, (int) ($revisions['children']['assets'] ?? 0));
+        $assets_changed = (new WporgAssetSync())->refresh_unlocked($plugin_post, (int) ($revisions['children']['assets'] ?? 0));
     } catch (\Throwable $e) {
         wporg_log_cache_error($plugin_post, 'assets', $e);
         $assets_failure = wporg_refresh_failure($e, __('The assets could not be read from wordpress.org.', 'peak-publisher'));

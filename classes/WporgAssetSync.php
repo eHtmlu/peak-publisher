@@ -20,26 +20,22 @@ class WporgAssetSync {
      * plugin changed, the editor's Refresh, an upload is prepared): pulls when the mirror is
      * behind SVN or lost a file, else records that it was just confirmed against SVN
      * (listed_at — with the directory's stamp check the bar's "checked …"). Answers whether a
-     * pull changed the mirror. A mirror that could not be brought in step is the caller's to
-     * know: the lock's own error while a commit or a change holds it, and
-     * wporg_assets_pull_incomplete when a file did not arrive — the next refresh catches up.
-     * The confirmation alone is skipped while the lock is held: a timestamp can wait.
+     * pull changed the mirror; one that did not arrive completely is the caller's to know
+     * (wporg_assets_pull_incomplete) — the next refresh catches up. The caller holds the lock
+     * (refresh_wporg_plugin_cache()).
      *
      * @throws WporgSvnException
      */
-    public function refresh(\WP_Post $marker, int $assets_revision): bool {
+    public function refresh_unlocked(\WP_Post $marker, int $assets_revision): bool {
         if ($this->is_behind_svn($marker, $assets_revision) || $this->has_lost_files($marker)) {
             raise_wporg_time_limit();
-            $pulled = WporgOperations::under_plugin_lock($marker->post_name, 'assets_pull', (int) $marker->ID, fn(): array => $this->pull_unlocked($marker));
+            $pulled = $this->pull_unlocked($marker);
             if (!$pulled['complete']) {
                 throw new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely. They are read again with the next check.', 'peak-publisher'), 502);
             }
             return $pulled['changed'];
         }
-        WporgOperations::try_under_plugin_lock($marker->post_name, 'assets_pull', (int) $marker->ID, static function() use ($marker): bool {
-            update_wporg_assets_state((int) $marker->ID, [ ...get_wporg_assets_state((int) $marker->ID), 'listed_at' => time() ]);
-            return true;
-        });
+        update_wporg_assets_state((int) $marker->ID, [ ...get_wporg_assets_state((int) $marker->ID), 'listed_at' => time() ]);
         return false;
     }
 
@@ -422,7 +418,7 @@ class WporgAssetSync {
         ] : [ ...$state, 'pending' => [] ]);
     }
 
-    /** Runs a change of the working copy under the commit lock: a pull or another change is waited for, a commit — or one of those outlasting the wait — refuses it (deploy_in_progress, wporg_plugin_busy). */
+    /** Runs a change of the working copy under the commit lock: a pull, a refresh or another change is waited for, a commit — or one of those outlasting the wait — refuses it (deploy_in_progress, wporg_plugin_busy). */
     private function locked(\WP_Post $marker, callable $fn): array|\WP_Error {
         try {
             return WporgOperations::under_plugin_lock($marker->post_name, 'assets_change', (int) $marker->ID, $fn);

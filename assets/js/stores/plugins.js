@@ -213,8 +213,7 @@
         // store (applyWporgRefresh). Resolves to the answer, whose `plugins` are the rows that
         // moved, so a caller can reload what else it holds of them. One at a time: a refresh
         // asked for while another runs starts once that one has settled, so the manual Refresh
-        // is never refused and never runs beside the automatic check — two refreshes of one
-        // changed plugin would sync its tags side by side.
+        // is never refused and its answer, the later one, is applied last.
         refreshWporg: function(pluginId) {
             var refresh = wporgRefreshes.then(function() {
                 return runWporgRefresh(pluginId || null);

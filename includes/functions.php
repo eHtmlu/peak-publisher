@@ -574,6 +574,10 @@ function default_plugin_readme_txt_data(): array {
  * Parses a WordPress.org-style readme.txt into headers/sections and includes raw content.
  * Returns associative array suitable for storage under data.plugin_readme_txt.
  *
+ * $content is readme content and nothing else. The parser's own constructor takes "a
+ * filepath, URL, or contents" and reads whatever a path or URL names, so it is replaced:
+ * a readme that merely looks like one is parsed as the text it is, never dereferenced.
+ *
  * @param string $content Content of the readme.txt file.
  * @return array Parsed readme.txt content.
  */
@@ -582,7 +586,13 @@ function parse_readme_txt(string $content): array {
     require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/class-markdown.php';
 
     // Use the official parser of wordpress.org
-    $parser = new \Pblsh\Vendor\WordPressdotorg\Plugin_Directory\Readme\Parser($content);
+    $parser = new class($content) extends \Pblsh\Vendor\WordPressdotorg\Plugin_Directory\Readme\Parser {
+        public function __construct(string $content) {
+            if ($content !== '') {
+                $this->parse_readme_contents($content);
+            }
+        }
+    };
     // Return the full parser data structure
     $data = get_object_vars($parser);
     return is_array($data) ? $data : [];

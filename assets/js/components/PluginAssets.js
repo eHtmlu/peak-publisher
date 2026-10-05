@@ -30,7 +30,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const pluginId = pluginData ? pluginData.id : null;
     const assets = useSelect((select) => pluginId ? select('pblsh/assets').getForPlugin(pluginId) : null, [pluginId]);   // null = not yet loaded
     const assetsLoading = useSelect((select) => pluginId ? select('pblsh/assets').isLoadingForPlugin(pluginId) : false, [pluginId]);
-    const setAssets = (view) => wp.data.dispatch('pblsh/assets').setView(pluginId, view);
+    const setAssets = (view) => Pblsh.Controllers.Assets.showAfterWrite(pluginId, view);   // every caller is a write's answer
     const [busy, setBusy]                   = useState(null);   // 'committing' | 'working' | null — a working-copy request in flight
     const [showWporgState, setShowWporgState] = useState(false); // wordpress.org's state alone, read-only
     const [notice, setNotice]               = useState(null);   // the last commit's outcome

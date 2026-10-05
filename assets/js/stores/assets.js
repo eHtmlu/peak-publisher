@@ -1,7 +1,8 @@
 /* Assets Store for Peak Publisher — the editor's view of a plugin's assets (the server's
    describe() payload), one per plugin id. Loaded when the editor opens and reloaded with the
-   plugin (refreshPlugin), like the releases, and set by every write's answer; it survives a
-   switch to another tab, so the tab opens without a request. */
+   plugin (refreshPlugin), like the releases, and set by every write's answer — never by an
+   answer older than the one shown; it survives a switch to another tab, so the tab opens
+   without a request. */
 (function() {
     'use strict';
     var registerStore = wp.data.registerStore;
@@ -51,16 +52,33 @@
     });
     window.Pblsh = window.Pblsh || {};
     window.Pblsh.Controllers = window.Pblsh.Controllers || {};
+    // Which answer the store shows, per plugin. A load takes its number when it is asked for, a
+    // write when it is answered: its answer is the state after it, newer than any load asked
+    // for before. A view is taken only when it is newer than the one shown — a load that was
+    // overtaken, by a later load or by a write answered meanwhile, would put an older state
+    // over a newer one.
+    var newest = 0;
+    var shown = {};
+    function show(pluginId, number, view) {
+        if (number < (shown[pluginId] || 0)) return;
+        shown[pluginId] = number;
+        wp.data.dispatch('pblsh/assets').setView(pluginId, view);
+    }
     window.Pblsh.Controllers.Assets = {
         // Loads the view; one already there stays visible meanwhile. A failure is the caller's to report.
         fetchForPlugin: async function(pluginId) {
             var dispatch = wp.data.dispatch('pblsh/assets');
+            var number = ++newest;
             try {
                 dispatch.setLoading(pluginId, true);
-                dispatch.setView(pluginId, await window.Pblsh.API.getPluginAssets(pluginId));
+                show(pluginId, number, await window.Pblsh.API.getPluginAssets(pluginId));
             } finally {
                 dispatch.setLoading(pluginId, false);
             }
+        },
+        // The view a write answered with.
+        showAfterWrite: function(pluginId, view) {
+            show(pluginId, ++newest, view);
         },
     };
 })();

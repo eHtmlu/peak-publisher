@@ -2187,6 +2187,13 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 .pblsh--list {
     margin: 1.25rem 0; /* 20px */
 }
+/* The freshness of the wordpress.org rows, right-aligned over the table it speaks for */
+.pblsh--list__check {
+    text-align: right;
+}
+.pblsh--list__check + .pblsh--table-container {
+    margin-top: 0.5rem; /* 8px */
+}
 
 /* The one-time upgrade notice above the plugin list — aligned with the list's margin;
    one section per migration topic, each led by its own heading line */
@@ -2602,16 +2609,18 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     gap: 1rem;
 }
 
-/* The status of the wordpress.org figures beside the plugin's status button: source,
-   fetch age, last failure and the Refresh link, which reads like its neighbouring
-   fragments (renderWporgFiguresStatus() in PluginEditor.js) */
-.pblsh--plugin-header__figures {
-    color: #666;
-    font-size: 0.8125rem;
+/* The freshness of the plugin's wordpress.org data beside its status button */
+.pblsh--plugin-header__check {
     text-align: right;
 }
 
-.pblsh--plugin-header__figures .components-button.is-link {
+/* How fresh the wordpress.org data on screen is (WporgCheckStatus): one muted line of
+   fragments; a link among them — the editor's Refresh — reads like its neighbours */
+.pblsh--wporg-check {
+    color: #666;
+    font-size: 0.8125rem;
+}
+.pblsh--wporg-check .components-button.is-link {
     font-size: inherit;
     line-height: inherit;
     vertical-align: baseline;

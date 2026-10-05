@@ -98,8 +98,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // asks then and not before, so in between this costs neither server a request. That
         // moment is the timer's to find, and every look's that comes after it: showing the list,
         // opening a plugin, the browser tab coming back into view or getting the focus. A hidden
-        // tab asks nothing. A failed check stays quiet — the cached state stands, the editor's
-        // Refresh link reports its own.
+        // tab asks nothing. A failed check stays quiet; the status line says how old the data is,
+        // and the editor's Refresh link reports its own.
         const nextWporgCheckAt = useSelect((select) => select('pblsh/plugins').getNextWporgCheckAt(), []);
         const showsWporgData = hasLoadedList && (view === 'list' || view === 'editor')
             && plugins.some((plugin) => plugin.hosting_type === 'wporg');

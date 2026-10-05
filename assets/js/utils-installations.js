@@ -37,9 +37,15 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
             : __('This plugin has been closed on wordpress.org. Nothing is distributed while it is closed.', 'peak-publisher');
     }
 
-    // The last failed attempt, as the editor's header row explains it.
-    function getLastErrorText(lastError) {
-        return sprintf(__('wordpress.org could not be reached %1$s: %2$s', 'peak-publisher'), formatRelativeTime(lastError.at), lastError.message);
+    // What the tooltip of every wordpress.org figure ends with: how old the daily figures
+    // are, and the last failed attempt to fetch them.
+    function withFiguresAge(plugin, figure) {
+        const inst = plugin.installations;
+        return { ...figure, title: [
+            figure.title,
+            inst.fetched_at && sprintf(__('Updated %s', 'peak-publisher'), formatRelativeTime(inst.fetched_at)),
+            inst.last_error && sprintf(__('wordpress.org could not be reached %1$s: %2$s', 'peak-publisher'), formatRelativeTime(inst.last_error.at), inst.last_error.message),
+        ].filter(Boolean).join(' · ') };
     }
 
     // Whether a wordpress.org plugin's first figures are on their way: a directory refresh
@@ -52,7 +58,7 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
 
     // The cell of the list and the editor header, one vocabulary for both channels — the
     // row shows the channel, the cell says what the figure is. A failed fetch does not
-    // touch the cell: the figures keep their last state, the editor's header row tells.
+    // touch the cell: the figures keep their last state, the tooltip tells.
     function getInstallationsCell(plugin) {
         const inst = plugin.installations;
         if (plugin.hosting_type !== 'wporg') {
@@ -62,23 +68,23 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
         }
         switch (inst.state) {
             case 'ok':
-                return formatWporgActiveInstalls(inst.count);
+                return withFiguresAge(plugin, formatWporgActiveInstalls(inst.count));
             case 'closed':
-                return { text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) };
+                return withFiguresAge(plugin, { text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) });
             case 'not_found':
-                return { text: '—', title: __('Not listed on wordpress.org', 'peak-publisher') };
+                return withFiguresAge(plugin, { text: '—', title: __('Not listed on wordpress.org', 'peak-publisher') });
             default:
-                return { text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') };
+                return withFiguresAge(plugin, { text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') });
         }
     }
 
     // The editor's Downloads figure: the all-time total, or what stands in for it.
     function getDownloads(plugin) {
-        if (plugin.installations.state === 'closed') return { text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) };
+        if (plugin.installations.state === 'closed') return withFiguresAge(plugin, { text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) });
         const downloaded = plugin.wporg_stats.downloaded;
-        return typeof downloaded === 'number'
+        return withFiguresAge(plugin, typeof downloaded === 'number'
             ? { text: downloaded.toLocaleString(), title: __('Total downloads · Reported by wordpress.org', 'peak-publisher') }
-            : { text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') };
+            : { text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') });
     }
 
     // The editor's Rating figure as wordpress.org shows it: five stars in half-star steps
@@ -86,24 +92,24 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
     // beside them, spelled out in the tooltip. `stars` is null when there is nothing to
     // draw — then `text` stands in the value (closed, not fetched or not rated: "—").
     function getRating(plugin) {
-        if (plugin.installations.state === 'closed') return { stars: null, count: null, text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) };
+        if (plugin.installations.state === 'closed') return withFiguresAge(plugin, { stars: null, count: null, text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) });
         const stats = plugin.wporg_stats;
-        if (typeof stats.rating !== 'number') return { stars: null, count: null, text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') };
-        if (!stats.num_ratings) return { stars: null, count: null, text: '—', title: __('No ratings on wordpress.org yet', 'peak-publisher') };
+        if (typeof stats.rating !== 'number') return withFiguresAge(plugin, { stars: null, count: null, text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') });
+        if (!stats.num_ratings) return withFiguresAge(plugin, { stars: null, count: null, text: '—', title: __('No ratings on wordpress.org yet', 'peak-publisher') });
         const halves = Math.round(stats.rating / 10);
         const stars = Array.from({ length: 5 }, (unused, index) => {
             const filled = halves - index * 2;
             return filled >= 2 ? 'star' : (filled === 1 ? 'star_half_full' : 'star_outline');
         });
         const count = stats.num_ratings.toLocaleString();
-        return {
+        return withFiguresAge(plugin, {
             stars,
             count,
             text: null,
             title: sprintf(_n('%1$s out of 5 stars from %2$s rating · Reported by wordpress.org', '%1$s out of 5 stars from %2$s ratings · Reported by wordpress.org', stats.num_ratings, 'peak-publisher'),
                 (stats.rating / 20).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }), count),
-        };
+        });
     }
 
-    return { formatWporgActiveInstalls, isFirstFetchRunning, getInstallationsCell, getWporgClosedFact, getWporgClosedNotice, getLastErrorText, getDownloads, getRating };
+    return { formatWporgActiveInstalls, isFirstFetchRunning, getInstallationsCell, getWporgClosedFact, getWporgClosedNotice, getDownloads, getRating };
 })());

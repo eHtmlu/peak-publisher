@@ -5,7 +5,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
     const { showAlert, getSvgIcon, getPluginStatus } = Pblsh.Utils;
-    const { ChannelPath, CurrentVersion, InstallationsCount } = Pblsh.Components;
+    const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus } = Pblsh.Components;
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
@@ -38,6 +38,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     // The column shows whenever any row has a figure to show — self-hosted with counting
     // on, wordpress.org always (its figure is public); the setting is not read here.
     const showInstallations = plugins.some((plugin) => plugin.installations.state !== 'disabled');
+    const wporgPlugins = plugins.filter((plugin) => plugin.hosting_type === 'wporg');
 
     return createElement('div', { className: 'pblsh--list' },
         !hasLoadedList
@@ -47,7 +48,12 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
             :
         plugins.length === 0 
             ? createElement('p', { className: 'pblsh--no-plugins' }, __('No plugins created yet.', 'peak-publisher'))
-            : createElement('div', { className: 'pblsh--table-container' },
+            : createElement(wp.element.Fragment, null,
+              // How fresh the wordpress.org rows are — the oldest check among them.
+              wporgPlugins.length > 0 && createElement('div', { className: 'pblsh--list__check' },
+                createElement(WporgCheckStatus, { plugins: wporgPlugins }),
+              ),
+              createElement('div', { className: 'pblsh--table-container' },
                 createElement('table', { className: 'pblsh--table' },
                     createElement('thead', null,
                         createElement('tr', null,
@@ -136,6 +142,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                         )
                     )
                 )
+              ),
             )
     );
 }); 

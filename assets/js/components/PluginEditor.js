@@ -4,10 +4,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip, Button, Spinner } = wp.components;
-    const { getSvgIcon, formatRelativeTime, getTimeTooltipProps, getPluginStatus } = Pblsh.Utils;
+    const { getSvgIcon, getPluginStatus } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
-    const { getLastErrorText, getDownloads, getRating, getWporgClosedNotice, isFirstFetchRunning } = Pblsh.InstallationsUtils;
-    const { NoticeBox, CurrentVersion, InstallationsCount, Figure } = Pblsh.Components;
+    const { getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
+    const { NoticeBox, CurrentVersion, InstallationsCount, Figure, WporgCheckStatus } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
     const isWporg = pluginData && pluginData.hosting_type === 'wporg';
@@ -28,11 +28,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const [flippingReleaseId, setFlippingReleaseId] = useState(null);
     const [flipNotice, setFlipNotice] = useState(null);
     useEffect(() => { setFlipNotice(null); }, [pluginData && pluginData.id]);
-    // The manual stats refresh (wordpress.org): while it runs, the three figures show a
-    // spinner. Its outcome shows through the data — the fetch age becomes "just now", a
-    // failure appears beside it.
-    const [refreshingStats, setRefreshingStats] = useState(false);
-    const isRefreshingAnyStats = useSelect((select) => select('pblsh/plugins').isRefreshingWporg(), []);
+    // The manual refresh from wordpress.org: while it runs, the three figures show a spinner.
+    // Its outcome shows through the data — the status line reads "just now", a check that
+    // failed stands beside it.
+    const [refreshingWporg, setRefreshingWporg] = useState(false);
     const validTabs = ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
 
@@ -60,67 +59,25 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     // The Refresh link: this plugin's figures and its state straight from SVN, whatever the
     // directory says — it lags SVN by wordpress.org's import —, tabs included (refreshWporg).
     // The data says the rest; a failure of the request itself is reported like the flip's.
-    const refreshStats = async () => {
-        if (!pluginData || refreshingStats) return;
-        setRefreshingStats(true);
+    const refreshFromWporg = async () => {
+        if (!pluginData || refreshingWporg) return;
+        setRefreshingWporg(true);
         try {
             await refreshWporg(pluginData.id);
         } catch (e) {
-            alert((e?.message || __('Could not refresh the wordpress.org figures.', 'peak-publisher'))
+            alert((e?.message || __('Could not refresh from wordpress.org.', 'peak-publisher'))
                 + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));
         } finally {
-            setRefreshingStats(false);
+            setRefreshingWporg(false);
         }
-    };
-
-    // The status of the wordpress.org stats (installations, downloads, rating) in the
-    // card's header row, beside the plugin's status button: the fetch age, the last
-    // failure, and the Refresh link — one line for the three values it covers; every
-    // value names its source in its tooltip. A plugin never fetched because the server
-    // cannot reach wordpress.org gets that as the line itself. Muted fragments, ' · '
-    // separated, no period, sentence case except "wordpress.org".
-    const renderWporgFiguresStatus = () => {
-        const inst = pluginData.installations;
-        const fragments = [];
-        let refreshable = true;
-        if (inst.state === 'never' && inst.last_error) {
-            fragments.push(createElement(Tooltip, { text: getLastErrorText(inst.last_error) },
-                createElement('span', { tabIndex: 0 }, __('wordpress.org could not be reached from this server', 'peak-publisher'))));
-        } else if (isFirstFetchRunning(pluginData, isRefreshingAnyStats)) {
-            fragments.push(__('Fetching stats…', 'peak-publisher'));
-            refreshable = false;
-        } else {
-            if (inst.fetched_at) {
-                fragments.push(createElement('span', null, __('Stats updated', 'peak-publisher'), ' ',
-                    createElement('time', getTimeTooltipProps(inst.fetched_at), formatRelativeTime(inst.fetched_at))));
-            } else {
-                fragments.push(__('Stats not fetched yet', 'peak-publisher'));
-            }
-            if (inst.last_error) {
-                fragments.push(createElement(Tooltip, { text: getLastErrorText(inst.last_error) },
-                    createElement('span', { tabIndex: 0 }, __('Could not be reached', 'peak-publisher'))));
-            }
-        }
-        // Locked only while its own refresh runs — after a failure the user may try again at
-        // once, and a click during the automatic check is taken: the store runs it next.
-        if (refreshable) {
-            fragments.push(createElement(Button, {
-                isLink: true,
-                isBusy: refreshingStats,
-                disabled: refreshingStats,
-                onClick: refreshStats,
-            }, __('Refresh', 'peak-publisher')));
-        }
-        return fragments.flatMap((fragment, index) => index === 0 ? [ fragment ] : [ ' · ', fragment ]);
     };
 
     const renderInfoBox = () => {
         // The wordpress.org dashboard figures beside Installations; each names its source
-        // in the tooltip, the header row carries the age. During the manual stats refresh
-        // a figure gives way to a spinner; the automatic refresh after loading keeps
-        // showing the cached values.
+        // and its age in the tooltip. During the manual refresh a figure gives way to a
+        // spinner; the automatic check keeps showing the cached values.
         const wporgFigures = isWporg ? { downloads: getDownloads(pluginData), rating: getRating(pluginData) } : null;
-        const wporgFigure = (figure) => refreshingStats ? createElement(Spinner, { className: 'pblsh--plugin-grid__spinner' }) : figure;
+        const wporgFigure = (figure) => refreshingWporg ? createElement(Spinner, { className: 'pblsh--plugin-grid__spinner' }) : figure;
         return [
                 createElement('div', { className: 'pblsh--card pblsh--card--plugin-info' },
                 createElement('div', { className: 'pblsh--plugin-info__row' },
@@ -151,7 +108,19 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 ),
                             ),
                             createElement('div', { className: 'pblsh--plugin-header__actions' },
-                                isWporg && createElement('div', { className: 'pblsh--plugin-header__figures' }, ...renderWporgFiguresStatus()),
+                                // How fresh the plugin's wordpress.org data is, with the Refresh link —
+                                // locked only while its own refresh runs: a click during the automatic
+                                // check is taken, the store runs it next.
+                                isWporg && createElement('div', { className: 'pblsh--plugin-header__check' },
+                                    createElement(WporgCheckStatus, { plugins: [ pluginData ] },
+                                        createElement(Button, {
+                                            isLink: true,
+                                            isBusy: refreshingWporg,
+                                            disabled: refreshingWporg,
+                                            onClick: refreshFromWporg,
+                                        }, __('Refresh', 'peak-publisher')),
+                                    ),
+                                ),
                                 createElement(Button, {
                                     isTertiary: true,
                                     className: 'pblsh--status-btn pblsh--status-btn--' + getPluginStatus(pluginData?.status).modifier,

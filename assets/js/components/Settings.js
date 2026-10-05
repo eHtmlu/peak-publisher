@@ -11,6 +11,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const loading = useSelect((select) => select('pblsh/settings').isLoading(), []);
     const saving = useSelect((select) => select('pblsh/settings').isSaving(), []);
+    const hasWporgPlugins = useSelect((select) => select('pblsh/plugins').getPlugins().some((plugin) => plugin.hosting_type === 'wporg'), []);
     const [settings, setSettings] = useState({
         standalone_mode: false,
         auto_remove_workspace_artifacts: false,
@@ -100,7 +101,12 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     };
 
     const handleDisconnectWporgAccount = async () => {
-        if (!confirm(__('Disconnect the wordpress.org account? The stored SVN credentials will be deleted — publishing to wordpress.org will require connecting the account again.', 'peak-publisher'))) {
+        let message = __('Disconnect the wordpress.org account? The stored SVN credentials will be deleted — publishing to wordpress.org will require connecting the account again.', 'peak-publisher');
+        // Disconnecting ends the publishing, not the contact with wordpress.org.
+        if (hasWporgPlugins) {
+            message += '\n\n' + __('Your wordpress.org plugins stay in Peak Publisher, which keeps fetching their data from wordpress.org until you remove them.', 'peak-publisher');
+        }
+        if (!confirm(message)) {
             return;
         }
         try {

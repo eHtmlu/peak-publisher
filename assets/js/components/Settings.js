@@ -31,10 +31,16 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         setWporgAvatarFailed(false);
     }, [storedAccount?.username || '']);
 
-    // Quiet like the app's start, which loads the settings as well.
-    useEffect(() => {
-        settingsController.fetch().catch(() => {});
-    }, []);
+    // The settings as the server holds them. Without them there is nothing to edit and
+    // nothing safe to save — a save sends the server's settings with this form's fields put
+    // in — so the dialog waits for them, and says in the form's place when they cannot be
+    // loaded.
+    const [loadError, setLoadError] = useState(null);
+    const load = () => {
+        setLoadError(null);
+        settingsController.fetch().catch(setLoadError);
+    };
+    useEffect(load, []);
 
     useEffect(() => {
         if (serverSettings) {
@@ -64,13 +70,8 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         return (Array.isArray(list) ? list : []).join('\n');
     };
 
-    const cloneServerSettings = () => {
-        try {
-            return JSON.parse(JSON.stringify(serverSettings || {}));
-        } catch (e) {
-            return {};
-        }
-    };
+    // The form renders only with the server's settings loaded.
+    const cloneServerSettings = () => JSON.parse(JSON.stringify(serverSettings));
 
     const buildSavePayload = () => {
         // The account card saves itself through the shared form — this payload only
@@ -112,9 +113,23 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         }
     };
 
-    if (loading) {
+    if (loading || (!serverSettings && !loadError)) {
         return createElement('div', { className: 'pblsh--loading' },
             createElement('div', { className: 'pblsh--loading__spinner' }),
+        );
+    }
+    if (!serverSettings) {
+        return createElement('div', { className: 'pblsh--settings' },
+            createElement('div', { className: 'pblsh--settings__unavailable' },
+                createElement(NoticeBox, { variant: 'error', className: 'pblsh--settings__unavailable-notice', title: __('The settings could not be loaded', 'peak-publisher'), error: loadError },
+                    createElement('p', null, createElement(Button, { isLink: true, onClick: load }, __('Try again', 'peak-publisher'))),
+                ),
+                createElement(Button, {
+                    isSecondary: true,
+                    onClick: () => { if (typeof onClose === 'function') onClose(); },
+                    __next40pxDefaultSize: true,
+                }, __('Close', 'peak-publisher')),
+            ),
         );
     }
     const sections = [

@@ -2847,6 +2847,13 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     border-radius: .5em;
     overflow: hidden;
 }
+/* In the form's place when the settings could not be loaded: the reason, then the way out */
+.pblsh--settings__unavailable {
+    padding: 1.25rem; /* 20px */
+}
+.pblsh--settings__unavailable-notice {
+    margin-top: 0;
+}
 
 
 .pblsh--editor__content {

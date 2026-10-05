@@ -5,6 +5,24 @@ lodash.set(window, 'Pblsh.Utils', {
     // match the server's WPORG_PASSWORD_MASKED constant.
     WPORG_PASSWORD_MASKED: '__MASKED__',
 
+    // Answers that arrive out of order must not put an older state over a newer
+    // one. An order hands out numbers — whoever takes one later is the newer — and
+    // lets an answer claim its key's place (a plugin's) only when no newer one holds
+    // it. A load takes its number when it is asked for; an answer that is the
+    // state after a write takes it when it arrives.
+    createAnswerOrder: () => {
+        let newest = 0;
+        const shown = {};
+        return {
+            take: () => ++newest,
+            claim: (key, number) => {
+                if (number < (shown[key] || 0)) return false;
+                shown[key] = number;
+                return true;
+            },
+        };
+    },
+
     // Relative wording for a past moment ("just now" … "3 days ago"); beyond a
     // month the absolute date reads better. Returns null for missing/invalid
     // input so callers choose their own fallback.

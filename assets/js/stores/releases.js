@@ -110,14 +110,18 @@
     });
     window.Pblsh = window.Pblsh || {};
     window.Pblsh.Controllers = window.Pblsh.Controllers || {};
+    // Which list the store shows, per plugin (Pblsh.Utils.createAnswerOrder()): of two loads
+    // the one asked for later is the newer, whichever answers last.
+    var order = window.Pblsh.Utils.createAnswerOrder();
     window.Pblsh.Controllers.Releases = {
         fetchForPlugin: async function(pluginId) {
             var dispatch = wp.data.dispatch('pblsh/releases');
+            var number = order.take();
             try {
                 dispatch.setLoading(pluginId, true);
                 var items = await window.Pblsh.API.getPluginReleases(pluginId);
                 if (!Array.isArray(items)) items = [];
-                dispatch.setList(pluginId, items);
+                if (order.claim(pluginId, number)) dispatch.setList(pluginId, items);
             } catch (e) {
                 dispatch.setError(e && e.message ? e.message : 'Failed to load releases');
                 throw e;

@@ -52,23 +52,19 @@
     });
     window.Pblsh = window.Pblsh || {};
     window.Pblsh.Controllers = window.Pblsh.Controllers || {};
-    // Which answer the store shows, per plugin. A load takes its number when it is asked for, a
-    // write when it is answered: its answer is the state after it, newer than any load asked
-    // for before. A view is taken only when it is newer than the one shown — a load that was
-    // overtaken, by a later load or by a write answered meanwhile, would put an older state
-    // over a newer one.
-    var newest = 0;
-    var shown = {};
+    // Which answer the store shows, per plugin (Pblsh.Utils.createAnswerOrder()). A load takes
+    // its number when it is asked for, a write when it is answered: its answer is the state
+    // after it, newer than any load asked for before. A load that was overtaken, by a later
+    // load or by a write answered meanwhile, is not shown.
+    var order = window.Pblsh.Utils.createAnswerOrder();
     function show(pluginId, number, view) {
-        if (number < (shown[pluginId] || 0)) return;
-        shown[pluginId] = number;
-        wp.data.dispatch('pblsh/assets').setView(pluginId, view);
+        if (order.claim(pluginId, number)) wp.data.dispatch('pblsh/assets').setView(pluginId, view);
     }
     window.Pblsh.Controllers.Assets = {
         // Loads the view; one already there stays visible meanwhile. A failure is the caller's to report.
         fetchForPlugin: async function(pluginId) {
             var dispatch = wp.data.dispatch('pblsh/assets');
-            var number = ++newest;
+            var number = order.take();
             try {
                 dispatch.setLoading(pluginId, true);
                 show(pluginId, number, await window.Pblsh.API.getPluginAssets(pluginId));
@@ -78,7 +74,7 @@
         },
         // The view a write answered with.
         showAfterWrite: function(pluginId, view) {
-            show(pluginId, ++newest, view);
+            show(pluginId, order.take(), view);
         },
     };
 })();

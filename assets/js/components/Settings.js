@@ -31,8 +31,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         setWporgAvatarFailed(false);
     }, [storedAccount?.username || '']);
 
+    // Quiet like the app's start, which loads the settings as well.
     useEffect(() => {
-        settingsController.fetch();
+        settingsController.fetch().catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -137,7 +138,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             showAlert(e && e.message ? e.message : __('Connection test failed.', 'peak-publisher'), 'error');
         } finally {
             // Reload the masked accounts so verified_at / rejection state update.
-            await settingsController.fetch();
+            await settingsController.fetch().catch((e) => showAlert(e.message, 'error'));
         }
     };
 

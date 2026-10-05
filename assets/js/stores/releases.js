@@ -5,8 +5,6 @@
     var assign = Object.assign;
     var initialState = {
         byPluginId: {},
-        pendingReleaseIds: [],
-        error: null,
     };
     function ensurePlugin(state, pluginId) {
         var bucket = state.byPluginId[pluginId];
@@ -21,18 +19,6 @@
         },
         setList: function(pluginId, items) {
             return { type: 'SET_LIST', pluginId: pluginId, items: items };
-        },
-        upsert: function(pluginId, item) {
-            return { type: 'UPSERT', pluginId: pluginId, item: item };
-        },
-        remove: function(pluginId, id) {
-            return { type: 'REMOVE', pluginId: pluginId, id: id };
-        },
-        setPendingRelease: function(id, flag) {
-            return { type: 'SET_PENDING_RELEASE', id: id, flag: !!flag };
-        },
-        setError: function(message) {
-            return { type: 'SET_ERROR', message: message };
         },
     };
     function reducer(state, action) {
@@ -58,29 +44,6 @@
                 b2.lastFetch = Date.now();
                 return st2;
             }
-            case 'UPSERT': {
-                var st3 = assign({}, state);
-                var b3 = ensurePlugin(st3, action.pluginId);
-                var id = action.item && action.item.id;
-                if (!id) return state;
-                b3.byId[id] = assign({}, b3.byId[id] || {}, action.item);
-                if (b3.ids.indexOf(id) === -1) b3.ids.push(id);
-                return st3;
-            }
-            case 'REMOVE': {
-                var st4 = assign({}, state);
-                var b4 = ensurePlugin(st4, action.pluginId);
-                delete b4.byId[action.id];
-                b4.ids = b4.ids.filter(function(x){ return x !== action.id; });
-                return st4;
-            }
-            case 'SET_PENDING_RELEASE': {
-                var exists = state.pendingReleaseIds.indexOf(action.id) !== -1;
-                var next = action.flag ? (exists ? state.pendingReleaseIds : state.pendingReleaseIds.concat([action.id])) : state.pendingReleaseIds.filter(function(x){ return x !== action.id; });
-                return assign({}, state, { pendingReleaseIds: next });
-            }
-            case 'SET_ERROR':
-                return assign({}, state, { error: action.message || 'Error' });
             default:
                 return state;
         }
@@ -99,9 +62,6 @@
             var b = state.byPluginId[pluginId];
             return !!(b && b.lastFetch);
         },
-        getPendingReleaseIds: function(state) {
-            return state.pendingReleaseIds.slice();
-        },
     };
     registerStore('pblsh/releases', {
         reducer: reducer,
@@ -114,6 +74,7 @@
     // the one asked for later is the newer, whichever answers last.
     var order = window.Pblsh.Utils.createAnswerOrder();
     window.Pblsh.Controllers.Releases = {
+        // Loads the list; one already there stays visible meanwhile. A failure is the caller's to report.
         fetchForPlugin: async function(pluginId) {
             var dispatch = wp.data.dispatch('pblsh/releases');
             var number = order.take();
@@ -122,23 +83,8 @@
                 var items = await window.Pblsh.API.getPluginReleases(pluginId);
                 if (!Array.isArray(items)) items = [];
                 if (order.claim(pluginId, number)) dispatch.setList(pluginId, items);
-            } catch (e) {
-                dispatch.setError(e && e.message ? e.message : 'Failed to load releases');
-                throw e;
             } finally {
                 dispatch.setLoading(pluginId, false);
-            }
-        },
-        deleteRelease: async function(pluginId, releaseId) {
-            var dispatch = wp.data.dispatch('pblsh/releases');
-            try {
-                dispatch.setPendingRelease(releaseId, true);
-                await window.Pblsh.API.deleteRelease(releaseId);
-                dispatch.remove(pluginId, releaseId);
-            } catch (e) {
-                dispatch.setError(e && e.message ? e.message : 'Failed to delete release');
-            } finally {
-                dispatch.setPendingRelease(releaseId, false);
             }
         },
     };

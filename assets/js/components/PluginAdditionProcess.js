@@ -10,7 +10,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onFin
     const { useState, useEffect, useRef, createElement, createInterpolateElement, Fragment } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
-    const { copyText, getSvgIcon } = Pblsh.Utils;
+    const { copyText, getSvgIcon, showAlert } = Pblsh.Utils;
     const { ChannelChoiceCards, NoticeBox, TipLink, WporgAccountForm, WporgImportTable } = Pblsh.Components;
     const hljs = window.hljs;
 
@@ -132,7 +132,7 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onFin
     useEffect(() => {
         if (hostingType === 'wporg' && !serverSettings && !settingsFetchRequestedRef.current) {
             settingsFetchRequestedRef.current = true;
-            window.Pblsh.Controllers.Settings.fetch();
+            window.Pblsh.Controllers.Settings.fetch().catch((e) => showAlert(e.message, 'error'));
         }
     }, [hostingType, serverSettings]);
 

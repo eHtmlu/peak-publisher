@@ -362,7 +362,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
                                     createElement('br', null),
                                     createInterpolateElement(__('For more special patterns check out the <a>PHP fnmatch documentation</a>.', 'peak-publisher'),
                                         {
-                                            a: createElement('a', { href: 'https://www.php.net/manual/en/function.fnmatch.php', target: '_blank' }),
+                                            a: createElement('a', { href: 'https://www.php.net/manual/en/function.fnmatch.php', target: '_blank', rel: 'noreferrer' }),
                                         }
                                     ),
                                 ],

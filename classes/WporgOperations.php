@@ -481,9 +481,10 @@ class WporgOperations {
 
     /**
      * Runs $fn under the plugin's write lock — the lock every commit takes — for a local write
-     * that must not interleave with a commit (a change of the assets working copy). Throws the
-     * catalog's deploy_in_progress when a commit holds the lock, wporg_plugin_busy when a pull
-     * or another local write does (acquire_wporg_deploy_lock() decides by the holder).
+     * that must not interleave with a commit (a change of the assets working copy). A holder
+     * that is over in seconds is waited for; throws the catalog's deploy_in_progress when a
+     * commit holds the lock, wporg_plugin_busy when a pull or another local write outlasts
+     * the wait (acquire_wporg_deploy_lock() decides by the holder).
      */
     public static function under_plugin_lock(string $wporg_slug, string $operation, int $plugin_id, callable $fn): mixed {
         $lock = self::acquire_wporg_deploy_lock(self::normalize_slug_or_throw($wporg_slug), '', $operation, $plugin_id);
@@ -502,7 +503,7 @@ class WporgOperations {
      */
     public static function try_under_plugin_lock(string $wporg_slug, string $operation, int $plugin_id, callable $fn): mixed {
         try {
-            $lock = self::acquire_wporg_deploy_lock(self::normalize_slug_or_throw($wporg_slug), '', $operation, $plugin_id);
+            $lock = self::acquire_wporg_deploy_lock(self::normalize_slug_or_throw($wporg_slug), '', $operation, $plugin_id, false);
         } catch (WporgSvnException $e) {
             if (in_array($e->get_error_code(), [ 'deploy_in_progress', 'wporg_plugin_busy' ], true)) {
                 return false;
@@ -1300,10 +1301,14 @@ class WporgOperations {
     }
 
     // Lock holders that are over in seconds — the assets pull and a working-copy change, no
-    // commit: a caller that runs into them is told wporg_plugin_busy, not deploy_in_progress.
+    // commit. A caller that runs into one waits for it (LOCAL_LOCK_WAIT): a click must not
+    // fail because the mirror was being pulled at that moment. One that outlasts the wait is
+    // told wporg_plugin_busy; a commit takes minutes and is told at once, as
+    // deploy_in_progress.
     private const LOCAL_LOCK_OPERATIONS = [ 'assets_pull', 'assets_change' ];
+    private const LOCAL_LOCK_WAIT = 10; // seconds
 
-    private static function acquire_wporg_deploy_lock(string $wporg_slug, string $username, string $operation = 'deploy', ?int $plugin_id = null): array {
+    private static function acquire_wporg_deploy_lock(string $wporg_slug, string $username, string $operation = 'deploy', ?int $plugin_id = null, bool $wait = true): array {
         // Acquire a cross-site lock for this wporg slug
         $key = 'pblsh_wporg_deploy_lock_' . $wporg_slug;
         $blog_id = function_exists('get_current_blog_id') ? (int) get_current_blog_id() : 1;
@@ -1338,24 +1343,34 @@ class WporgOperations {
         }
 
         try {
-            if ($acquire()) {
-                return $payload;
-            }
-
-            $existing = $read_existing();
-            $existing_time = is_array($existing) ? (int) ($existing['acquired_at'] ?? 0) : 0;
-            // Reclaim stale locks before failing the deploy
-            if ($existing_time > 0 && (time() - $existing_time) > 5 * 60) {
-                $delete_existing();
+            $deadline = microtime(true) + ($wait ? self::LOCAL_LOCK_WAIT : 0);
+            while (true) {
                 if ($acquire()) {
                     return $payload;
                 }
-            }
 
-            // The holder decides the error: a commit takes minutes, a pull or a working-copy
-            // change seconds.
-            $held_by = is_array($existing) ? (string) ($existing['operation'] ?? '') : '';
-            throw self::exception(in_array($held_by, self::LOCAL_LOCK_OPERATIONS, true) ? 'wporg_plugin_busy' : 'deploy_in_progress');
+                $existing = $read_existing();
+                $existing_time = is_array($existing) ? (int) ($existing['acquired_at'] ?? 0) : 0;
+                // Reclaim stale locks before failing the deploy
+                if ($existing_time > 0 && (time() - $existing_time) > 5 * 60) {
+                    $delete_existing();
+                    if ($acquire()) {
+                        return $payload;
+                    }
+                }
+
+                // The holder decides: a commit takes minutes and ends the attempt, a pull or a
+                // working-copy change seconds — worth the wait while it lasts.
+                $held_by = is_array($existing) ? (string) ($existing['operation'] ?? '') : '';
+                $local = in_array($held_by, self::LOCAL_LOCK_OPERATIONS, true);
+                if (!$local || microtime(true) >= $deadline) {
+                    throw self::exception($local ? 'wporg_plugin_busy' : 'deploy_in_progress');
+                }
+                usleep(250000);
+                // The holder is another request: this one's copy of the option is its own
+                // cached read, which no release over there clears.
+                wp_cache_delete($key, 'options');
+            }
         } finally {
             if ($switched) {
                 restore_current_blog();

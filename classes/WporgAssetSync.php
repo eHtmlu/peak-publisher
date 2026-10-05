@@ -422,7 +422,7 @@ class WporgAssetSync {
         ] : [ ...$state, 'pending' => [] ]);
     }
 
-    /** Runs a change of the working copy under the commit lock; while a commit, a pull or another change holds it, the change is refused (deploy_in_progress, wporg_plugin_busy). */
+    /** Runs a change of the working copy under the commit lock: a pull or another change is waited for, a commit — or one of those outlasting the wait — refuses it (deploy_in_progress, wporg_plugin_busy). */
     private function locked(\WP_Post $marker, callable $fn): array|\WP_Error {
         try {
             return WporgOperations::under_plugin_lock($marker->post_name, 'assets_change', (int) $marker->ID, $fn);

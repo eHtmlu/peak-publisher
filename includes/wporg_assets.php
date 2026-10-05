@@ -19,7 +19,6 @@ const PBLSH_WPORG_ASSETS_META = '_pblsh_wporg_assets';
 function wporg_assets_state_defaults(): array {
     return [
         'revision' => null,      // revision of assets/ the mirror holds; 0 = no directory, null = never pulled
-        'listed_at' => 0,        // when the mirror was last confirmed against SVN
         'other_files' => 0,      // files in assets/ that are no slot member (the tab's footer)
         'color_source' => null,  // { filename, revision } the stored banner color was computed from (A10)
         'pending' => [],         // the working copy: slot_id → entry

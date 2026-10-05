@@ -4,17 +4,19 @@
 // kept across tab switches), the upload in progress and the drag are the component's own;
 // the plugin comes with pluginData, a changed icon reaches the header and the list through
 // refreshPlugin. A
-// wordpress.org plugin edits a working copy over its mirror of SVN's assets/: the bar says
-// where the mirror stands and commits the changes as one, every box shows what its change
-// does, a conflict box lets the user decide, and wordpress.org's state can be shown alone.
-lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin }) => {
+// wordpress.org plugin edits a working copy over its mirror of SVN's assets/: while it holds
+// changes, the bar names them and commits them as one, every box shows what its change does,
+// a conflict box lets the user decide, and wordpress.org's state can be shown alone. A mirror
+// that was never read leaves the tab showing only; its notice offers the editor's Refresh
+// (refreshFromWporg, refreshingWporg).
+lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin, refreshFromWporg, refreshingWporg }) => {
     const { __, sprintf } = wp.i18n;
-    const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
+    const { createElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Spinner } = wp.components;
-    const { getSvgIcon, getTimeTooltipProps } = Pblsh.Utils;
+    const { getSvgIcon } = Pblsh.Utils;
     const {
-        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText,
+        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText,
     } = Pblsh.AssetsUtils;
@@ -538,11 +540,17 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         ];
     };
 
-    // Above the card, flush in the tab panel: the last commit's outcome, the directory's verdict,
-    // and why the commit waits when no account can make it.
+    // Above the card, flush in the tab panel: the last commit's outcome, why nothing can be
+    // changed while the mirror was never read, the directory's verdict, and why the commit
+    // waits when no account can make it.
     const renderNotices = () => [
         notice && createElement(NoticeBox, { key: 'committed', variant: 'info', className: 'pblsh--tab-panel__notice' },
             createElement('p', null, notice),
+        ),
+        notSynced && createElement(NoticeBox, { key: 'not-synced', variant: 'warning', className: 'pblsh--tab-panel__notice' },
+            createElement('p', null, getNotSyncedNotice(), ' ',
+                createElement(Button, { isLink: true, isBusy: refreshingWporg, disabled: refreshingWporg, onClick: refreshFromWporg }, __('Refresh', 'peak-publisher')),
+            ),
         ),
         isWporg && pluginData.wporg_stats && pluginData.wporg_stats.closed && createElement(NoticeBox, { key: 'closed', variant: 'warning', className: 'pblsh--tab-panel__notice' },
             createElement('p', null, getClosedAssetsNotice()),
@@ -552,8 +560,9 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         ),
     ].filter(Boolean);
 
-    // wordpress.org: where the mirror stands, or the working copy's changes with commit,
-    // discard and the switch to wordpress.org's state; while committing, only that.
+    // wordpress.org: the working copy's changes with commit, discard and the switch to
+    // wordpress.org's state; while committing, only that. Nothing to commit, no bar — how
+    // fresh the mirror is says the editor's status line for the whole plugin.
     const renderBar = () => {
         if (!wporg) return null;
         if (busy === 'committing') {
@@ -561,13 +570,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                 createElement('div', { className: 'pblsh--assets-bar__status pblsh--assets-bar__status--busy' }, createElement(Spinner), getCommittingText()),
             );
         }
-        if (wporg.pending_count === 0) {
-            return createElement('div', { className: 'pblsh--assets-bar' },
-                createElement('div', { className: 'pblsh--assets-bar__status' },
-                    createInterpolateElement(getSyncedText(wporg), { time: createElement('time', getTimeTooltipProps(wporg.checked_at)) }),
-                ),
-            );
-        }
+        if (wporg.pending_count === 0) return null;
         return createElement('div', { className: 'pblsh--assets-bar pblsh--assets-bar--pending' },
             createElement('div', { className: 'pblsh--assets-bar__status' },
                 createElement('strong', null, getPendingBarText(wporg.pending_count)),

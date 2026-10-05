@@ -18,10 +18,10 @@ final class WporgAssetsStateTest extends TestCase {
 
     public function test_the_state_reads_back_with_defaults_and_drops_foreign_keys(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
-        self::assertSame([ 'revision' => null, 'listed_at' => 0, 'other_files' => 0, 'color_source' => null, 'pending' => [] ], get_wporg_assets_state($marker->ID));
+        self::assertSame([ 'revision' => null, 'other_files' => 0, 'color_source' => null, 'pending' => [] ], get_wporg_assets_state($marker->ID));
 
         update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 7, 'junk' => 1, 'pending' => 'garbage' ]);
-        self::assertSame([ 'revision' => 7, 'listed_at' => 0, 'other_files' => 0, 'color_source' => null, 'pending' => [] ], get_wporg_assets_state($marker->ID));
+        self::assertSame([ 'revision' => 7, 'other_files' => 0, 'color_source' => null, 'pending' => [] ], get_wporg_assets_state($marker->ID));
 
         update_wporg_assets_state($marker->ID, [ ...get_wporg_assets_state($marker->ID), 'other_files' => 3, 'junk' => 2 ]);
         self::assertSame(3, get_wporg_assets_state($marker->ID)['other_files']);

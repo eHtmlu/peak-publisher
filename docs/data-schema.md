@@ -23,7 +23,7 @@ code in this repository creates today:
   `_pblsh_installations` (24-hour counting cache, regenerable, not declared); marker: the same
   manifest metas and `assets_banners_color` describing the assets mirror (revision = the SVN
   revision the file was last changed in; regenerable from SVN), `_pblsh_wporg_assets`
-  (`{revision, listed_at, other_files, color_source, pending}` — the revision of `assets/` the
+  (`{revision, other_files, color_source, pending}` — the revision of `assets/` the
   mirror holds, `0` = no directory, `null` = never pulled; `pending` = the working copy, user
   work: slot id → `{action: put|copy|delete, file (put), from {slot, filename, revision} (copy),
   base {filename, revision}|null, ext, filesize, width, height, at, user {id, login}}`;

@@ -440,7 +440,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     createElement('p', null, getChangesText(wporgChanges)),
                                 ),
                                 activeTab === 'releases' && renderReleasesTable(),
-                                activeTab === 'assets' && createElement(Pblsh.Components.PluginAssets, { pluginData, refreshPlugin }),
+                                activeTab === 'assets' && createElement(Pblsh.Components.PluginAssets, { pluginData, refreshPlugin, refreshFromWporg, refreshingWporg }),
                             ),
                         ),
                     ),

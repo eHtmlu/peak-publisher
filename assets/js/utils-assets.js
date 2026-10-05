@@ -3,7 +3,6 @@
 // utils-installations.js. Sizes and limits are binary units, like wordpress.org's.
 lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     const { __, _n, sprintf } = wp.i18n;
-    const { formatRelativeTime } = Pblsh.Utils;
 
     const MB = 1048576;
     // A limit: '1 MB', '4 MB', '10 MB' (whole binary MB).
@@ -86,15 +85,10 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     // Screenshots without a single caption: one line instead of the caption details.
     const getNoCaptionsText = () => __('No captions in readme.txt yet', 'peak-publisher');
 
-    // Where the mirror of a wordpress.org plugin stands (the server's wporg block): the
-    // revision of assets/ it holds and when it was last checked — the moment inside
-    // <time></time> for the caller's exact-timestamp tooltip.
-    function getSyncedText(wporg) {
-        const checked = formatRelativeTime(wporg.checked_at);
-        if (wporg.revision === null || !checked) return __('Not synced with wordpress.org yet · reload to try again', 'peak-publisher');
-        if (wporg.revision === 0) return sprintf(__('wordpress.org has no assets/ directory for this plugin · checked <time>%s</time>', 'peak-publisher'), checked);
-        return sprintf(__('Synced with wordpress.org · r%1$d · checked <time>%2$s</time>', 'peak-publisher'), wporg.revision, checked);
-    }
+    // A wordpress.org plugin whose assets were never read from SVN (the first pull failed):
+    // nothing can be built on them, the tab only shows — the notice says so beside its
+    // Refresh link.
+    const getNotSyncedNotice = () => __('The assets of this plugin have not been read from wordpress.org yet, so they cannot be changed here.', 'peak-publisher');
 
     // Files of assets/ that no slot of the tab shows — they stay on wordpress.org untouched.
     function getOtherFilesText(count) {
@@ -151,7 +145,7 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         : __('Not on wordpress.org', 'peak-publisher');
 
     return {
-        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getSyncedText, getOtherFilesText,
+        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText,
     };

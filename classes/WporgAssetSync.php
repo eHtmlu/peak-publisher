@@ -18,25 +18,22 @@ class WporgAssetSync {
     /**
      * Brings the mirror in step with SVN when the marker is refreshed (the directory said the
      * plugin changed, the editor's Refresh, an upload is prepared): pulls when the mirror is
-     * behind SVN or lost a file, else records that it was just confirmed against SVN
-     * (listed_at — with the directory's stamp check the bar's "checked …"). Answers whether a
-     * pull changed the mirror; one that did not arrive completely is the caller's to know
-     * (wporg_assets_pull_incomplete) — the next refresh catches up. The caller holds the lock
-     * (refresh_wporg_plugin_cache()).
+     * behind SVN or lost a file. Answers whether a pull changed the mirror; one that did not
+     * arrive completely is the caller's to know (wporg_assets_pull_incomplete) — the next
+     * refresh catches up. The caller holds the lock (refresh_wporg_plugin_cache()).
      *
      * @throws WporgSvnException
      */
     public function refresh_unlocked(\WP_Post $marker, int $assets_revision): bool {
-        if ($this->is_behind_svn($marker, $assets_revision) || $this->has_lost_files($marker)) {
-            raise_wporg_time_limit();
-            $pulled = $this->pull_unlocked($marker);
-            if (!$pulled['complete']) {
-                throw new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely. They are read again with the next check.', 'peak-publisher'), 502);
-            }
-            return $pulled['changed'];
+        if (!$this->is_behind_svn($marker, $assets_revision) && !$this->has_lost_files($marker)) {
+            return false;
         }
-        update_wporg_assets_state((int) $marker->ID, [ ...get_wporg_assets_state((int) $marker->ID), 'listed_at' => time() ]);
-        return false;
+        raise_wporg_time_limit();
+        $pulled = $this->pull_unlocked($marker);
+        if (!$pulled['complete']) {
+            throw new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely. They are read again with the next check.', 'peak-publisher'), 502);
+        }
+        return $pulled['changed'];
     }
 
     /**
@@ -81,8 +78,8 @@ class WporgAssetSync {
      * source. A copy entry of the working copy whose source this pull replaces becomes a put of
      * the old file first, so it keeps its meaning ("the picture that was in slot 3"); when the
      * mirror file is gone, the SVN history still has it. The manifest records every slot
-     * that arrived; the anchor (revision, listed_at) moves only when all did, so a failed
-     * download is retried by the next pull. The caller holds the lock.
+     * that arrived; the anchor (revision) moves only when all did, so a failed download is
+     * retried by the next pull. The caller holds the lock.
      *
      * @return array{listing: ?array, complete: bool, changed: bool} listing = list_assets()
      *         as read; changed = wordpress.org's winners differ from the mirror's (a file
@@ -151,7 +148,6 @@ class WporgAssetSync {
         update_wporg_assets_state((int) $marker->ID, [
             ...$state,
             'revision' => $listing === null ? 0 : (int) $listing['revision'],
-            'listed_at' => time(),
             'other_files' => $classified['other_files'],
             'color_source' => $classified['color_source'],
         ]);
@@ -411,7 +407,6 @@ class WporgAssetSync {
         update_wporg_assets_state($id, $complete ? [
             ...$state,
             'revision' => $revision,
-            'listed_at' => time(),
             'other_files' => $classified['other_files'],
             'color_source' => $classified['color_source'],
             'pending' => [],

@@ -102,8 +102,8 @@ class AssetManager {
 
     /**
      * A wordpress.org plugin's mirror and working copy for the tab: where the mirror stands (the
-     * revision of assets/ it holds, when it was last confirmed, the files of assets/ that are no
-     * slot here) and, for every slot with a mirror file or a pending entry, the entry's action,
+     * revision of assets/ it holds — null before the first pull —, the files of assets/ that are
+     * no slot here) and, for every slot with a mirror file or a pending entry, the entry's action,
      * whether it conflicts, and wordpress.org's file (the mirror entry with its URL — the
      * conflict box and the state view show it).
      */
@@ -120,11 +120,8 @@ class AssetManager {
                     : null,
             ];
         }
-        // "checked": the later of the mirror's last SVN sync and the directory's last stamp check.
-        $checked_at = max((int) $state['listed_at'], wporg_directory_checked_at());
         return [
             'revision' => $state['revision'],
-            'checked_at' => $checked_at > 0 ? gmdate('Y-m-d\TH:i:s\Z', $checked_at) : null,
             'other_files' => $state['other_files'],
             'pending_count' => count($pending),
             'conflict_count' => count($conflicts),

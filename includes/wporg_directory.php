@@ -115,23 +115,24 @@ function wporg_directory_stamp(array $result): ?array {
 
 
 /**
- * One batched request per 100 slugs for every marker (or the one) whose figures are due,
- * and for every marker in scope when the stamp check is due; $force — the manual refresh —
- * is due for both. Writes the due figures and compares every stamp with the stored one.
- * Answers `figures`: the IDs of every marker whose figures were touched — successes and
- * failed attempts alike, so the caller can serve their new state — and `changed`: the IDs
- * whose stamp moved since the last look, the ones the caller refreshes against SVN. The
- * first look only records the stamp.
+ * One batched request per 100 slugs. Site-wide ($plugin_ids null): every marker whose
+ * figures are due, and every marker when the stamp check is due. For the given markers
+ * alone — the manual refresh of one, the markers an import just created —: those whose
+ * figures are due; such a look neither consults nor claims the site-wide check, which stays
+ * the list's. $force — the manual refresh — fetches every marker in scope regardless. Writes
+ * the due figures and compares every stamp with the stored one. Answers `figures`: the IDs
+ * of every marker whose figures were touched — successes and failed attempts alike, so the
+ * caller can serve their new state — and `changed`: the IDs whose stamp moved since the last
+ * look, the ones the caller refreshes against SVN. The first look only records the stamp.
  *
+ * @param int[]|null $plugin_ids
  * @return array{figures: int[], changed: int[]}
  */
-function refresh_wporg_directory(?int $plugin_id = null, bool $force = false): array {
-    if ($plugin_id === null) {
-        $markers = get_posts([ 'post_type' => 'pblsh_wporg_plugin', 'post_status' => 'any', 'posts_per_page' => -1 ]);
-    } else {
-        $marker = get_post($plugin_id);
-        $markers = is_wporg_plugin($marker) ? [ $marker ] : [];
-    }
+function refresh_wporg_directory(?array $plugin_ids = null, bool $force = false): array {
+    $site_wide = $plugin_ids === null;
+    $markers = $site_wide
+        ? get_posts([ 'post_type' => 'pblsh_wporg_plugin', 'post_status' => 'any', 'posts_per_page' => -1 ])
+        : array_values(array_filter(array_map('get_post', $plugin_ids), static fn($post): bool => is_wporg_plugin($post)));
     $nothing = [ 'figures' => [], 'changed' => [] ];
     if ($markers === []) {
         return $nothing;
@@ -142,7 +143,7 @@ function refresh_wporg_directory(?int $plugin_id = null, bool $force = false): a
     // storm — the automatic paths wait. Read-then-write on post meta, not atomic: a rare
     // second request from a parallel tab is harmless.
     $now = time();
-    $check_due = $force || is_wporg_directory_check_due(wporg_directory_checked_at(), $now);
+    $check_due = $site_wide && ($force || is_wporg_directory_check_due(wporg_directory_checked_at(), $now));
     if ($check_due) {
         update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, $now, false);
     }

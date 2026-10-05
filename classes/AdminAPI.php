@@ -601,7 +601,7 @@ class AdminAPI {
             return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
         }
 
-        $result = refresh_wporg_directory($plugin_id, !empty($params['force']));
+        $result = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], !empty($params['force']));
         $stats = [];
         foreach ($result['figures'] as $id) {
             $stats[$id] = serialize_wporg_installations($id);
@@ -1333,6 +1333,13 @@ class AdminAPI {
             }
 
             $imported[] = $this->serialize_imported_wporg_plugin((int) $plugin_id, $slug);
+        }
+
+        // The directory data of the new markers — figures and stamp — in one batched request, so
+        // their rows arrive complete instead of waiting for the list's next look. A failure is
+        // recorded on the marker like any other and retried by the automatic path.
+        if ($imported !== []) {
+            refresh_wporg_directory(array_column($imported, 'id'));
         }
 
         return [

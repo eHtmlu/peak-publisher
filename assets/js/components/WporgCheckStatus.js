@@ -9,18 +9,26 @@ const WporgCheckStatus = ({ plugins, children = null }) => {
     const { useSelect } = wp.data;
     const { Tooltip } = wp.components;
     const { __ } = wp.i18n;
-    const { getTimeTooltipProps } = Pblsh.Utils;
+    const { getTimeTooltipProps, msUntilRelativeTimeChanges } = Pblsh.Utils;
     const { getCheck, getCheckedText, getCheckErrorText } = Pblsh.WporgCheckUtils;
 
     const checking = useSelect((select) => select('pblsh/plugins').isRefreshingWporg(), []);
-    // "2 minutes ago" ages while the line stands: it is read anew once a minute.
-    const [, setMinute] = useState(0);
+    const check = getCheck(plugins);
+    // "2 minutes ago" ages while the line stands: it is read anew exactly when its wording
+    // changes — and when the tab comes back into view, where a hidden tab's timers ran late.
+    const [reading, setReading] = useState(0);
     useEffect(() => {
-        const timer = setInterval(() => setMinute((minute) => minute + 1), 60000);
-        return () => clearInterval(timer);
+        const wait = msUntilRelativeTimeChanges(check.checkedAt);
+        if (wait === null) return undefined;
+        const timer = setTimeout(() => setReading((count) => count + 1), wait);
+        return () => clearTimeout(timer);
+    }, [check.checkedAt, reading]);
+    useEffect(() => {
+        const onVisibility = () => setReading((count) => count + 1);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
     }, []);
 
-    const check = getCheck(plugins);
     const fragments = [
         createInterpolateElement(getCheckedText(check.checkedAt, checking), { time: createElement('time', getTimeTooltipProps(check.checkedAt)) }),
         check.error && !checking && createElement(Tooltip, { text: getCheckErrorText(check.error) },

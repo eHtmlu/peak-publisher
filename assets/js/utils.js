@@ -40,6 +40,16 @@ lodash.set(window, 'Pblsh.Utils', {
         return sprintf(__('on %s', 'peak-publisher'), then.toLocaleDateString());
     },
 
+    // How long formatRelativeTime() keeps saying what it says now, in ms: until
+    // the age rounds to the next minute — every wording it has changes on such a
+    // boundary or not at all. null for missing/invalid input.
+    msUntilRelativeTimeChanges: (value) => {
+        const then = value ? new Date(value) : null;
+        if (!then || isNaN(then.getTime())) return null;
+        const age = Date.now() - then.getTime();
+        return (Math.round(age / 60000) + 0.5) * 60000 - age;
+    },
+
     // Props for a <time> element with the shared precise-moment affordance: the
     // dotted underline (class pblsh--time-tooltip) signals the exact localized
     // timestamp in the native tooltip. Empty props for missing/invalid input.

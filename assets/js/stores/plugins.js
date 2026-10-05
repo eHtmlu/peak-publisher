@@ -14,6 +14,7 @@
         lastFetch: 0,
         isRefreshingWporg: false,
         nextWporgCheckAt: 0,   // when to ask the server again (this client's clock, ms); 0 = not asked yet
+        wporgChanges: {},      // plugin id → what refreshes found changed on wordpress.org, until told
     };
     var actions = {
         setList: function(items) {
@@ -37,12 +38,16 @@
         // The answer of a directory refresh in one step: the figures and check of every marker
         // (stats) and the fresh row of each that moved (plugins) merge into the plugins the
         // store holds — unknown ids are ignored, an answer may name a plugin deleted
-        // meanwhile —, and the next check is due when the server said.
+        // meanwhile —, what the refresh found changed on wordpress.org adds to what is not
+        // told yet, and the next check is due when the server said.
         applyWporgRefresh: function(answer, now) {
             return { type: 'APPLY_WPORG_REFRESH', answer: answer, now: now };
         },
         setNextWporgCheckAt: function(at) {
             return { type: 'SET_NEXT_WPORG_CHECK_AT', at: at };
+        },
+        clearWporgChanges: function(id) {
+            return { type: 'CLEAR_WPORG_CHANGES', id: id };
         },
         setRefreshingWporg: function(flag) {
             return { type: 'SET_REFRESHING_WPORG_STATS', flag: !!flag };
@@ -95,13 +100,30 @@
                         if (refreshedById[pluginId]) refreshedById[pluginId] = assign({}, refreshedById[pluginId], fieldsById[pluginId]);
                     });
                 });
+                // Counts add up, facts stay: two refreshes before the plugin is looked at tell one story.
+                var changesById = assign({}, state.wporgChanges);
+                Object.keys(action.answer.changes).forEach(function(pluginId) {
+                    var found = action.answer.changes[pluginId];
+                    var told = assign({}, changesById[pluginId]);
+                    Object.keys(found).forEach(function(fact) {
+                        told[fact] = typeof found[fact] === 'number' ? (told[fact] || 0) + found[fact] : found[fact];
+                    });
+                    changesById[pluginId] = told;
+                });
                 return assign({}, state, {
                     byId: refreshedById,
+                    wporgChanges: changesById,
                     nextWporgCheckAt: action.now + action.answer.next_check_in * 1000,
                 });
             }
             case 'SET_NEXT_WPORG_CHECK_AT':
                 return assign({}, state, { nextWporgCheckAt: action.at });
+            case 'CLEAR_WPORG_CHANGES': {
+                if (!state.wporgChanges[action.id]) return state;
+                var remaining = assign({}, state.wporgChanges);
+                delete remaining[action.id];
+                return assign({}, state, { wporgChanges: remaining });
+            }
             case 'SET_REFRESHING_WPORG_STATS':
                 return assign({}, state, { isRefreshingWporg: !!action.flag });
             default:
@@ -132,6 +154,10 @@
         },
         getNextWporgCheckAt: function(state) {
             return state.nextWporgCheckAt;
+        },
+        // null = nothing to tell
+        getWporgChanges: function(state, id) {
+            return state.wporgChanges[id] || null;
         },
     };
     registerStore('pblsh/plugins', {

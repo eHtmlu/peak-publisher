@@ -7,6 +7,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { getSvgIcon, getPluginStatus } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
     const { getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
+    const { getChangesText } = Pblsh.WporgCheckUtils;
     const { NoticeBox, CurrentVersion, InstallationsCount, Figure, WporgCheckStatus } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
@@ -30,8 +31,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     useEffect(() => { setFlipNotice(null); }, [pluginData && pluginData.id]);
     // The manual refresh from wordpress.org: while it runs, the three figures show a spinner.
     // Its outcome shows through the data — the status line reads "just now", a check that
-    // failed stands beside it.
+    // failed stands beside it, and what changed on wordpress.org is told in the notice.
     const [refreshingWporg, setRefreshingWporg] = useState(false);
+    const wporgChanges = useSelect(
+        (select) => pluginData && pluginData.id ? select('pblsh/plugins').getWporgChanges(pluginData.id) : null,
+        [pluginData && pluginData.id]
+    );
     const validTabs = ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
 
@@ -429,6 +434,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--tab-panel', 'data-active-tab': activeTab },
                             renderTabNav(),
                             createElement('div', { className: 'pblsh--tab-panel__body' },
+                                // Plugin-wide, so above either tab: what refreshes found changed on
+                                // wordpress.org, told until the plugin is left.
+                                wporgChanges && createElement(NoticeBox, { variant: 'info', className: 'pblsh--tab-panel__notice' },
+                                    createElement('p', null, getChangesText(wporgChanges)),
+                                ),
                                 activeTab === 'releases' && renderReleasesTable(),
                                 activeTab === 'assets' && createElement(Pblsh.Components.PluginAssets, { pluginData, refreshPlugin }),
                             ),

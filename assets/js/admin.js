@@ -125,6 +125,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.removeEventListener('focus', checkWporg);
             };
         }, [checkWporg]);
+        // What a refresh found changed on wordpress.org is told while the plugin stands open;
+        // leaving it settles that.
+        useEffect(() => () => {
+            if (currentPluginId) wp.data.dispatch('pblsh/plugins').clearWporgChanges(currentPluginId);
+        }, [currentPluginId]);
 
         // Helpers for URL state
         const parseQuery = () => {

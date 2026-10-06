@@ -3707,14 +3707,35 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 }
 
 /* wordpress.org: a box's band says what the working copy does to the slot — the color from
-   one property, like the notice boxes. */
+   one property, like the notice boxes — and carries the control that takes it back, on every
+   band alike. */
 .pblsh--asset-slot__band {
     --pblsh-band-color: var(--color-blue);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
     padding: 0.25rem 0.75rem;
     font-weight: 600;
     color: var(--pblsh-band-color);
     background: color-mix(in srgb, var(--pblsh-band-color) 10%, #fff);
     border-bottom: 1px solid color-mix(in srgb, var(--pblsh-band-color) 30%, #fff);
+}
+/* The band's own control, outlined in the band's color and on the band's line, so the band
+   stays as high as its text. */
+.pblsh--asset-slot__band .pblsh--asset-slot__band-discard.components-button {
+    color: var(--pblsh-band-color);
+    border-color: currentColor;
+    height: auto;
+    min-height: 0;
+    line-height: inherit;
+    padding: 0 0.375rem;
+    margin-block: -1px;
+}
+.pblsh--asset-slot__band .pblsh--asset-slot__band-discard.components-button:hover:not(:disabled) {
+    color: var(--pblsh-band-color);
+    border-color: currentColor;
+    background: color-mix(in srgb, var(--pblsh-band-color) 12%, #fff);
 }
 .pblsh--asset-slot__band--delete {
     --pblsh-band-color: var(--color-orange);

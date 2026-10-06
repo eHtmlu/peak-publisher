@@ -18,7 +18,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
-        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText,
+        getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
     } = Pblsh.AssetsUtils;
     const { TipLink, NoticeBox, WporgRevisionLink } = Pblsh.Components;
 
@@ -141,7 +141,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         runWorkingCopyRequest(() => Pblsh.API.discardPluginAssets(pluginData.id), __('Discard failed.', 'peak-publisher'));
     };
 
-    // keep 'theirs' drops the slot's change (also the Restore of a delete); 'mine' keeps it over wordpress.org's new file.
+    // keep 'theirs' drops the slot's change (the band's Discard); 'mine' keeps it over wordpress.org's new file.
     const handleResolve = (slotKey, keep) => runWorkingCopyRequest(() => Pblsh.API.resolvePluginAsset(pluginData.id, slotKey, keep), __('The decision could not be saved.', 'peak-publisher'));
 
     const openFilePicker = (slot, screenshotN) => {
@@ -296,7 +296,23 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             className: classNames,
             ...dragProps,
         },
-            band && createElement('div', { className: 'pblsh--asset-slot__band pblsh--asset-slot__band--' + band }, getBandText(band)),
+            band && createElement('div', { className: 'pblsh--asset-slot__band pblsh--asset-slot__band--' + band },
+                getBandText(band),
+                // The slot's change is taken back here, on every band alike — in a conflict too, where
+                // this is the familiar way out and "Take theirs" in the box below does the same as the
+                // decision beside the pictures: kept both on purpose, one word learnt from every other
+                // band. An upload is lost with its change, so that one asks; a move or a delete is only
+                // taken back.
+                createElement(Button, {
+                    isSecondary: true,
+                    className: 'pblsh--asset-slot__band-discard',
+                    disabled: busy !== null,
+                    onClick: () => {
+                        if (slotInfo.pending === 'put' && !confirm(getDiscardUploadConfirmText())) return;
+                        handleResolve(slotKey, 'theirs');
+                    },
+                }, __('Discard', 'peak-publisher')),
+            ),
             editable && createElement('input', {
                 ref: (el) => { fileInputRefs.current[slotKey] = el; },
                 type: 'file',
@@ -354,13 +370,6 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                                 onClick: () => openFilePicker(slot, screenshotN),
                                 disabled: isUploading,
                             }, __('Select File', 'peak-publisher')),
-                            // A delete waiting for the commit can be taken back.
-                            pendingDelete && createElement(Button, {
-                                isSecondary: true,
-                                className: 'pblsh--asset-slot__box-upload-btn',
-                                onClick: () => handleResolve(slotKey, 'theirs'),
-                                disabled: busy !== null,
-                            }, __('Restore', 'peak-publisher')),
                         ),
                 ),
             hasAsset && editable && createElement('div', { className: 'pblsh--asset-slot__actions' },

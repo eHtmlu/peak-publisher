@@ -124,6 +124,9 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
 
     const getDiscardConfirmText = (count) => sprintf(_n('Discard %d change? The assets return to their state on wordpress.org.', 'Discard %d changes? The assets return to their state on wordpress.org.', count, 'peak-publisher'), count);
 
+    // The band's Discard of an upload: the file is lost with its change — a move or a delete is only taken back, unasked.
+    const getDiscardUploadConfirmText = () => __('Discard the uploaded file? The slot returns to its state on wordpress.org.', 'peak-publisher');
+
     // A wordpress.org plugin's delete waits for the commit; a self-hosted one is gone at once.
     const getDeleteConfirmText = (isWporg) => isWporg
         ? __('Delete this asset? It is removed from wordpress.org with the next commit.', 'peak-publisher')
@@ -138,11 +141,9 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         }[kind];
     }
 
-    // The wordpress.org side of a conflict box: the mirror file with the commit that last
-    // changed it (<revision /> is the WporgRevisionLink's slot), or that the slot is empty there.
     return {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
-        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText,
+        getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
     };
 })());

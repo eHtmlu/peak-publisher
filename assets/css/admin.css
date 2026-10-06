@@ -1,11 +1,14 @@
 /* Peak Publisher Admin Styles - React Version */
 
-/* Prevent layout shift from scrollbar appearing/disappearing.
-   The .pblsh-force-scrollbar class is added by an inline script only when
-   NOT inside an iframe (e.g. WordPress Playground), where overflow-y on
-   :root can interfere with the host frame's resize/scroll monitoring. */
+/* Prevent layout shift from the scrollbar appearing/disappearing: the gutter is reserved,
+   the bar shown only when there is something to scroll. Not overflow-y: scroll — that makes
+   html a scroll container, WordPress's body { overflow-x: hidden } then stays on body instead
+   of reaching the viewport, and body becomes a scroll container that never scrolls, which
+   every position: sticky in the app would stick to. The .pblsh-force-scrollbar class is added
+   by an inline script only when NOT inside an iframe (e.g. WordPress Playground), where a
+   gutter on :root can interfere with the host frame's resize/scroll monitoring. */
 :root.pblsh-force-scrollbar {
-    overflow-y: scroll;
+    scrollbar-gutter: stable;
 }
 
 .pblsh-app {
@@ -2804,7 +2807,9 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     border: 1px solid var(--border-color-light);
     border-radius: 0 0.5rem 0.5rem 0.5rem;
     box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.1);
-    overflow: hidden;
+    /* clip, not hidden: the corners cut the content the same, but no scroll container — the
+       assets bar sticks to the window, not to this box. */
+    overflow: clip;
 }
 
 /* Strip box styling from inner elements rendered directly inside the panel */
@@ -3661,23 +3666,36 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     color: #8c96a0;
 }
 
-/* wordpress.org: the bar above the groups — where the mirror stands, or the working copy's
-   changes on the left and what to do with them on the right; wraps on narrow screens. */
+/* wordpress.org: the bar above the groups — the working copy's changes on the left and what
+   to do with them on the right, or the commit under way; wraps on narrow screens. It sticks
+   below the admin bar while the groups scroll under it, within its card: what is not committed
+   stays in view as long as the assets do. The same blue tint as the bands and the info box. */
 .pblsh--assets-bar {
+    position: sticky;
+    top: calc(var(--wp-admin--admin-bar--height, 32px) - 1px);
+    z-index: 1;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem 1.5rem;
-    color: #646970;
-    margin-bottom: 2rem;
-}
-.pblsh--assets-bar--pending {
     padding: 0.75rem 1rem;
     border: 1px solid color-mix(in srgb, var(--color-blue) 30%, #fff);
     border-radius: 0.375rem;
-    background: color-mix(in srgb, var(--color-blue) 8%, #fff);
+    background: color-mix(in srgb, var(--color-blue) 10%, #fff);
     color: #1e1e1e;
+    margin-bottom: 2rem;
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+    transition: all .3s;
+}
+/* Held at the window's top while the groups pass beneath (the component sets the class from
+   its sentinel): the full border and a shadow give the bar the edge it has there; at rest,
+   on the white card, it needs none. */
+.pblsh--assets-bar--stuck {
+    border-color: var(--color-blue);
+    box-shadow: 0 0.375rem 1rem rgba(0, 0, 0, 0.3);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
 }
 .pblsh--assets-bar__status {
     display: flex;
@@ -3695,9 +3713,6 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--assets-bar__conflicts {
     color: var(--color-red);
     font-weight: 600;
-}
-.pblsh--assets-bar__account {
-    color: #646970;
 }
 .pblsh--assets-bar__actions {
     display: flex;

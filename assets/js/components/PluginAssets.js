@@ -17,7 +17,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const { getSvgIcon } = Pblsh.Utils;
     const {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
-        getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
+        getPendingBarText, getConflictBarText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
     } = Pblsh.AssetsUtils;
     const { TipLink, NoticeBox, WporgRevisionLink } = Pblsh.Components;
@@ -108,7 +108,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     // The working copy of a wordpress.org plugin as one commit. A conflict answers with the view
     // after the commit's fresh pull: the boxes show what to decide.
     const handleCommit = async () => {
-        if (!confirm(getCommitConfirmText(assets.wporg.slots))) return;
+        if (!confirm(getCommitConfirmText(assets.wporg.slots, account.username))) return;
         setBusy('committing');
         try {
             const result = await Pblsh.API.commitPluginAssets(pluginData.id);
@@ -579,26 +579,42 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     // wordpress.org: the working copy's changes with commit, discard and the switch to
     // wordpress.org's state; while committing, only that. Nothing to commit, no bar — how
     // fresh the mirror is says the editor's status line for the whole plugin.
+    // The bar sticks below the admin bar. Whether it is held there right now (and shows the
+    // edge it has there, pblsh--assets-bar--stuck) tells a sentinel standing where the bar
+    // rests: once the sentinel has scrolled above the bar's sticky line, the bar is stuck.
+    const hasBar = !!wporg && (busy === 'committing' || wporg.pending_count > 0);
+    const [barStuck, setBarStuck] = useState(false);
+    const barSentinelRef = useRef(null);
+    useEffect(() => {
+        const sentinel = barSentinelRef.current;
+        if (!sentinel || typeof IntersectionObserver === 'undefined') return undefined;
+        const stickyTop = parseFloat(getComputedStyle(sentinel.nextElementSibling).top) || 0;
+        const observer = new IntersectionObserver(([entry]) => {
+            setBarStuck(!entry.isIntersecting && entry.boundingClientRect.top < stickyTop);
+        }, { rootMargin: -stickyTop + 'px 0px 0px 0px' });
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [hasBar]);
+    const barClass = (...classes) => ['pblsh--assets-bar', ...classes, barStuck ? 'pblsh--assets-bar--stuck' : ''].filter(Boolean).join(' ');
     const renderBar = () => {
-        if (!wporg) return null;
+        if (!hasBar) return null;
+        const sentinel = createElement('div', { ref: barSentinelRef, className: 'pblsh--assets-bar__sentinel' });
         if (busy === 'committing') {
-            return createElement('div', { className: 'pblsh--assets-bar' },
+            return createElement(Fragment, null, sentinel, createElement('div', { className: barClass() },
                 createElement('div', { className: 'pblsh--assets-bar__status pblsh--assets-bar__status--busy' }, createElement(Spinner), getCommittingText()),
-            );
+            ));
         }
-        if (wporg.pending_count === 0) return null;
-        return createElement('div', { className: 'pblsh--assets-bar pblsh--assets-bar--pending' },
+        return createElement(Fragment, null, sentinel, createElement('div', { className: barClass('pblsh--assets-bar--pending') },
             createElement('div', { className: 'pblsh--assets-bar__status' },
                 createElement('strong', null, getPendingBarText(wporg.pending_count)),
                 wporg.conflict_count > 0 && createElement('div', { className: 'pblsh--assets-bar__conflicts' }, getConflictBarText(wporg.conflict_count)),
-                canCommit && createElement('div', { className: 'pblsh--assets-bar__account' }, getCommitsAsText(account.username)),
             ),
             createElement('div', { className: 'pblsh--assets-bar__actions' },
-                createElement(Button, { isPrimary: true, disabled: !canCommit || wporg.conflict_count > 0 || busy !== null, onClick: handleCommit }, __('Commit to wordpress.org', 'peak-publisher')),
-                createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: handleDiscard }, __('Discard', 'peak-publisher')),
                 createElement(Button, { isLink: true, disabled: busy !== null, onClick: () => setShowWporgState(!showingWporgState) }, getShowWporgStateText(showingWporgState)),
+                createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: handleDiscard }, __('Discard', 'peak-publisher')),
+                createElement(Button, { isPrimary: true, disabled: !canCommit || wporg.conflict_count > 0 || busy !== null, onClick: handleCommit }, __('Commit to wordpress.org', 'peak-publisher')),
             ),
-        );
+        ));
     };
 
     return renderAssetsSection();

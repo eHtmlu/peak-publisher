@@ -101,16 +101,16 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     const getPendingBarText = (count) => sprintf(_n('%d change not on wordpress.org yet', '%d changes not on wordpress.org yet', count, 'peak-publisher'), count);
     const getConflictBarText = (count) => sprintf(_n('%d conflict — resolve it to commit', '%d conflicts — resolve them to commit', count, 'peak-publisher'), count);
     const getCommittingText = () => __('Committing to wordpress.org…', 'peak-publisher');
-    const getCommitsAsText = (username) => sprintf(__('Commits as "%s"', 'peak-publisher'), username);
     const getNoAccountCommitText = () => __('Committing assets needs your wordpress.org account — connect one under Settings › wordpress.org. Your changes are kept until then.', 'peak-publisher');
     const getClosedAssetsNotice = () => __('The plugin is closed on wordpress.org — its page shows a generated icon and no banner until it is reopened.', 'peak-publisher');
     // The commit's receipt; <revision /> is the WporgRevisionLink's slot (createInterpolateElement).
     const getCommittedText = () => __('Committed to wordpress.org in <revision />.', 'peak-publisher');
     const getShowWporgStateText = (showing) => showing ? __('Show my changes', 'peak-publisher') : __("Show wordpress.org's state", 'peak-publisher');
 
-    // The commit's confirm with the tally the commit message will carry: puts are updated,
-    // copies (move, swap) moved, deletes deleted — counted from the server's wporg.slots.
-    function getCommitConfirmText(slots) {
+    // The commit's confirm, the last word before the write: the account that commits — the
+    // one place the editor names it — and the tally the commit message will carry: puts are
+    // updated, copies (move, swap) moved, deletes deleted — counted from the server's wporg.slots.
+    function getCommitConfirmText(slots, username) {
         const counts = { put: 0, copy: 0, delete: 0 };
         Object.values(slots || {}).forEach((slot) => { if (slot.pending) counts[slot.pending]++; });
         const total = counts.put + counts.copy + counts.delete;
@@ -119,7 +119,7 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
             counts.copy && sprintf(_n('%d moved', '%d moved', counts.copy, 'peak-publisher'), counts.copy),
             counts.delete && sprintf(_n('%d deleted', '%d deleted', counts.delete, 'peak-publisher'), counts.delete),
         ].filter(Boolean);
-        return sprintf(_n('Commit %d change to wordpress.org?', 'Commit %d changes to wordpress.org?', total, 'peak-publisher'), total) + '\n' + parts.join(', ');
+        return sprintf(_n('Commit %d change to wordpress.org as "%s"?', 'Commit %d changes to wordpress.org as "%s"?', total, 'peak-publisher'), total, username) + '\n' + parts.join(', ');
     }
 
     const getDiscardConfirmText = (count) => sprintf(_n('Discard %d change? The assets return to their state on wordpress.org.', 'Discard %d changes? The assets return to their state on wordpress.org.', count, 'peak-publisher'), count);
@@ -145,7 +145,7 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
 
     return {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
-        getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
+        getPendingBarText, getConflictBarText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
     };
 })());

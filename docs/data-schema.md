@@ -31,7 +31,7 @@ code in this repository creates today:
   `_pblsh_wporg_account_username`, `_pblsh_wporg_operations` (the operations log: every SVN
   write Peak Publisher committed, newest first, unbounded — `{operation, at, user {id, login},
   username, revision, details}`), `_pblsh_wporg_directory` (the directory cache: the daily info API figures and the
-  check's record — the stamp `{version, last_updated}` of the last completed check, when that
+  check's record — the stamp `{version, last_updated, assets: filename → revision}` of the last completed check, when that
   was and the last failure since —, regenerable, not declared), `_pblsh_wporg_import` (the import forecast
   `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
   wporg `_pblsh_upload_state` (the deploy's upload state).

@@ -11,8 +11,8 @@ require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
 /**
  * The directory cache of wordpress.org plugins — what the plugins info API says about a
  * marker, cached per marker as post meta: the daily figures (active installs, downloads,
- * rating, the closed state) and the directory stamp, `version` and `last_updated`, the
- * change detector for the list — with the check's own record: when a plugin was last brought
+ * rating, the closed state) and the directory stamp — `version`, `last_updated` and the asset
+ * revisions —, the change detector for the list — with the check's own record: when a plugin was last brought
  * in step with wordpress.org, and the last failure since. A function module like
  * wporg_cache.php, deliberately apart from it: the marker cache is revision-driven (SVN),
  * this cache is time-driven — figures are published once a day at 00:00 UTC and fetched when
@@ -52,7 +52,7 @@ function wporg_directory_defaults(): array {
         'fetched_at' => 0,           // last success of the figures
         'attempted_at' => 0,         // claim time of the last figures attempt
         'last_error' => null,        // { code, message, at }
-        'stamp' => null,             // { version, last_updated } of the directory at the last completed check
+        'stamp' => null,             // { version, last_updated, assets } of the directory at the last completed check
         'checked_at' => 0,           // the last completed check
         'check_error' => null,       // { code, message, at }, null after a completed check
     ];
@@ -65,11 +65,22 @@ function get_wporg_directory(int $plugin_id): array {
     $defaults = wporg_directory_defaults();
     $stored = get_post_meta($plugin_id, PBLSH_WPORG_DIRECTORY_META, true);
     $directory = is_array($stored) ? array_merge($defaults, array_intersect_key($stored, $defaults)) : $defaults;
-    $stamp = $directory['stamp'];
-    $directory['stamp'] = is_array($stamp) && is_string($stamp['version'] ?? null) && is_string($stamp['last_updated'] ?? null)
-        ? [ 'version' => $stamp['version'], 'last_updated' => $stamp['last_updated'] ]
-        : null;
+    $directory['stamp'] = wporg_directory_stored_stamp($directory['stamp']);
     return $directory;
+}
+
+
+/** A stored stamp as wporg_directory_stamp() shapes it, or null for any other shape: no stamp, the next check is a first look. */
+function wporg_directory_stored_stamp($stamp): ?array {
+    if (!is_array($stamp) || !is_string($stamp['version'] ?? null) || !is_string($stamp['last_updated'] ?? null) || !is_array($stamp['assets'] ?? null)) {
+        return null;
+    }
+    foreach ($stamp['assets'] as $filename => $revision) {
+        if (!is_string($filename) || !is_int($revision)) {
+            return null;
+        }
+    }
+    return [ 'version' => $stamp['version'], 'last_updated' => $stamp['last_updated'], 'assets' => $stamp['assets'] ];
 }
 
 
@@ -106,11 +117,14 @@ function wporg_directory_checked_at(): int {
 
 
 /**
- * The directory stamp of a plugin_information result: `version`, the directory's stable
- * version, and `last_updated`, the time of the last import — it moves with every commit
- * the directory imported, tag, trunk or assets (plugin-directory: class-import.php writes
- * post_modified_gmt into last_updated). Null when the listing holds no such state (closed,
- * not found).
+ * The directory stamp of a plugin_information result — what the directory shows of the
+ * plugin's SVN state, the change detector: `version`, the directory's stable version;
+ * `last_updated`, which wordpress.org's import bumps only when the version changed or the
+ * commit touched the stable tag's folder (plugin-directory: class-import.php, "Bump last
+ * updated if") — an assets commit of a plugin with a tagged release and a trunk commit
+ * leave it alone —; and `assets`, the revision of every asset the directory serves, by
+ * filename (wporg_api_asset_revisions()), which every assets commit moves. Null when the
+ * listing holds no such state (closed, not found).
  */
 function wporg_directory_stamp(array $result): ?array {
     if ($result['state'] !== 'ok') {
@@ -118,7 +132,14 @@ function wporg_directory_stamp(array $result): ?array {
     }
     $data = $result['data'];
     $last_updated = (string) ($data['last_updated'] ?? '');
-    return $last_updated === '' ? null : [ 'version' => (string) ($data['version'] ?? ''), 'last_updated' => $last_updated ];
+    if ($last_updated === '') {
+        return null;
+    }
+    return [
+        'version' => (string) ($data['version'] ?? ''),
+        'last_updated' => $last_updated,
+        'assets' => wporg_api_asset_revisions($data),
+    ];
 }
 
 
@@ -178,7 +199,8 @@ function refresh_wporg_directory(?array $plugin_ids = null, bool $force = false)
     }
 
     raise_wporg_time_limit();
-    $fields = wporg_api_fields([ 'active_installs', 'downloaded', 'rating' ]);
+    // The figures, and the stamp's fields: last_updated and the asset URLs with their revisions.
+    $fields = wporg_api_fields([ 'active_installs', 'downloaded', 'rating', 'last_updated', 'icons', 'banners', 'screenshots' ]);
     $open = [];
     // One client call per chunk, so a transport failure marks only the slugs of the
     // chunk it hit — the chunks before it are already written.

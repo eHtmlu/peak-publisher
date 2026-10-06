@@ -162,6 +162,40 @@ function wporg_api_query_plugins_by_author(string $username): array {
 }
 
 
+/**
+ * The assets a listing serves, filename → the SVN revision the directory's URL names
+ * (`?rev=`, the revision the file was last changed in): the icons (1x, 2x, svg), the banners
+ * (low, high) and the screenshots' src. A generated icon (`default`, a geopattern on
+ * s.w.org) names no revision and is no asset of the plugin: left out. In filename order, so
+ * two listings of the same assets compare identical; empty when the listing serves none (the
+ * API's [] for absent icons, banners, screenshots).
+ *
+ * @return array<string, int>
+ */
+function wporg_api_asset_revisions(array $listing): array {
+    $urls = [];
+    foreach ([ 'icons', 'banners' ] as $field) {
+        $urls = [ ...$urls, ...array_values(is_array($listing[$field] ?? null) ? $listing[$field] : []) ];
+    }
+    foreach (is_array($listing['screenshots'] ?? null) ? $listing['screenshots'] : [] as $screenshot) {
+        $urls[] = is_array($screenshot) ? ($screenshot['src'] ?? null) : null;
+    }
+    $revisions = [];
+    foreach ($urls as $url) {
+        if (!is_string($url)) {
+            continue;
+        }
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+        if (!is_numeric($query['rev'] ?? null)) {
+            continue;
+        }
+        $revisions[basename((string) parse_url($url, PHP_URL_PATH))] = (int) $query['rev'];
+    }
+    ksort($revisions, SORT_STRING);
+    return $revisions;
+}
+
+
 /** Picks the preferred icon URL from a wordpress.org icons map (or null). */
 function wporg_api_pick_icon_url($icons): ?string {
     if (!is_array($icons)) {

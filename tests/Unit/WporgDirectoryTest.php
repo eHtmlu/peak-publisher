@@ -104,6 +104,9 @@ final class WporgDirectoryTest extends TestCase {
         self::assertEqualsCanonicalizing([ 'plugin-a', 'plugin-b', 'plugin-c' ], explode(',', $query['request']['slugs']));
         self::assertStringContainsString(',downloaded,', ',' . $query['request']['fields'] . ',', 'downloaded must be requested positively');
         self::assertStringContainsString(',-sections,', ',' . $query['request']['fields'] . ',');
+        foreach ([ 'last_updated', 'icons', 'banners', 'screenshots' ] as $field) {
+            self::assertStringContainsString(',' . $field . ',', ',' . $query['request']['fields'] . ',', "the stamp's $field must be requested positively");
+        }
         self::assertStringStartsWith('PeakPublisher/', FakeWordPress::$http_requests[0]['args']['user-agent']);
 
         $stats_a = get_wporg_directory($a->ID);
@@ -292,9 +295,71 @@ final class WporgDirectoryTest extends TestCase {
 
         self::assertSame([], refresh_wporg_directory());
 
-        self::assertSame([ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT' ], get_wporg_directory($marker->ID)['stamp']);
+        self::assertSame([ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ], get_wporg_directory($marker->ID)['stamp']);
         self::assertGreaterThanOrEqual($before, get_wporg_directory($marker->ID)['checked_at']);
         self::assertGreaterThanOrEqual($before, (int) get_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION), 'the check claims the option');
+    }
+
+    /** The asset fields as the info API serves them: every URL names the file and the revision it was last changed in. */
+    private function directory_assets(int $screenshot_revision): array {
+        return [
+            'icons' => [ '1x' => 'https://ps.w.org/plugin-a/assets/icon-128x128.png?rev=100', '2x' => 'https://ps.w.org/plugin-a/assets/icon-256x256.png?rev=101' ],
+            'banners' => [ 'low' => 'https://ps.w.org/plugin-a/assets/banner-772x250.jpg?rev=102', 'high' => 'https://ps.w.org/plugin-a/assets/banner-1544x500.jpg?rev=103' ],
+            'screenshots' => [
+                '1' => [ 'src' => 'https://ps.w.org/plugin-a/assets/screenshot-1.png?rev=' . $screenshot_revision, 'caption' => 'The editor' ],
+                '2' => [ 'src' => 'https://ps.w.org/plugin-a/assets/screenshot-2.png?rev=104', 'caption' => '' ],
+            ],
+        ];
+    }
+
+    public function test_the_stamp_carries_the_revision_of_every_asset_the_directory_serves(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'last_updated' => 'A', ...$this->directory_assets(105) ]) ]);
+
+        self::assertSame([], refresh_wporg_directory());
+
+        self::assertSame([
+            'version' => '1.0.0',
+            'last_updated' => 'A',
+            'assets' => [
+                'banner-1544x500.jpg' => 103, 'banner-772x250.jpg' => 102,
+                'icon-128x128.png' => 100, 'icon-256x256.png' => 101,
+                'screenshot-1.png' => 105, 'screenshot-2.png' => 104,
+            ],
+        ], get_wporg_directory($marker->ID)['stamp'], 'filename → revision, in filename order');
+    }
+
+    public function test_a_generated_icon_and_empty_asset_lists_leave_no_asset_in_the_stamp(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        $this->answer([ 'plugin-a' => $this->listing([
+            'slug' => 'plugin-a', 'last_updated' => 'A',
+            'icons' => [ 'default' => 'https://s.w.org/plugins/geopattern-icon/plugin-a_ffffff.svg' ], 'banners' => [], 'screenshots' => [],
+        ]) ]);
+
+        self::assertSame([], refresh_wporg_directory());
+
+        self::assertSame([ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [] ], get_wporg_directory($marker->ID)['stamp']);
+    }
+
+    public function test_a_moved_asset_revision_opens_the_check_like_a_moved_last_updated(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'last_updated' => 'A', ...$this->directory_assets(105) ]) ]);
+        self::assertSame([], refresh_wporg_directory(), 'the first look');
+        $before = get_wporg_directory($marker->ID)['stamp'];
+
+        update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, 0);
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'last_updated' => 'A', ...$this->directory_assets(106) ]) ]);
+        $open = refresh_wporg_directory();
+
+        self::assertSame([ ...$before, 'assets' => [ ...$before['assets'], 'screenshot-1.png' => 106 ] ], $open[$marker->ID] ?? null, 'an assets commit moves a revision alone: version and last_updated stay');
+        self::assertSame($before, get_wporg_directory($marker->ID)['stamp'], 'the old stamp stands until the SVN refresh completed');
+    }
+
+    public function test_a_stored_stamp_without_the_asset_revisions_reads_as_none(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => [ 'version' => '1.0.0', 'last_updated' => 'A' ] ]));
+
+        self::assertNull(get_wporg_directory($marker->ID)['stamp'], 'a foreign shape is no stamp: the next check is a first look');
     }
 
     public function test_a_moved_stamp_is_answered_and_stands_until_its_check_is_confirmed(): void {
@@ -302,13 +367,13 @@ final class WporgDirectoryTest extends TestCase {
         $checked = time() - HOUR_IN_SECONDS;
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([
             'state' => 'ok', 'active_installs' => 10, 'fetched_at' => time(), 'attempted_at' => time(),
-            'stamp' => [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT' ], 'checked_at' => $checked,
+            'stamp' => [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ], 'checked_at' => $checked,
         ]));
         $listing = $this->listing([ 'slug' => 'plugin-a', 'version' => '1.0.0', 'last_updated' => '2026-10-04 8:02am GMT', 'active_installs' => 999 ]);
-        $moved = [ 'version' => '1.0.0', 'last_updated' => '2026-10-04 8:02am GMT' ];
+        $moved = [ 'version' => '1.0.0', 'last_updated' => '2026-10-04 8:02am GMT', 'assets' => [] ];
 
         $this->answer([ 'plugin-a' => $listing ]);
-        self::assertSame([ $marker->ID => $moved ], refresh_wporg_directory(), 'an assets or trunk commit moves last_updated alone');
+        self::assertSame([ $marker->ID => $moved ], refresh_wporg_directory(), 'a commit to the stable tag moves last_updated alone');
         $stored = get_wporg_directory($marker->ID);
         self::assertSame('2026-10-01 9:15am GMT', $stored['stamp']['last_updated'], 'the old stamp stands until the SVN refresh completed');
         self::assertSame($checked, $stored['checked_at']);
@@ -330,7 +395,7 @@ final class WporgDirectoryTest extends TestCase {
 
     public function test_a_failed_svn_refresh_is_the_failed_check_until_the_next_one_completes(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
-        $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT' ];
+        $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ];
         $checked = time() - HOUR_IN_SECONDS;
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => $stamp, 'checked_at' => $checked ]));
 
@@ -353,9 +418,9 @@ final class WporgDirectoryTest extends TestCase {
     public function test_an_unchanged_stamp_marks_nothing_and_the_check_waits_five_minutes(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         $now = time();
-        $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT' ];
+        $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ];
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'fetched_at' => $now, 'attempted_at' => $now, 'stamp' => $stamp ]));
-        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', ...$stamp ]) ]);
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT' ]) ]);
 
         self::assertSame([], refresh_wporg_directory());
         self::assertGreaterThanOrEqual($now, get_wporg_directory($marker->ID)['checked_at'], 'an unchanged stamp completes the check');
@@ -366,7 +431,7 @@ final class WporgDirectoryTest extends TestCase {
     public function test_a_closed_or_missing_plugin_never_changes(): void {
         $a = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         $b = $this->create_plugin('pblsh_wporg_plugin', 'plugin-b');
-        $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT' ];
+        $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ];
         foreach ([ $a, $b ] as $marker) {
             update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => $stamp, 'fetched_at' => time(), 'attempted_at' => time() ]));
         }
@@ -380,19 +445,19 @@ final class WporgDirectoryTest extends TestCase {
     public function test_force_checks_the_stamp_of_one_marker_regardless_of_the_interval(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, time());
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => [ 'version' => '1.0.0', 'last_updated' => 'A' ], 'fetched_at' => time(), 'attempted_at' => time() ]));
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [] ], 'fetched_at' => time(), 'attempted_at' => time() ]));
         $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'version' => '1.1.0', 'last_updated' => 'B' ]) ]);
 
-        self::assertSame([ $marker->ID => [ 'version' => '1.1.0', 'last_updated' => 'B' ] ], refresh_wporg_directory([ $marker->ID ], true));
+        self::assertSame([ $marker->ID => [ 'version' => '1.1.0', 'last_updated' => 'B', 'assets' => [] ] ], refresh_wporg_directory([ $marker->ID ], true));
     }
 
     public function test_force_leaves_every_check_open_for_the_caller_who_reads_svn(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
-        $stamp = [ 'version' => '1.0.0', 'last_updated' => 'A' ];
+        $stamp = [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [] ];
         $checked = time() - HOUR_IN_SECONDS;
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => $stamp, 'checked_at' => $checked ]));
 
-        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', ...$stamp ]) ]);
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'version' => '1.0.0', 'last_updated' => 'A' ]) ]);
         self::assertSame([ $marker->ID => $stamp ], refresh_wporg_directory([ $marker->ID ], true), 'an unchanged stamp too');
         self::assertSame($checked, get_wporg_directory($marker->ID)['checked_at'], 'the check is the SVN read\'s to complete');
 

@@ -1,14 +1,14 @@
 // PluginEditor Component (simplified overview + releases list)
 lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, refreshWporg, onTogglePluginStatus, pendingPluginStatus, onBack, initialTab, onTabChange }) => {
     const { __, sprintf } = wp.i18n;
-    const { createElement, useState, useEffect, useRef } = wp.element;
+    const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip, Button, Spinner } = wp.components;
     const { getSvgIcon, getPluginStatus } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
     const { getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
     const { getChangesText } = Pblsh.WporgCheckUtils;
-    const { NoticeBox, CurrentVersion, InstallationsCount, Figure, WporgCheckStatus } = Pblsh.Components;
+    const { NoticeBox, CurrentVersion, InstallationsCount, Figure, WporgCheckStatus, WporgRevisionLink } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
     const isWporg = pluginData && pluginData.hosting_type === 'wporg';
@@ -24,11 +24,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
 
     const [downloadingReleaseId, setDownloadingReleaseId] = useState(null);
     const downloadingReleaseIdRef = useRef(null);
-    // The flip in progress (its ring shows the spinner, every ring is locked) and the
-    // transient success notice, which the next plugin change clears.
+    // The flip in progress (its ring shows the spinner, every ring is locked) and the last
+    // flip's outcome { version, revision } behind the transient success notice, which the
+    // next plugin change clears.
     const [flippingReleaseId, setFlippingReleaseId] = useState(null);
-    const [flipNotice, setFlipNotice] = useState(null);
-    useEffect(() => { setFlipNotice(null); }, [pluginData && pluginData.id]);
+    const [flipOutcome, setFlipOutcome] = useState(null);
+    useEffect(() => { setFlipOutcome(null); }, [pluginData && pluginData.id]);
     // The manual refresh from wordpress.org: while it runs, its link is busy and the status
     // line says so — for everything it brings, figures, releases and assets alike; what is
     // shown stays until the answer replaces it. Its outcome shows through the data: the status
@@ -198,12 +199,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const makeCurrent = async (rel, relation) => {
         if (!pluginData || flippingReleaseId !== null) return;
         if (!confirm(getFlipConfirmText(isWporg, rel.version, relation, isWporg ? pluginData.wporg_stats.closed : null))) return;
-        setFlipNotice(null);
+        setFlipOutcome(null);
         setFlippingReleaseId(rel.id);
         try {
             const response = await Pblsh.API.setCurrentRelease(pluginData.id, rel.version, pluginData.pointer);
             if (typeof refreshPlugin === 'function') await refreshPlugin();
-            setFlipNotice(getFlipSuccessText(isWporg, response.to, response.revision));
+            setFlipOutcome({ version: response.to, revision: response.revision });
         } catch (e) {
             // apiFetch rejects with the REST error payload: message leads, the code follows.
             alert((e?.message || __('Could not change the current release.', 'peak-publisher'))
@@ -220,8 +221,9 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         const issue = getCurrentReleaseIssue(pluginData);
         const closed = isWporg ? pluginData.wporg_stats.closed : null;
         return [
-            flipNotice && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--tab-panel__notice' },
-                createElement('p', null, flipNotice),
+            // The self-hosted sentence has no <revision /> slot: the link stays unrendered there.
+            flipOutcome && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--tab-panel__notice' },
+                createElement('p', null, createInterpolateElement(getFlipSuccessText(isWporg, flipOutcome.version), { revision: createElement(WporgRevisionLink, { revision: flipOutcome.revision }) })),
             ),
             // Closed on wordpress.org — the most important fact of the daily stats fetch:
             // nothing is distributed, whatever the pointer says.

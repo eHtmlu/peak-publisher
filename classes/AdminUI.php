@@ -82,6 +82,7 @@ class AdminUI {
             'components/Checklist.js',
             'components/FaqLink.js',
             'components/TipLink.js',
+            'components/WporgRevisionLink.js',
             'components/ChannelPath.js',
             'components/NoticeBox.js',
             'components/Figure.js',

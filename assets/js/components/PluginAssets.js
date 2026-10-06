@@ -11,16 +11,16 @@
 // (refreshFromWporg, refreshingWporg).
 lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin, refreshFromWporg, refreshingWporg }) => {
     const { __, sprintf } = wp.i18n;
-    const { createElement, useState, useEffect, useRef } = wp.element;
+    const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Spinner } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
     const {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
-        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText,
+        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText, getNotOnWporgText,
     } = Pblsh.AssetsUtils;
-    const { TipLink, NoticeBox } = Pblsh.Components;
+    const { TipLink, NoticeBox, WporgRevisionLink } = Pblsh.Components;
 
     const isWporg = !!pluginData && pluginData.hosting_type === 'wporg';
     // The working copy waits without an account; only the commit needs one.
@@ -33,7 +33,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const setAssets = (view) => Pblsh.Controllers.Assets.showAfterWrite(pluginId, view);   // every caller is a write's answer
     const [busy, setBusy]                   = useState(null);   // 'committing' | 'working' | null — a working-copy request in flight
     const [showWporgState, setShowWporgState] = useState(false); // wordpress.org's state alone, read-only
-    const [notice, setNotice]               = useState(null);   // the last commit's outcome
+    const [committedRevision, setCommittedRevision] = useState(null);   // the last commit's outcome: its revision
     const [uploadingSlot, setUploadingSlot] = useState(null);   // 'icon_128' | 'screenshot-3' | null
     const [uploadProgress, setUploadProgress] = useState(0);
     const fileInputRefs = useRef({});  // { [slotKey]: HTMLInputElement }
@@ -51,7 +51,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     // Every write answers the fresh view — no second request. A self-hosted write may change
     // the icon of header and list; a wordpress.org change does so only once it is committed.
     const applyAssets = (result) => {
-        setNotice(null);
+        setCommittedRevision(null);
         setAssets(result.assets);
         if (!isWporg && typeof refreshPlugin === 'function') refreshPlugin();
     };
@@ -114,7 +114,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             const result = await Pblsh.API.commitPluginAssets(pluginData.id);
             setAssets(result.assets);
             setShowWporgState(false);
-            setNotice(result.committed ? getCommittedText(result.revision) : null);
+            setCommittedRevision(result.committed ? result.revision : null);
             if (typeof refreshPlugin === 'function') refreshPlugin();
         } catch (e) {
             if (e && e.assets) setAssets(e.assets);
@@ -188,25 +188,29 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         return view;
     };
 
-    // A conflict side: the image or an empty frame, and what it is.
-    const renderCompareSide = (label, url, caption, imageModClass) => createElement('div', { className: 'pblsh--asset-slot__compare-side' },
+    // A conflict side: the image (file: { url, filename }) or an empty frame, and what it is.
+    const renderCompareSide = (label, file, meta, imageModClass) => createElement('div', { className: 'pblsh--asset-slot__compare-side' },
         createElement('div', { className: 'pblsh--asset-slot__compare-label' }, label),
-        url
+        file && file.url
             ? createElement('div', { className: 'pblsh--asset-slot__box-image ' + imageModClass },
                 createElement('div', { className: 'pblsh--asset-slot__box-image-inner' },
-                    createElement('img', { src: url, alt: caption, className: 'pblsh--asset-slot__box-img', draggable: false }),
+                    createElement('img', { src: file.url, alt: file.filename, className: 'pblsh--asset-slot__box-img', draggable: false }),
                 ),
             )
             : createElement('div', { className: 'pblsh--asset-slot__compare-empty' }),
-        createElement('div', { className: 'pblsh--asset-slot__box-meta' }, caption),
+        createElement('div', { className: 'pblsh--asset-slot__box-meta' }, meta),
     );
 
-    // Changed here and on wordpress.org: both states side by side and the two decisions.
+    // Changed here and on wordpress.org: both states side by side and the two decisions. The
+    // wordpress.org side names the commit that changed it there — who, when and why is what
+    // the decision needs.
     const renderConflict = (slotKey, label, mine, slotInfo, imageModClass) => createElement('div', { className: 'pblsh--asset-slot__conflict' },
         createElement('div', { className: 'pblsh--asset-slot__box-label' }, label),
         createElement('div', { className: 'pblsh--asset-slot__compare' },
-            renderCompareSide(__('Mine', 'peak-publisher'), mine && mine.url, mine ? mine.filename : __('Deleted here', 'peak-publisher'), imageModClass),
-            renderCompareSide(__('wordpress.org', 'peak-publisher'), slotInfo.on_wporg && slotInfo.on_wporg.url, getOnWporgText(slotInfo.on_wporg), imageModClass),
+            renderCompareSide(__('Mine', 'peak-publisher'), mine, mine ? mine.filename : __('Deleted here', 'peak-publisher'), imageModClass),
+            renderCompareSide(__('wordpress.org', 'peak-publisher'), slotInfo.on_wporg, slotInfo.on_wporg
+                ? createInterpolateElement(getOnWporgText(slotInfo.on_wporg.filename), { revision: createElement(WporgRevisionLink, { revision: slotInfo.on_wporg.revision }) })
+                : getNotOnWporgText(), imageModClass),
         ),
         createElement('div', { className: 'pblsh--asset-slot__resolve' },
             createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: () => handleResolve(slotKey, 'theirs') }, __("Take wordpress.org's version", 'peak-publisher')),
@@ -238,7 +242,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const isDragging = isScreenshot && draggingN === screenshotN;
         const isDragOver = isScreenshot && dragOverN === screenshotN && draggingN !== screenshotN;
 
-        const metaLine = hasAsset ? getMetaLine(assetData, isWporg) : '';
+        const metaLine = hasAsset ? getMetaLine(assetData) : '';
         const imageModClass = def.group === 'banners' ? 'pblsh--asset-slot__box-image--banner'
             : def.group === 'screenshots' ? 'pblsh--asset-slot__box-image--screenshot'
             : 'pblsh--asset-slot__box-image--icon';
@@ -544,8 +548,8 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     // changed while the mirror was never read, the directory's verdict, and why the commit
     // waits when no account can make it.
     const renderNotices = () => [
-        notice && createElement(NoticeBox, { key: 'committed', variant: 'info', className: 'pblsh--tab-panel__notice' },
-            createElement('p', null, notice),
+        committedRevision && createElement(NoticeBox, { key: 'committed', variant: 'info', className: 'pblsh--tab-panel__notice' },
+            createElement('p', null, createInterpolateElement(getCommittedText(), { revision: createElement(WporgRevisionLink, { revision: committedRevision }) })),
         ),
         notSynced && createElement(NoticeBox, { key: 'not-synced', variant: 'warning', className: 'pblsh--tab-panel__notice' },
             createElement('p', null, getNotSyncedNotice(), ' ',

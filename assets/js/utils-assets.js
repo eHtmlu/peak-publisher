@@ -38,13 +38,11 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     }
 
     // The box's figures: "128×128 px · 12.3 KB" — muted fragments, · separated.
-    // A wordpress.org file adds the SVN revision it was last changed in: "· r3670259".
-    function getMetaLine(entry, withRevision = false) {
+    function getMetaLine(entry) {
         const parts = [];
         if (entry.width && entry.height) parts.push(entry.width + '×' + entry.height + ' px');
         const size = formatSize(entry.filesize);
         if (size) parts.push(size);
-        if (withRevision && entry.revision) parts.push('r' + entry.revision);
         return parts.join(' · ');
     }
 
@@ -106,7 +104,8 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     const getCommitsAsText = (username) => sprintf(__('Commits as "%s"', 'peak-publisher'), username);
     const getNoAccountCommitText = () => __('Committing assets needs your wordpress.org account — connect one under Settings › wordpress.org. Your changes are kept until then.', 'peak-publisher');
     const getClosedAssetsNotice = () => __('The plugin is closed on wordpress.org — its page shows a generated icon and no banner until it is reopened.', 'peak-publisher');
-    const getCommittedText = (revision) => sprintf(__('Committed to wordpress.org in r%d.', 'peak-publisher'), revision);
+    // The commit's receipt; <revision /> is the WporgRevisionLink's slot (createInterpolateElement).
+    const getCommittedText = () => __('Committed to wordpress.org in <revision />.', 'peak-publisher');
     const getShowWporgStateText = (showing) => showing ? __('Show my changes', 'peak-publisher') : __("Show wordpress.org's state", 'peak-publisher');
 
     // The commit's confirm with the tally the commit message will carry: puts are updated,
@@ -139,14 +138,14 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         }[kind];
     }
 
-    // The wordpress.org side of a conflict box: the mirror file, or that the slot is empty there.
-    const getOnWporgText = (onWporg) => onWporg
-        ? sprintf(__('On wordpress.org: %1$s r%2$d', 'peak-publisher'), onWporg.filename, onWporg.revision)
-        : __('Not on wordpress.org', 'peak-publisher');
+    // The wordpress.org side of a conflict box: the mirror file with the commit that last
+    // changed it (<revision /> is the WporgRevisionLink's slot), or that the slot is empty there.
+    const getOnWporgText = (filename) => sprintf(__('On wordpress.org: %s <revision />', 'peak-publisher'), filename);
+    const getNotOnWporgText = () => __('Not on wordpress.org', 'peak-publisher');
 
     return {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
-        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText,
+        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText, getNotOnWporgText,
     };
 })());

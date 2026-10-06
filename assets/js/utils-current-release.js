@@ -212,10 +212,11 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
         }
     }
 
-    // The transient notice after a successful flip.
-    function getFlipSuccessText(isWporg, version, revision) {
+    // The transient notice after a successful flip; on wordpress.org with the commit as
+    // <revision />, the WporgRevisionLink's slot (createInterpolateElement).
+    function getFlipSuccessText(isWporg, version) {
         return isWporg
-            ? sprintf(__('Stable tag set to %1$s in r%2$s — sites see it with their next update check once wordpress.org has processed the commit, usually within a few minutes.', 'peak-publisher'), version, revision)
+            ? sprintf(__('Stable tag set to %s in <revision /> — sites see it with their next update check once wordpress.org has processed the commit, usually within a few minutes.', 'peak-publisher'), version)
             : sprintf(__('%s is now the current release — sites see it with their next update check.', 'peak-publisher'), version);
     }
 

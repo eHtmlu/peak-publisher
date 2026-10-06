@@ -132,10 +132,12 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         ? __('Delete this asset? It is removed from wordpress.org with the next commit.', 'peak-publisher')
         : __('Delete this asset?', 'peak-publisher');
 
-    // A box's band: what the working copy does to this slot.
+    // A box's band: what the commit will do with the slot on wordpress.org, said from the picture
+    // the box shows — or that both sides changed the slot.
     function getBandText(kind) {
         return {
-            pending: __('Not on wordpress.org yet', 'peak-publisher'),
+            add: __('Will be added on wordpress.org', 'peak-publisher'),
+            replace: __('Will replace the one on wordpress.org', 'peak-publisher'),
             delete: __('Will be deleted on wordpress.org', 'peak-publisher'),
             conflict: __('Changed here and on wordpress.org', 'peak-publisher'),
         }[kind];

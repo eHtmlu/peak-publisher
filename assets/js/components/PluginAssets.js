@@ -237,7 +237,8 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const slotInfo = wporg && !showingWporgState ? wporg.slots[slotKey] || null : null;
         const conflict = !!(slotInfo && slotInfo.conflict);
         const pendingDelete = !!(slotInfo && slotInfo.pending === 'delete');
-        const band = conflict ? 'conflict' : pendingDelete ? 'delete' : slotInfo && slotInfo.pending ? 'pending' : null;
+        // The band names what the commit will do to the slot: add, replace or delete its file there.
+        const band = conflict ? 'conflict' : pendingDelete ? 'delete' : slotInfo && slotInfo.pending ? (slotInfo.on_wporg ? 'replace' : 'add') : null;
         const editable = !readOnly && !conflict;
         const warnings = (assetData && assetData.warnings) || [];
         const isScreenshot = slot === 'screenshot';

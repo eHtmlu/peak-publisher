@@ -11,14 +11,14 @@
 // (refreshFromWporg, refreshingWporg).
 lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin, refreshFromWporg, refreshingWporg }) => {
     const { __, sprintf } = wp.i18n;
-    const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
+    const { createElement, createInterpolateElement, Fragment, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Spinner } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
     const {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
-        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText, getNotOnWporgText,
+        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText,
     } = Pblsh.AssetsUtils;
     const { TipLink, NoticeBox, WporgRevisionLink } = Pblsh.Components;
 
@@ -188,33 +188,35 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         return view;
     };
 
-    // A conflict side: the image (file: { url, filename }) or an empty frame, and what it is.
-    const renderCompareSide = (label, file, meta, imageModClass) => createElement('div', { className: 'pblsh--asset-slot__compare-side' },
+    // A conflict side: what it is, the picture (file: { url, filename }) in the slot's frame — or
+    // that frame empty, so the missing picture still shows its shape —, what the file is, and
+    // the decision that takes this side. The frame stands in a row of its own, so it keeps the
+    // picture's width and its height follows that width, not the side's.
+    const renderCompareSide = (label, file, meta, imageModClass, decision) => createElement('div', { className: 'pblsh--asset-slot__compare-side' },
         createElement('div', { className: 'pblsh--asset-slot__compare-label' }, label),
-        file && file.url
-            ? createElement('div', { className: 'pblsh--asset-slot__box-image ' + imageModClass },
+        createElement('div', { className: 'pblsh--asset-slot__compare-picture' },
+            createElement('div', { className: 'pblsh--asset-slot__box-image ' + imageModClass + (file && file.url ? '' : ' pblsh--asset-slot__box-image--empty') },
                 createElement('div', { className: 'pblsh--asset-slot__box-image-inner' },
-                    createElement('img', { src: file.url, alt: file.filename, className: 'pblsh--asset-slot__box-img', draggable: false }),
+                    file && file.url && createElement('img', { src: file.url, alt: file.filename, className: 'pblsh--asset-slot__box-img', draggable: false }),
                 ),
-            )
-            : createElement('div', { className: 'pblsh--asset-slot__compare-empty' }),
+            ),
+        ),
         createElement('div', { className: 'pblsh--asset-slot__box-meta' }, meta),
+        createElement('div', { className: 'pblsh--asset-slot__compare-decision' }, decision),
     );
 
-    // Changed here and on wordpress.org: both states side by side and the two decisions. The
-    // wordpress.org side names the commit that changed it there — who, when and why is what
-    // the decision needs.
+    // Changed here and on wordpress.org: both states side by side, each with the decision that
+    // takes it beneath. The wordpress.org side names the commit that changed it there — who,
+    // when and why is what the decision needs.
     const renderConflict = (slotKey, label, mine, slotInfo, imageModClass) => createElement('div', { className: 'pblsh--asset-slot__conflict' },
         createElement('div', { className: 'pblsh--asset-slot__box-label' }, label),
         createElement('div', { className: 'pblsh--asset-slot__compare' },
-            renderCompareSide(__('Mine', 'peak-publisher'), mine, mine ? mine.filename : __('Deleted here', 'peak-publisher'), imageModClass),
+            renderCompareSide(__('Mine', 'peak-publisher'), mine, mine ? mine.filename : __('Deleted here', 'peak-publisher'), imageModClass,
+                createElement(Button, { isPrimary: true, disabled: busy !== null, onClick: () => handleResolve(slotKey, 'mine') }, __('Keep mine', 'peak-publisher'))),
             renderCompareSide(__('wordpress.org', 'peak-publisher'), slotInfo.on_wporg, slotInfo.on_wporg
-                ? createInterpolateElement(getOnWporgText(slotInfo.on_wporg.filename), { revision: createElement(WporgRevisionLink, { revision: slotInfo.on_wporg.revision }) })
-                : getNotOnWporgText(), imageModClass),
-        ),
-        createElement('div', { className: 'pblsh--asset-slot__resolve' },
-            createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: () => handleResolve(slotKey, 'theirs') }, __("Take wordpress.org's version", 'peak-publisher')),
-            createElement(Button, { isPrimary: true, disabled: busy !== null, onClick: () => handleResolve(slotKey, 'mine') }, __('Keep mine', 'peak-publisher')),
+                ? createElement(Fragment, null, slotInfo.on_wporg.filename, ' ', createElement(WporgRevisionLink, { revision: slotInfo.on_wporg.revision }))
+                : __('Deleted there', 'peak-publisher'), imageModClass,
+                createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: () => handleResolve(slotKey, 'theirs') }, __('Take theirs', 'peak-publisher'))),
         ),
     );
 

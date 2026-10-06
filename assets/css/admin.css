@@ -3723,8 +3723,8 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     --pblsh-band-color: var(--color-red);
 }
 
-/* wordpress.org: a conflict box — both states side by side (stacked on small screens), then
-   the two decisions. */
+/* wordpress.org: a conflict box — both states side by side at any width (a conflict is decided
+   at a desk; small images do no harm), each with the decision that takes it beneath. */
 .pblsh--asset-slot__conflict {
     display: flex;
     flex-direction: column;
@@ -3736,11 +3736,6 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
 }
-@media (max-width: 782px) {
-    .pblsh--asset-slot__compare {
-        grid-template-columns: 1fr;
-    }
-}
 .pblsh--asset-slot__compare-side {
     display: flex;
     flex-direction: column;
@@ -3750,18 +3745,36 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--asset-slot__compare-label {
     font-weight: 600;
 }
-.pblsh--asset-slot__compare-empty {
-    min-height: 4rem;
-    border: 1px dashed #c3c4c7;
+/* A row of its own for the frame: it shrinks to the picture's width, so the frame's height
+   (a percentage of its own width) follows the picture, not the side. */
+.pblsh--asset-slot__compare-picture {
+    display: flex;
+}
+/* The empty side: the slot's frame as a dashed outline, inert — no hover. */
+.pblsh--asset-slot__box-image--empty:hover {
+    border-color: transparent;
+}
+.pblsh--asset-slot__box-image--empty .pblsh--asset-slot__box-image-inner {
+    background: none;
+    outline: 1px dashed #c3c4c7;
+    outline-offset: -1px;
+}
+.pblsh--asset-slot__box-image--empty .pblsh--asset-slot__box-image-inner:hover {
+    box-shadow: none;
 }
 .pblsh--asset-slot__compare .pblsh--asset-slot__box-meta {
     word-break: break-word;
 }
-.pblsh--asset-slot__resolve {
+/* The decision stands at the foot of its side — the sides stretch to one height, so the two
+   buttons share a baseline — and spans it, so both are one width whatever they say. */
+.pblsh--asset-slot__compare-decision {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.5rem;
+    margin-top: auto;
+    padding-top: 0.25rem;
+}
+.pblsh--asset-slot__compare-decision .components-button {
+    flex: 1;
+    justify-content: center;
 }
 
 /* wordpress.org: the files of assets/ the tab does not show, after the groups — closer to

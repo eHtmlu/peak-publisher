@@ -140,12 +140,9 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
 
     // The wordpress.org side of a conflict box: the mirror file with the commit that last
     // changed it (<revision /> is the WporgRevisionLink's slot), or that the slot is empty there.
-    const getOnWporgText = (filename) => sprintf(__('On wordpress.org: %s <revision />', 'peak-publisher'), filename);
-    const getNotOnWporgText = () => __('Not on wordpress.org', 'peak-publisher');
-
     return {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getPendingBarText, getConflictBarText, getCommittingText, getCommitsAsText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
-        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText, getOnWporgText, getNotOnWporgText,
+        getCommitConfirmText, getDiscardConfirmText, getDeleteConfirmText, getBandText,
     };
 })());

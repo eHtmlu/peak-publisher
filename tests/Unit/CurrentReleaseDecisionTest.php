@@ -60,7 +60,8 @@ final class CurrentReleaseDecisionTest extends TestCase {
             'no_current wporg trunk_and_tag forced' => [ $trunk, true, '1.2.3', true, 'trunk_and_tag', [ 'no_current', true, false ] ],
             'no_current wporg tag_only is a choice' => [ $trunk, true, '1.2.3', true, 'tag_only', [ 'no_current', true, true ] ],
             'no_current wporg tag_only pre-release' => [ $missing, true, '1.2.3-beta1', true, 'tag_only', [ 'no_current', false, true ] ],
-            'no_current wporg none forced even tag_only' => [ $none, true, '1.2.3', true, 'tag_only', [ 'no_current', true, false ] ],
+            'no_current wporg none trunk_and_tag forced' => [ $none, true, '1.2.3', true, 'trunk_and_tag', [ 'no_current', true, false ] ],
+            'no_current wporg none tag_only is a choice too: wordpress.org serves trunk, which stays' => [ $none, true, '1.2.3', true, 'tag_only', [ 'no_current', true, true ] ],
             'no_current self-hosted' => [ $none, true, '1.2.3', false, null, [ 'no_current', true, true ] ],
             'no_current self-hosted pre-release' => [ $none, true, '1.2.3-beta1', false, null, [ 'no_current', false, true ] ],
             // 5–7: relation to the current version

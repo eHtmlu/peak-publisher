@@ -265,10 +265,11 @@ function is_pre_release_version(string $version): bool {
 /**
  * The upload's default answer to "does this release become the current release?" — one
  * decision tree for both channels: exactly one relation per upload, evaluated in this
- * order. Where the channels differ, the reason is always the same: on wordpress.org
- * trunk serves the new code anyway in first/no_current, so a tag pointer is always the
- * better state; self-hosted serves nothing without a pointer, and a pre-release must not
- * become current by default even then.
+ * order. Where the channels differ, the reason is always the same: on wordpress.org the
+ * decision is forced exactly where trunk receives this code (first, and no_current with
+ * trunk_and_tag) — wordpress.org would serve it either way, so a tag pointer is the better
+ * state; self-hosted serves nothing without a pointer, and a pre-release must not become
+ * current by default even then.
  *
  * @param array   $current      resolve_current_release() of the plugin (or its wporg marker).
  * @param bool    $has_releases The plugin has releases (wporg: the mirror has).
@@ -305,11 +306,11 @@ function decide_current_release(array $current, bool $has_releases, string $vers
         return $decide('repairs_pointer', true, false);
     }
     if (in_array($state, [ 'trunk', 'tag_missing', 'none' ], true)) {
-        // wporg: with trunk getting the code a tag pointer is always better, and with no
-        // pointer at all there is nothing to preserve; only tag_only on a trunk/invalid
-        // pointer may leave trunk untouched. self-hosted: opting out keeps the pointer empty
-        // or invalid.
-        if ($is_wporg && ($deploy_mode === 'trunk_and_tag' || $state === 'none')) {
+        // wporg: with trunk getting the code a tag pointer is always better — forced; with
+        // tag_only trunk stays as it is, and so may the pointer that serves it (trunk, an
+        // invalid tag, none at all: wordpress.org serves trunk for each). self-hosted:
+        // opting out keeps the pointer empty or invalid.
+        if ($is_wporg && $deploy_mode === 'trunk_and_tag') {
             return $decide('no_current', true, false);
         }
         return $decide('no_current', !$pre_release, true);

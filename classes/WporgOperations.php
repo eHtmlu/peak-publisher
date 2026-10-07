@@ -705,7 +705,8 @@ class WporgOperations {
      * current_release_changed when the pointer moved since the dialog — or, after a dialog
      * that could not read it (relation unknown), when the live relation would be one the user
      * never saw: equal or repairs_pointer (V names the pointer) or lower (V below a current
-     * release); higher, no_current and first carry the user's decision. Throws
+     * release), said in that situation's own words since nothing moved; higher, no_current
+     * and first carry the user's decision. Throws
      * wporg_trunk_readme_unreadable when the plan needs the live readme and it could not be
      * read: preserving an unknown pointer while trunk gets code, or replacing the line in a
      * file that cannot be read. Writing the workspace variant with the new pointer needs
@@ -738,7 +739,12 @@ class WporgOperations {
                 && version_compare($normalized_version, $normalized_pointer, '<')
                 && self::tag_exists($client, $wporg_slug, $live_pointer);
             if ($names_this_version || $below_current) {
-                throw self::exception('current_release_changed');
+                // The code is the dialog's cue to reload the facts; the message is this
+                // situation's own — the catalog's "changed in the meantime" would be wrong,
+                // the pointer never moved, the dialog never knew it.
+                throw new WporgSvnException('current_release_changed', $names_this_version
+                    ? sprintf(__('The current release on wordpress.org could now be read: it is %s already. Reload the upload facts and check the decision again.', 'peak-publisher'), $live_pointer)
+                    : sprintf(__('The current release on wordpress.org could now be read: it is %1$s, newer than %2$s. Reload the upload facts and check the decision again.', 'peak-publisher'), $live_pointer, $version), 409);
             }
         }
 

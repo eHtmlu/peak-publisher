@@ -32,9 +32,9 @@ function get_wporg_plugin_data($plugin_post_or_id): array {
 
 /**
  * Brings a marker in step with SVN — the cache (tags, trunk readme) when the plugin's
- * revision moved or a key is missing, the assets mirror when it is behind or lost a file —
- * and says what that changed in what the editor shows (wporg_refresh_changes()). One
- * revision listing when nothing moved.
+ * revision moved or a key is missing, the trunk readme alone when its last read failed, the
+ * assets mirror when it is behind or lost a file — and says what that changed in what the
+ * editor shows (wporg_refresh_changes()). One revision listing when nothing moved.
  *
  * A refresh that could not complete says so as its `failure`, the pipeline's error with code
  * and message, beside what it did change until then: the assets and the cache are two
@@ -104,15 +104,7 @@ function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
     if ((int) ($cached['revision'] ?? 0) !== (int) $current_revision
         || !array_key_exists('release_count', $cached)
         || !array_key_exists('trunk_readme', $cached)) {
-        // trunk/readme.txt carries the pointer (Stable tag) and the screenshot captions.
-        // Not readable → null: warn-only, the cache is written anyway and the current
-        // release reads as 'unknown' until the next refresh.
-        try {
-            $trunk_readme = WporgOperations::fetch_trunk_readme($plugin_post->post_name);
-        } catch (\Throwable $e) {
-            wporg_log_cache_error($plugin_post, 'trunk_readme', $e);
-            $trunk_readme = null;
-        }
+        $trunk_readme = wporg_read_trunk_readme_for_cache($plugin_post);
 
         try {
             $sync_summary = sync_wporg_release_posts($plugin_post, $current_revision);
@@ -131,13 +123,16 @@ function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
             'trunk_readme' => $trunk_readme,
             'fetched_at' => time(),
         ];
-        wp_update_post([
-            'ID' => (int) $plugin_post->ID,
-            'post_content' => wp_slash(wp_json_encode($cache)),
-        ]);
-
-        // After the cache write, so the title follows the pointer just read.
-        refresh_plugin_title_from_reference((int) $plugin_post->ID);
+        wporg_write_plugin_cache($plugin_post, $cache);
+    } elseif ($cached['trunk_readme'] === null) {
+        // The last read of trunk/readme.txt failed and nothing moved since: the file is read
+        // again on its own — the releases are in step — so one failed read does not keep the
+        // pointer 'unknown' until the next commit on wordpress.org.
+        $trunk_readme = wporg_read_trunk_readme_for_cache($plugin_post);
+        if ($trunk_readme !== null) {
+            $cache['trunk_readme'] = $trunk_readme;
+            wporg_write_plugin_cache($plugin_post, $cache);
+        }
     }
 
     return [
@@ -145,6 +140,31 @@ function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
         'changes' => wporg_refresh_changes($sync_summary, $cached['trunk_readme'] ?? null, $cache['trunk_readme'] ?? null, $assets_changed),
         'failure' => $failure,
     ];
+}
+
+
+/**
+ * trunk/readme.txt for the marker cache — the pointer (Stable tag) and the screenshot
+ * captions — or null when it cannot be read: warn-only and logged, the cache is written
+ * anyway and the current release reads as 'unknown' until a refresh reads the file.
+ */
+function wporg_read_trunk_readme_for_cache(\WP_Post $plugin_post): ?array {
+    try {
+        return WporgOperations::fetch_trunk_readme($plugin_post->post_name);
+    } catch (\Throwable $e) {
+        wporg_log_cache_error($plugin_post, 'trunk_readme', $e);
+        return null;
+    }
+}
+
+
+/** Writes the marker cache, then the title, which follows the pointer just written. */
+function wporg_write_plugin_cache(\WP_Post $plugin_post, array $cache): void {
+    wp_update_post([
+        'ID' => (int) $plugin_post->ID,
+        'post_content' => wp_slash(wp_json_encode($cache)),
+    ]);
+    refresh_plugin_title_from_reference((int) $plugin_post->ID);
 }
 
 

@@ -1940,10 +1940,25 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 /* Check rows — the shared base rendered by the Checklist component: the upload
    result checklist and the wporg import facts use the same anatomy. */
 
-/* While the destination is undecided, the body is the gray decision surface —
-   choosing collapses it into the publish-path row of the same color. */
+/* While the destination is undecided, the body is the gray decision surface at the
+   dialog's top — the publish-path row unfolded: choosing collapses it into the row of
+   the same color and place. No border against the dialog's edge. */
 .pblsh--upload-result--choosing .pblsh--upload-result__body {
     background: var(--surface-color);
+    border-top: 0;
+}
+
+/* The upload's own identity atop the decision surface, in the prompts' centered column. */
+.pblsh--upload-result__upload-identity {
+    margin: 0 0 1.5rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: #646970;
+}
+
+.pblsh--upload-result__upload-identity strong {
+    font-weight: 600;
+    color: #1e1e1e;
 }
 
 .pblsh--upload-result__body {
@@ -3824,7 +3839,8 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     padding-top: 1rem;
 }
 
-/* Decision rows — pinned between header and body. The publish path (channel + slug) and
+/* Decision rows — the dialog's first rows, pinned above the release block: the destination
+   comes first, everything below derives from it. The publish path (channel + slug) and
    the current-release decision share this row anatomy; each row owns its own content
    classes (pblsh--publish-path__*, pblsh--current-release-decision__*). */
 .pblsh--upload-result .pblsh--upload-result__decision {
@@ -3833,8 +3849,13 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     align-items: center;
     gap: 0.5rem;
     padding: 0.125rem 2rem;
-    border-top: 1px solid var(--border-color-light);
+    border-bottom: 1px solid var(--border-color-light);
     background: var(--surface-color);
+}
+
+/* A line between two rows, none against the dialog's edge. */
+.pblsh--upload-result .pblsh--upload-result__decision + .pblsh--upload-result__decision {
+    border-top: 1px solid var(--border-color-light);
 }
 
 /* Current-release decision row: ring (the release list's symbol for "current"), the

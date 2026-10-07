@@ -457,6 +457,16 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         );
     }
 
+    // The upload's own identity — name and version from the plugin file — as the first line
+    // of the destination decision: what the user compares the destinations against.
+    function renderUploadIdentity(meta) {
+        return createElement('p', { className: 'pblsh--upload-result__upload-identity' },
+            createElement('strong', null, meta?.plugin_data?.Name || ''),
+            ' ',
+            meta?.plugin_data?.Version || '',
+        );
+    }
+
     function renderDestinationChoice(meta = {}, uploadId) {
         const destinations = getDestinations(meta);
         if (destinations.length === 0) return null;
@@ -607,7 +617,10 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     function renderUploadResultShell({
         classNames = [],
-        header,
+        // The release block (name, version, release type). Absent while the destination is
+        // undecided and on its pre-screens: it depends on the destination, and the dialog
+        // grows top-down — publish path, release block, checklist.
+        header = null,
         identity = null,
         // Pinned error strip between body and footer: errors are dialog state,
         // not body content — visible in every scroll position and right next
@@ -625,8 +638,8 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         return createElement('div', {
             className: ['pblsh--upload-result', ...classNames].filter(Boolean).join(' '),
         },
-            renderUploadResultHeader(header),
             identity,
+            header && renderUploadResultHeader(header),
             bodyContent.length > 0 && createElement('div', { className: 'pblsh--upload-result__body' }, ...bodyContent),
             notices,
             visibleActions.length > 0 && createElement('footer', { className: 'pblsh--upload-result__actions' }, ...visibleActions),
@@ -1090,8 +1103,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     function buildUploadValidationModel(result, meta, targetKey) {
         const context = getUploadCheckContext(result, meta, targetKey);
-        const { pluginData, isWporg, releaseContext, presentation, target, uploadId, resultErrors } = context;
-        const pendingReleaseImport = isWporg && meta.plugin_ok && context.preDeployRequired && !meta.existing_plugin && !releaseContext.hasReleaseData;
+        const { pluginData, isWporg, presentation, target, uploadId, resultErrors } = context;
         const screen = isWporg ? wporgScreen(context) : null;
         const accessStatus = target?.wporg_access_status || '';
 
@@ -1158,7 +1170,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         const checklistItems = screen ? null : uploadChecks.buildUploadCheckItems(context);
 
         return {
-            classNames: pendingReleaseImport ? [] : presentation.classNames,
+            classNames: presentation.classNames,
             // The import screen owns its error display (WporgImportFacts).
             notices: screen === 'import' ? null : renderResultErrorNotices(resultErrors, context.blockers, uploadId, meta),
             // The pinned decision rows: publish path, and — past the wporg pre-screens —
@@ -1167,16 +1179,18 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                 renderPublishPath(meta, context.uploadId),
                 !screen && renderCurrentReleaseDecision(context),
             ),
-            header: meta.plugin_ok ? {
+            // The release block, once the checklist can be shown: the wporg pre-screens are the
+            // destination's preconditions and render under the publish path alone — the release
+            // type, in particular, is only known after the import.
+            header: screen ? null : (meta.plugin_ok ? {
                 headline: pluginData.Name,
                 desc: pluginData.Version,
-                // No release type badge while the wporg import is still pending — the type is only known afterwards.
-                type: pendingReleaseImport ? undefined : presentation.type,
+                type: presentation.type,
             } : {
                 headline: __('Not a plugin', 'peak-publisher'),
                 desc: __('No valid plugin main file could be found', 'peak-publisher'),
                 type: presentation.type,
-            },
+            }),
             body,
             checklistItems,
             actions: actions || buildUploadActions(context, checklistItems),
@@ -1190,16 +1204,17 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         if (meta?.plugin_ok && ((meta?.hosting_type_choice && !activeTargetKey) || (activeTarget && !activeTarget.slug))) {
             // Open destination decision — channel choice or slug ambiguity: the choice is the
             // only content, so it lives in the scrollable body instead of the fixed slot and
-            // the publish-path row stays hidden until the destination is settled. The body
-            // turns into the gray decision surface (the publish-path row's color): once the
-            // destination is chosen, that surface collapses into the path row.
+            // the publish-path row stays hidden until the destination is settled. The body is
+            // the gray decision surface at the dialog's top — the publish-path row unfolded, in
+            // its color and place: once the destination is chosen, that surface collapses into
+            // the row. No release block yet (it depends on the destination); the upload names
+            // itself in the decision's first line instead.
             return renderUploadResultShell({
                 classNames: ['pblsh--upload-result--choosing'],
-                header: {
-                    headline: meta?.plugin_data?.Name || '',
-                    desc: meta?.plugin_data?.Version || '',
-                },
-                body: renderDestinationChoice(meta, result?.upload_id),
+                body: createElement(wp.element.Fragment, null,
+                    renderUploadIdentity(meta),
+                    renderDestinationChoice(meta, result?.upload_id),
+                ),
                 actions: [renderDiscardButton(result?.upload_id)],
             });
         }

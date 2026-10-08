@@ -19,6 +19,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
     const [useNotPeakPublisherForNewUpdateServer, setUseNotPeakPublisherForNewUpdateServer] = useState(false);
     const [keepWorkspaceArtifacts, setKeepWorkspaceArtifacts] = useState(false);
     const [keepOldBootstrapCode, setKeepOldBootstrapCode] = useState(false);
+    const [confirmRollback, setConfirmRollback] = useState(false);
+    const [confirmPreReleaseCurrent, setConfirmPreReleaseCurrent] = useState(false);
+    const [confirmReplaceReach, setConfirmReplaceReach] = useState(false);
 
     function reset() {
         setUseDifferentCustomUpdateServer(false);
@@ -31,6 +34,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         setUseNotPeakPublisherForNewUpdateServer(false);
         setKeepWorkspaceArtifacts(false);
         setKeepOldBootstrapCode(false);
+        setConfirmRollback(false);
+        setConfirmPreReleaseCurrent(false);
+        setConfirmReplaceReach(false);
     }
 
     function checkPluginFile(context) {
@@ -112,11 +118,14 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 title: __('Version number already exists', 'peak-publisher'),
                 type: replaceRelease ? 'ok' : 'error',
                 desc: [
-                    sprintf(__('A release with the version number %s already exists for this plugin.', 'peak-publisher'), pluginData.Version),
+                    // Replacing a release for its readme alone is common practice; the receipt is
+                    // about the code. What the replaced build does not reach is the current-release
+                    // row's receipt (checkCurrentRelease).
+                    sprintf(__('A release with the version number %s already exists for this plugin. Changing only its readme is harmless, but different code under the same version number makes it impossible to tell which code a site runs.', 'peak-publisher'), pluginData.Version),
                     createElement('br'),
                     createElement(CheckboxControl, {
                         __nextHasNoMarginBottom: true,
-                        label: __('That\'s fine, I want to replace the existing release. I understand that this is not recommended if the existing release is or was already published.', 'peak-publisher'),
+                        label: __('That\'s fine, I want to replace the existing release. I understand that this is not recommended if the code changed.', 'peak-publisher'),
                         checked: replaceRelease,
                         onChange: (value) => setReplaceRelease(value),
                     }),
@@ -169,6 +178,97 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 ],
             ],
         };
+    }
+
+    // The consequence of the header's current-release switch, said for the sites. The title
+    // names the outcome. The text puts the row's main fact first — the lock's reason, the
+    // rollback, the replace, the pointer that could not be read — then the reach, then the
+    // pre-release with its receipt; where the pre-release is the only fact, it comes first.
+    // Every risky fact carries a receipt of its own, a checkbox the row stays red without: a
+    // pre-release going out as a regular update, a rollback, a replace that never reaches the
+    // sites already on the version. The facts — relation, pre-release flag, choice, the
+    // current version — come from the server's decide_current_release(); the client never
+    // compares versions.
+    function checkCurrentRelease(context) {
+        const { pluginData, currentRelease } = context;
+        if (!currentRelease) return null;
+        const { facts, makeCurrent } = currentRelease;
+        const version = pluginData.Version;
+        const pre = !!facts.pre_release;
+
+        const preRelease = pre && sprintf(__('%s is a pre-release, a version for testers.', 'peak-publisher'), version);
+        const preReleaseReceipt = pre && {
+            label: sprintf(__('That\'s fine, I want sites to receive the pre-release %s as a regular update.', 'peak-publisher'), version),
+            checked: confirmPreReleaseCurrent,
+            onChange: setConfirmPreReleaseCurrent,
+        };
+        const offered = sprintf(__('Every site will be offered %s as an update.', 'peak-publisher'), version);
+        const notOffered = sprintf(__('%s will not be offered to sites as an update.', 'peak-publisher'), version);
+
+        if (facts.relation === 'unknown') {
+            // wordpress.org only: the pointer could not be read just now. The deploy reads it
+            // again and stops where the live relation would have changed the decision; the row
+            // stays a warning even after the receipt.
+            const unreadable = sprintf(__('The current release on wordpress.org could not be read right now, so whether %s is newer than it is unknown.', 'peak-publisher'), version);
+            return checkRow(__('Current release unknown', 'peak-publisher'), makeCurrent
+                ? [ [ unreadable, sprintf(__('If %s is newer, every site will be offered it as an update; otherwise publishing stops and you decide again, then with the facts.', 'peak-publisher'), version) ], [ preRelease, preReleaseReceipt ] ]
+                : [ [ unreadable, sprintf(__('%1$s will not be offered to sites as an update. Should %1$s turn out to be the current release already or an older version, publishing stops and you decide again, then with the facts.', 'peak-publisher'), version) ], [ preRelease ] ],
+            'warning');
+        }
+        if (!makeCurrent) {
+            return checkRow(__('Does not become the current release', 'peak-publisher'), [ [ preRelease, notOffered ] ]);
+        }
+        if (facts.relation === 'equal') {
+            return checkRow(__('Stays the current release', 'peak-publisher'), [
+                [
+                    sprintf(__('You replace the current release %1$s with this build. New installs and sites below %1$s will receive it, but sites already on %1$s keep their build: WordPress only offers newer version numbers.', 'peak-publisher'), version),
+                    {
+                        label: sprintf(__('That\'s fine, I understand that this build will not reach sites already on %s.', 'peak-publisher'), version),
+                        checked: confirmReplaceReach,
+                        onChange: setConfirmReplaceReach,
+                    },
+                ],
+                [ preRelease, preReleaseReceipt ],
+            ]);
+        }
+        if (facts.relation === 'lower') {
+            return checkRow(__('Rolls back the current release', 'peak-publisher'), [
+                [
+                    sprintf(__('You roll the current release back from %1$s to %2$s. New installs and sites below %2$s will receive %2$s, but sites already on %1$s keep it: WordPress only offers newer version numbers.', 'peak-publisher'), facts.version, version),
+                    {
+                        label: sprintf(__('That\'s fine, I want to roll the current release back to %1$s. I understand that sites already on %2$s keep it.', 'peak-publisher'), version, facts.version),
+                        checked: confirmRollback,
+                        onChange: setConfirmRollback,
+                    },
+                ],
+                [ preRelease, preReleaseReceipt ],
+            ]);
+        }
+        // Locked (a forced default): the reason there is no choice comes first.
+        const lockReason = facts.choice ? null : {
+            first: __('On wordpress.org, the first release is always the current release.', 'peak-publisher'),
+            repairs_pointer: sprintf(__('The current release already names %s; publishing it makes that valid.', 'peak-publisher'), version),
+            no_current: __('There is no valid current release to keep.', 'peak-publisher'),
+        }[facts.relation];
+        return checkRow(__('Becomes the current release', 'peak-publisher'), lockReason
+            ? [ [ lockReason, offered ], [ preRelease, preReleaseReceipt ] ]
+            : [ [ preRelease, offered, preReleaseReceipt ] ]);
+    }
+
+    // A check row from its topics in reading order. A topic is one matter — the lock's
+    // reason with the reach, the rollback, the pre-release — as sentences that flow into one
+    // paragraph, with its receipts ({label, checked, onChange}) as checkboxes beneath; topics
+    // stand apart from each other. The row is an error while a receipt is unticked,
+    // settledType once every receipt is.
+    function checkRow(title, topics, settledType = 'ok') {
+        const present = topics.map((parts) => parts.filter(Boolean)).filter((parts) => parts.length > 0);
+        const type = present.flat().some((part) => typeof part === 'object' && !part.checked) ? 'error' : settledType;
+        const desc = present.map((parts, index) => createElement('span', { key: index, className: 'pblsh--check__topic' },
+            ...parts.map((part, position) => typeof part === 'string'
+                ? (position > 0 && typeof parts[position - 1] === 'string' ? ' ' : '') + part
+                : createElement(CheckboxControl, { key: position, __nextHasNoMarginBottom: true, ...part })),
+        ));
+        return { title, type, desc };
     }
 
     function checkUpdateUri(context) {
@@ -536,6 +636,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 checkWporgOwnershipHint(context),
                 checkPluginFile(context),
                 checkVersion(context),
+                checkCurrentRelease(context),
                 checkUpdateUri(context),
                 checkBootstrapCode(context),
                 checkWorkspaceArtifacts(context),

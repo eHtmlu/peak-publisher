@@ -80,6 +80,7 @@ class AdminUI {
             'stores/assets.js',
             'stores/settings.js',
             'components/Checklist.js',
+            'components/CurrentReleaseSwitch.js',
             'components/FaqLink.js',
             'components/TipLink.js',
             'components/WporgRevisionLink.js',

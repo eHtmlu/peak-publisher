@@ -1456,6 +1456,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     grid-template-columns: 1fr auto;
     align-items: start;
     column-gap: 1rem;
+    row-gap: .75rem;
     padding: 2rem; /* 32px */
 }
 
@@ -1495,6 +1496,114 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 .pblsh--upload-result--firstrelease .pblsh--upload-result__plugin__type {
     color: #fff;
     background-color: color-mix(in srgb, var(--release-color) 70%, #000);
+}
+
+/* The current-release switch, right-aligned on the version's row: a role="switch" button
+   whose knob is the current ring (the release list's symbol) on a 20px track. The label is
+   constant, so track and knob carry the state. Off: a white disc on a gray track; hovering
+   previews the outcome with the blue rim, as the list's ring does. On: a white ring on the
+   blue track — the track shows through as the dot, the list's "current" symbol; hovering
+   previews the outcome by fading that dot. Locked (aria-disabled) keeps its look, loses the
+   preview and shows a lock on the track's free half. */
+.pblsh--upload-result__plugin__current {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+    align-self: center;
+}
+
+.pblsh--current-release-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 0.8125rem;
+    color: #1e1e1e;
+    cursor: pointer;
+}
+
+.pblsh--current-release-switch.is-locked,
+.pblsh--current-release-switch:disabled {
+    cursor: default;
+}
+
+.pblsh--current-release-switch:disabled {
+    opacity: 0.6;
+}
+
+.pblsh--current-release-switch:focus-visible {
+    outline: none;
+}
+
+.pblsh--current-release-switch:focus-visible .pblsh--current-release-switch__track {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--color-blue);
+}
+
+.pblsh--current-release-switch__track {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    box-sizing: border-box;
+    width: 2.5rem;
+    height: 1.25rem;
+    border-radius: 0.625rem;
+    background: var(--border-color-medium);
+    transition: background-color 0.15s ease;
+}
+
+.pblsh--current-release-switch.is-on .pblsh--current-release-switch__track {
+    background: var(--color-blue);
+}
+
+/* The lock of a forced default, on the track's free half beside the knob: the state is a
+   fact, not a choice. */
+.pblsh--current-release-switch__lock {
+    position: absolute;
+    left: 0.25rem;
+    display: inline-flex;
+    color: #fff;
+}
+
+/* The knob: the ring's own border is the 2px inset to the track's edge; its pseudo-element
+   draws the white disc (off) or, with the background cleared, the white ring (on). It
+   travels the track's width minus its own size. */
+.pblsh--current-release-switch .pblsh--current-ring {
+    flex: none;
+    border-color: transparent;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.pblsh--current-release-switch .pblsh--current-ring::after {
+    border-color: #fff;
+    background-color: #fff;
+    /* Painted under the border, not clipped to the padding box: two white areas meeting at
+       the curve would render a hairline seam. */
+    background-clip: border-box;
+    opacity: 1;
+    transition: background-color 0.15s ease;
+}
+
+.pblsh--current-release-switch.is-on .pblsh--current-ring {
+    transform: translateX(1.25rem);
+}
+
+.pblsh--current-release-switch.is-on .pblsh--current-ring::after {
+    background-color: transparent;
+}
+
+/* Hovering previews the other outcome: off gains the blue rim and a faint dot, on fades
+   its dot to the same faint tone — the list ring's preview tone (its dot at 35%). */
+.pblsh--current-release-switch:not(.is-on):not(.is-locked):not(:disabled):hover .pblsh--current-ring {
+    border-color: var(--color-blue);
+}
+
+.pblsh--current-release-switch:not(.is-locked):not(:disabled):hover .pblsh--current-ring::after {
+    background-color: color-mix(in srgb, var(--color-blue) 35%, #fff);
 }
 
 .pblsh--upload-result__actions {
@@ -2028,6 +2137,16 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin-block: .75rem; /* 12px */
 }
 
+/* A topic of a check's description: its sentences in one paragraph, its receipts beneath.
+   Topics stand apart by the spacing a checkbox has. */
+.pblsh--check__topic {
+    display: block;
+}
+
+.pblsh--check__topic + .pblsh--check__topic {
+    margin-top: .75rem; /* 12px */
+}
+
 /* Global overlay */
 .pblsh--overlay {
     position: fixed;
@@ -2456,12 +2575,21 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     vertical-align: middle;
 }
 
+.pblsh--current-ring--current {
+    border-color: var(--color-blue);
+}
+
+/* The dot: drawn as the padding box behind a transparent 2px border rather than as an inset
+   box, so a context can turn it into a ring by coloring that border and clearing the
+   background (the upload's current-release switch does). */
 .pblsh--current-ring::after {
     content: '';
     position: absolute;
-    inset: 0.125rem; /* 2px */
+    inset: 0;
+    border: 2px solid transparent;
     border-radius: 50%;
     background: var(--color-blue);
+    background-clip: padding-box;
     opacity: 0;
 }
 
@@ -3839,11 +3967,9 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     padding-top: 1rem;
 }
 
-/* Decision rows — the dialog's first rows, pinned above the release block: the destination
-   comes first, everything below derives from it. The publish path (channel + slug) and
-   the current-release decision share this row anatomy; each row owns its own content
-   classes (pblsh--publish-path__*, pblsh--current-release-decision__*). */
-.pblsh--upload-result .pblsh--upload-result__decision {
+/* The publish path row (channel + slug) — the dialog's first row, pinned above the release
+   block: the destination comes first, everything below derives from it. */
+.pblsh--upload-result .pblsh--publish-path {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -3851,50 +3977,6 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     padding: 0.125rem 2rem;
     border-bottom: 1px solid var(--border-color-light);
     background: var(--surface-color);
-}
-
-/* A line between two rows, none against the dialog's edge. */
-.pblsh--upload-result .pblsh--upload-result__decision + .pblsh--upload-result__decision {
-    border-top: 1px solid var(--border-color-light);
-}
-
-/* Current-release decision row: ring (the release list's symbol for "current"), the
-   outcome as toggle label or settled statement, the consequence on its own line */
-.pblsh--upload-result .pblsh--current-release-decision {
-    padding-block: 0.375rem;
-    column-gap: 0.75rem;
-}
-
-.pblsh--upload-result .pblsh--current-release-decision .pblsh--current-ring {
-    flex: none;
-}
-
-.pblsh--upload-result .pblsh--current-release-decision__toggle .components-toggle-control__label,
-.pblsh--upload-result .pblsh--current-release-decision__label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    font-size: 0.875rem;
-    line-height: 1.375rem;
-}
-
-.pblsh--upload-result .pblsh--current-release-decision__warning {
-    display: inline-flex;
-    color: var(--color-orange);
-}
-
-.pblsh--upload-result .pblsh--current-release-decision__desc {
-    flex-basis: 100%;
-    margin: 0;
-    /* Aligns with the label: ring width + column gap — keep in sync with the ring size. */
-    padding-inline-start: calc(1.25rem + 0.75rem);
-    color: #757575; /* the lightest AA-safe gray on the surface */
-    font-size: 0.8125rem;
-}
-
-/* The wordpress.org mechanics under the consequence: the Stable tag line and the trunk sentence */
-.pblsh--upload-result .pblsh--current-release-decision__mechanics {
-    margin-top: 0.125rem;
 }
 
 .pblsh--upload-result .pblsh--publish-path__value {

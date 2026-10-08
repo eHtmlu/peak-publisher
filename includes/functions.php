@@ -289,7 +289,15 @@ function decide_current_release(array $current, bool $has_releases, string $vers
         'choice' => $choice,
     ];
     $state = (string) $current['state'];
+    $normalized_version = normalize_version_number($version);
 
+    if ($state === 'tag_missing' && normalize_version_number((string) $current['pointer']) === $normalized_version) {
+        // The pointer already names this version — the release makes it valid; opting out
+        // would be a no-op. Before "first" on purpose: a pointer naming V while the plugin
+        // has no release at all (a readme bumped ahead of its tag, a deleted release) makes
+        // V current whatever the switch says.
+        return $decide('repairs_pointer', true, false);
+    }
     if (!$has_releases) {
         // wporg: forced in every pointer state, trunk carries this very code. self-hosted:
         // opting out leaves the plugin without a current release (nothing is offered).
@@ -298,12 +306,6 @@ function decide_current_release(array $current, bool $has_releases, string $vers
     if ($state === 'unknown') {
         // finalize re-evaluates with the live value and stops if the relation would differ.
         return $decide('unknown', !$pre_release, true);
-    }
-    $normalized_version = normalize_version_number($version);
-    if ($state === 'tag_missing' && normalize_version_number((string) $current['pointer']) === $normalized_version) {
-        // The pointer already names this version — the release makes it valid; opting out
-        // would be a no-op.
-        return $decide('repairs_pointer', true, false);
     }
     if (in_array($state, [ 'trunk', 'tag_missing', 'none' ], true)) {
         // wporg: with trunk getting the code a tag pointer is always better — forced; with

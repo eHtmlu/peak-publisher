@@ -56,6 +56,8 @@ final class CurrentReleaseDecisionTest extends TestCase {
             // 3: the pointer already names this version
             'repairs pointer' => [ $missing, true, '1.2.4', true, 'trunk_and_tag', [ 'repairs_pointer', true, false ] ],
             'repairs pointer compares normalized' => [ [ 'tag_missing', '1.2.4-beta1' ], true, '1.2.4-BETA.1', true, 'tag_only', [ 'repairs_pointer', true, false ] ],
+            'repairs pointer before first: wporg readme names V ahead of its tag' => [ $missing, false, '1.2.4', true, 'trunk_and_tag', [ 'repairs_pointer', true, false ] ],
+            'repairs pointer before first: self-hosted pointer survives its deleted release, even for a pre-release' => [ [ 'tag_missing', '1.2.4-beta1' ], false, '1.2.4-beta1', false, null, [ 'repairs_pointer', true, false ] ],
             // 4: no usable pointer
             'no_current wporg trunk_and_tag forced' => [ $trunk, true, '1.2.3', true, 'trunk_and_tag', [ 'no_current', true, false ] ],
             'no_current wporg tag_only is a choice' => [ $trunk, true, '1.2.3', true, 'tag_only', [ 'no_current', true, true ] ],

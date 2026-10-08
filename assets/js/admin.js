@@ -96,6 +96,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const [currentPluginId, setCurrentPluginId] = useState(null);
         const [initialTab, setInitialTab] = useState(null);
         const [additionInitial, setAdditionInitial] = useState(null); // deep-link seed for the addition process
+        // Every start of the add-new flow — "Add New Plugin", "Import plugins…" from the settings,
+        // a deep link — is a fresh run: the flow reads where it starts when it mounts.
+        const [additionRun, setAdditionRun] = useState(0);
         const [activeUploadContext, setActiveUploadContext] = useState({});
         const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);
         const hasLoadedList = useSelect((select) => {
@@ -221,6 +224,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setIsNew(true);
             setActiveUploadContext({});
             setAdditionInitial(initial && typeof initial === 'object' ? initial : null);
+            setAdditionRun((run) => run + 1);
             setView('addition-process');
             setQuery({
                 view: 'addition',
@@ -309,63 +313,39 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         // The header's title and actions for the current view — rendered into the header place.
+        // The settings stay within reach in every view; the add-new flow trades "Add New Plugin"
+        // for its Cancel.
         const renderHeader = () => {
-            if (view === 'addition-process') {
-                return createElement(Fragment, null,
-                    createElement('h1', { className: 'pblsh--header__title' },
-                        __('Peak Publisher', 'peak-publisher'),
-                        ' - ',
-                        __('Add New Plugin', 'peak-publisher')
-                    ),
-                    createElement('div', { className: 'pblsh--header__actions' },
-                        createElement(Button, {
+            const adding = view === 'addition-process';
+            return createElement(Fragment, null,
+                createElement('h1', { className: 'pblsh--header__title' },
+                    __('Peak Publisher', 'peak-publisher'),
+                    adding && ' - ',
+                    adding && __('Add New Plugin', 'peak-publisher'),
+                ),
+                createElement('div', { className: 'pblsh--header__actions' },
+                    adding
+                        ? createElement(Button, {
                             isSecondary: true,
                             onClick: handleCancel,
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
-                        }, __('Cancel', 'peak-publisher')),
-                    )
-                );
-            }
-            else if (view === 'editor') {
-                return createElement(Fragment, null,
-                    createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--header__actions' },
-                        createElement(Button, {
+                        }, __('Cancel', 'peak-publisher'))
+                        : createElement(Button, {
                             isPrimary: true,
                             onClick: () => handleAddNewPlugin(),
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
                         }, __('Add New Plugin', 'peak-publisher')),
-                        createElement(Button, {
-                            isTertiary: true,
-                            onClick: openSettings,
-                            label: __('Settings', 'peak-publisher'),
-                            icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
-                            __next40pxDefaultSize: true,
-                        })
-                    )
-                );
-            } else {
-                return createElement(Fragment, null,
-                    createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--header__actions' },
-                        createElement(Button, {
-                            isPrimary: true,
-                            onClick: () => handleAddNewPlugin(),
-                            disabled: isLoading,
-                            __next40pxDefaultSize: true,
-                        }, __('Add New Plugin', 'peak-publisher')),
-                        createElement(Button, {
-                            isTertiary: true,
-                            onClick: openSettings,
-                            label: __('Settings', 'peak-publisher'),
-                            icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
-                            __next40pxDefaultSize: true,
-                        })
-                    ),
-                );
-            }
+                    createElement(Button, {
+                        isTertiary: true,
+                        onClick: openSettings,
+                        label: __('Settings', 'peak-publisher'),
+                        icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
+                        __next40pxDefaultSize: true,
+                    }),
+                ),
+            );
         };
 
         // Render main content
@@ -401,6 +381,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const renderMainContent = () => {
             if (view === 'addition-process') {
                 return createElement(PluginAdditionProcess, {
+                    key: additionRun,
                     onCreated: handleCreated,
                     // The flow's affirmative exit lands where Cancel lands —
                     // back on the plugin list.

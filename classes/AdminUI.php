@@ -43,7 +43,10 @@ class AdminUI {
             'manage_options',
             'pblsh-peak-publisher',
             [$this, 'render_peak_publisher'],
-            'dashicons-cloud',
+            // The small logo as a data URI: WordPress paints its one fill in the admin color
+            // scheme, in every menu state, like a dashicon. The arrows are cut out of the
+            // hexagon, so they stay visible in a single color.
+            'data:image/svg+xml;base64,' . base64_encode((string) file_get_contents(PBLSH_PLUGIN_DIR . 'assets/images/icon-small_white_20x20.svg')),
             58,
         );
     }

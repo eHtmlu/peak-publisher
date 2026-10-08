@@ -5,7 +5,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, ToggleControl, TextControl, TextareaControl } = wp.components;
     const { showAlert, getSvgIcon } = Pblsh.Utils;
-    const { WporgAccountForm, NoticeBox } = Pblsh.Components;
+    const { WporgAccountForm, NoticeBox, ScrollFrame } = Pblsh.Components;
     const settingsController = window.Pblsh.Controllers.Settings;
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
@@ -434,7 +434,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             ),
             createElement('div', { className: 'pblsh--settings--main' },
                 createElement('div', { className: 'pblsh--settings--main__inner' },
-                    createElement('div', { className: 'pblsh--settings--main__content' },
+                    createElement(ScrollFrame, { className: 'pblsh--settings--main__frame', scrollerClassName: 'pblsh--settings--main__content' },
                         renderSection()
                     ),
                     createElement('section', { className: 'pblsh--settings--main__section pblsh--settings--main__section--buttons' },

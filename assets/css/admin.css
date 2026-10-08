@@ -2074,24 +2074,23 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     color: #1e1e1e;
 }
 
-/* The body's frame: the lines above and below the scrolling body, and under them the
-   scroll-dependent shadows, shown while content is cut off in that direction
-   (is-clipped-top / is-clipped-bottom from the overlay). The lines stay; the shadow adds
-   that the content continues. Overlays on the frame rather than anything inside the body:
-   nothing there scrolls or pads them away, and the cards of the decision surface stay
-   beneath. Its own stacking context keeps the overlays under the publish-path panel. */
-.pblsh--upload-result__body-frame {
+/* Shared scroll frame (the upload dialog's body, the settings content): a frame around a
+   scroller, with a shadow under the edge in whose direction content is cut off
+   (is-clipped-top / is-clipped-bottom, set by the ScrollFrame component). The shadows are
+   overlays on the frame rather than anything inside the scroller: nothing there scrolls or
+   pads them away. Its own stacking context keeps the overlays under panels that open above
+   the frame. The frame's place in its layout and its lines are the component's, the
+   scroller's padding and background too. */
+.pblsh--scroll-frame {
     position: relative;
     isolation: isolate;
     display: flex;
     flex-direction: column;
-    flex: 1;
     min-height: 0;
-    border-block: 1px solid var(--border-color-light);
 }
 
-.pblsh--upload-result__body-frame::before,
-.pblsh--upload-result__body-frame::after {
+.pblsh--scroll-frame::before,
+.pblsh--scroll-frame::after {
     content: '';
     position: absolute;
     inset-inline: 0;
@@ -2102,26 +2101,36 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     transition: opacity 0.15s ease;
 }
 
-.pblsh--upload-result__body-frame::before {
+.pblsh--scroll-frame::before {
     top: 0;
     background: linear-gradient(rgba(0, 0, 0, 0.1), transparent);
 }
 
-.pblsh--upload-result__body-frame::after {
+.pblsh--scroll-frame::after {
     bottom: 0;
     background: linear-gradient(transparent, rgba(0, 0, 0, 0.1));
 }
 
-.pblsh--upload-result__body-frame.is-clipped-top::before,
-.pblsh--upload-result__body-frame.is-clipped-bottom::after {
+.pblsh--scroll-frame.is-clipped-top::before,
+.pblsh--scroll-frame.is-clipped-bottom::after {
     opacity: 1;
 }
 
-.pblsh--upload-result__body {
+.pblsh--scroll-frame__scroller {
     flex: 1;
     min-height: 0;
     overflow: auto;
     overscroll-behavior: contain;
+}
+
+/* The body's frame: the lines above and below the scrolling body; the shared scroll frame
+   adds the shadows. The lines stay; the shadow adds that the content continues. */
+.pblsh--upload-result__body-frame {
+    flex: 1;
+    border-block: 1px solid var(--border-color-light);
+}
+
+.pblsh--upload-result__body {
     padding: 2rem;
 }
 
@@ -3131,11 +3140,11 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     flex-direction: column;
 }
 
-.pblsh--settings--main__content {
+/* The content's frame: the line above the buttons; the shared scroll frame adds the
+   shadows. No line at the top, that is the dialog's edge. */
+.pblsh--settings--main__frame {
     flex: 1;
-    overflow: auto;
-    overscroll-behavior: contain;
-    height: 100%;
+    border-bottom: 1px solid #eee;
 }
 
 /* Settings Sections */
@@ -3151,7 +3160,6 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 
 .pblsh--settings--main__section--buttons {
     padding: 2rem; /* 32px */
-    border-top: 1px solid #eee;
     margin: 0;
 }
 

@@ -87,6 +87,7 @@ class AdminUI {
             'components/ChannelPath.js',
             'components/NoticeBox.js',
             'components/Figure.js',
+            'components/ScrollFrame.js',
             'components/UpgradeNotice.js',
             'components/ChannelChoiceCards.js',
             'components/WporgAccountForm.js',

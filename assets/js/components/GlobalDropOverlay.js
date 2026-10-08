@@ -2,13 +2,13 @@
 lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUploadContext = {} } = {}) => {
     const { __, _n } = wp.i18n;
     const sprintf = wp.i18n.sprintf ?? window.sprintf;
-    const { useState, useEffect, useRef, useCallback, createElement } = wp.element;
+    const { useState, useEffect, useRef, createElement } = wp.element;
     const { Button, TextControl, Spinner } = wp.components;
     const { useSelect } = wp.data;
     const { getSvgIcon, getChannelLabel, getChannelDescription, getChannelIcon } = Pblsh.Utils;
     const { getReleaseContext, getReleasePresentation } = Pblsh.UploadResultUtils;
     const { useUploadChecks } = Pblsh.Hooks;
-    const { WporgImportFacts, WporgAccountForm, ChannelChoiceCards, Checklist, CurrentReleaseSwitch, NoticeBox } = Pblsh.Components;
+    const { WporgImportFacts, WporgAccountForm, ChannelChoiceCards, Checklist, CurrentReleaseSwitch, NoticeBox, ScrollFrame } = Pblsh.Components;
 
     const fileInputRef = useRef(null);
     const dialogRef = useRef(null);
@@ -42,30 +42,6 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     // Owns the per-upload confirmation decisions and builds the checklist items (upload-checks.js).
     const uploadChecks = useUploadChecks();
-
-    // The scrolling body says in which direction content is cut off (is-clipped-top /
-    // is-clipped-bottom on its frame, the shadows under the frame's edges). Measured on
-    // scroll, on resize and after every render, since the content changes with the facts.
-    const [bodyClipped, setBodyClipped] = useState({ top: false, bottom: false });
-    const bodyElement = useRef(null);
-    const bodyResizeObserver = useRef(null);
-    const measureBodyClipping = () => {
-        const body = bodyElement.current;
-        if (!body) return;
-        const top = body.scrollTop > 0;
-        const bottom = body.scrollTop + body.clientHeight < body.scrollHeight - 1;
-        setBodyClipped((clipped) => clipped.top === top && clipped.bottom === bottom ? clipped : { top, bottom });
-    };
-    const bodyRef = useCallback((body) => {
-        bodyResizeObserver.current?.disconnect();
-        bodyResizeObserver.current = null;
-        bodyElement.current = body;
-        if (!body) return;
-        bodyResizeObserver.current = new ResizeObserver(measureBodyClipping);
-        bodyResizeObserver.current.observe(body);
-        measureBodyClipping();
-    }, []);
-    useEffect(measureBodyClipping);
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
 
@@ -676,11 +652,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         },
             identity,
             header && renderUploadResultHeader(header),
-            bodyContent.length > 0 && createElement('div', {
-                className: 'pblsh--upload-result__body-frame' + (bodyClipped.top ? ' is-clipped-top' : '') + (bodyClipped.bottom ? ' is-clipped-bottom' : ''),
-            },
-                createElement('div', { ref: bodyRef, className: 'pblsh--upload-result__body', onScroll: measureBodyClipping }, ...bodyContent),
-            ),
+            bodyContent.length > 0 && createElement(ScrollFrame, { className: 'pblsh--upload-result__body-frame', scrollerClassName: 'pblsh--upload-result__body' }, ...bodyContent),
             notices,
             visibleActions.length > 0 && createElement('footer', { className: 'pblsh--upload-result__actions' }, ...visibleActions),
         );

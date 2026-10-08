@@ -2,7 +2,7 @@
 lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUploadContext = {} } = {}) => {
     const { __, _n } = wp.i18n;
     const sprintf = wp.i18n.sprintf ?? window.sprintf;
-    const { useState, useEffect, useRef, createElement } = wp.element;
+    const { useState, useEffect, useRef, useCallback, createElement } = wp.element;
     const { Button, TextControl, Spinner } = wp.components;
     const { useSelect } = wp.data;
     const { getSvgIcon, getChannelLabel, getChannelDescription, getChannelIcon } = Pblsh.Utils;
@@ -34,7 +34,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const [selectedHostingType, setSelectedHostingType] = useState(null);
     // The current-release decision (decide_current_release() on the server): the server names the
     // relation between the upload and the plugin's current release plus the default; the
-    // header's switch encodes the deviation from that default. The deviation counts only while
+    // switch above the checklist encodes the deviation from that default. The deviation counts only while
     // relation and pre-release flag still match the target's facts — a re-resolution
     // (set_slug, refresh_target_context) may change the default, and a surviving deviation
     // would invert it into an unwanted rollback.
@@ -42,6 +42,30 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     // Owns the per-upload confirmation decisions and builds the checklist items (upload-checks.js).
     const uploadChecks = useUploadChecks();
+
+    // The scrolling body says in which direction content is cut off (is-clipped-top /
+    // is-clipped-bottom on its frame, the shadows under the frame's edges). Measured on
+    // scroll, on resize and after every render, since the content changes with the facts.
+    const [bodyClipped, setBodyClipped] = useState({ top: false, bottom: false });
+    const bodyElement = useRef(null);
+    const bodyResizeObserver = useRef(null);
+    const measureBodyClipping = () => {
+        const body = bodyElement.current;
+        if (!body) return;
+        const top = body.scrollTop > 0;
+        const bottom = body.scrollTop + body.clientHeight < body.scrollHeight - 1;
+        setBodyClipped((clipped) => clipped.top === top && clipped.bottom === bottom ? clipped : { top, bottom });
+    };
+    const bodyRef = useCallback((body) => {
+        bodyResizeObserver.current?.disconnect();
+        bodyResizeObserver.current = null;
+        bodyElement.current = body;
+        if (!body) return;
+        bodyResizeObserver.current = new ResizeObserver(measureBodyClipping);
+        bodyResizeObserver.current.observe(body);
+        measureBodyClipping();
+    }, []);
+    useEffect(measureBodyClipping);
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
 
@@ -602,7 +626,6 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             createElement('h2', { className: 'pblsh--upload-result__plugin__headline' }, header.headline),
             header.desc !== undefined && createElement('div', { className: 'pblsh--upload-result__plugin__desc' }, header.desc),
             header.type !== undefined && createElement('div', { className: 'pblsh--upload-result__plugin__type' }, header.type),
-            header.current && createElement('div', { className: 'pblsh--upload-result__plugin__current' }, header.current),
         );
     }
 
@@ -653,7 +676,11 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         },
             identity,
             header && renderUploadResultHeader(header),
-            bodyContent.length > 0 && createElement('div', { className: 'pblsh--upload-result__body' }, ...bodyContent),
+            bodyContent.length > 0 && createElement('div', {
+                className: 'pblsh--upload-result__body-frame' + (bodyClipped.top ? ' is-clipped-top' : '') + (bodyClipped.bottom ? ' is-clipped-bottom' : ''),
+            },
+                createElement('div', { ref: bodyRef, className: 'pblsh--upload-result__body', onScroll: measureBodyClipping }, ...bodyContent),
+            ),
             notices,
             visibleActions.length > 0 && createElement('footer', { className: 'pblsh--upload-result__actions' }, ...visibleActions),
         );
@@ -842,7 +869,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         return { facts, makeCurrent: facts.default_make_current !== deviates };
     }
 
-    // The header's "Set as current" switch. Locked where the facts leave no choice — every
+    // The "Set as current" switch above the checklist. Locked where the facts leave no choice — every
     // forced default is "on"; the consequence of the decision, and the reason for a lock, is
     // the checklist's current-release row (upload-checks.js).
     function renderCurrentReleaseSwitch(context) {
@@ -1162,6 +1189,12 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         }
 
         const checklistItems = screen ? null : uploadChecks.buildUploadCheckItems(context);
+        if (!screen) {
+            // The decision sits right above its consequences: the switch opens the body, the
+            // checklist's current-release row answers it.
+            const currentReleaseSwitch = renderCurrentReleaseSwitch(context);
+            body = currentReleaseSwitch && createElement('div', { className: 'pblsh--upload-result__current-release' }, currentReleaseSwitch);
+        }
 
         return {
             classNames: presentation.classNames,
@@ -1176,7 +1209,6 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                 headline: pluginData.Name,
                 desc: pluginData.Version,
                 type: presentation.type,
-                current: renderCurrentReleaseSwitch(context),
             } : {
                 headline: __('Not a plugin', 'peak-publisher'),
                 desc: __('No valid plugin main file could be found', 'peak-publisher'),

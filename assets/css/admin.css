@@ -1402,7 +1402,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 } */
 
 .pblsh--upload-result {
-    width: 40rem;
+    width: 45rem;
     max-width: 100%;
     max-height: calc(100vh - 2rem);
     box-sizing: border-box;
@@ -1456,7 +1456,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     grid-template-columns: 1fr auto;
     align-items: start;
     column-gap: 1rem;
-    row-gap: .75rem;
+    row-gap: 1rem;
     padding: 2rem; /* 32px */
 }
 
@@ -1466,17 +1466,20 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     font-weight: 400;
     margin: 0;
     letter-spacing: .025em;
+    text-box: trim-both cap alphabetic;
+    line-height: 1.2;
 }
 
 .pblsh--upload-result__plugin__desc {
     grid-column: 1;
-    font-size: .875rem; /* 16px */
+    font-size: .875rem; /* 14px */
     margin: 0;
+    text-box: trim-both cap alphabetic;
 }
 
 .pblsh--upload-result__plugin__type {
     grid-column: 2;
-    grid-row: 1;
+    grid-row: 1 / 3;
     justify-self: end;
     font-size: .75rem; /* 12px */
     padding: .25rem .75rem;
@@ -1498,18 +1501,16 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     background-color: color-mix(in srgb, var(--release-color) 70%, #000);
 }
 
-/* The current-release switch, right-aligned on the version's row: a role="switch" button
+/* The current-release switch, above the checklist with its track first: a role="switch" button
    whose knob is the current ring (the release list's symbol) on a 20px track. The label is
    constant, so track and knob carry the state. Off: a white disc on a gray track; hovering
    previews the outcome with the blue rim, as the list's ring does. On: a white ring on the
    blue track — the track shows through as the dot, the list's "current" symbol; hovering
    previews the outcome by fading that dot. Locked (aria-disabled) keeps its look, loses the
    preview and shows a lock on the track's free half. */
-.pblsh--upload-result__plugin__current {
-    grid-column: 2;
-    grid-row: 2;
-    justify-self: end;
-    align-self: center;
+/* The decision block that opens the body, above the checklist it is answered in. */
+.pblsh--upload-result__current-release {
+    margin-bottom: 1.5rem;
 }
 
 .pblsh--current-release-switch {
@@ -2051,9 +2052,12 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 
 /* While the destination is undecided, the body is the gray decision surface at the
    dialog's top — the publish-path row unfolded: choosing collapses it into the row of
-   the same color and place. No border against the dialog's edge. */
+   the same color and place. No line against the dialog's edge. */
 .pblsh--upload-result--choosing .pblsh--upload-result__body {
     background: var(--surface-color);
+}
+
+.pblsh--upload-result--choosing .pblsh--upload-result__body-frame {
     border-top: 0;
 }
 
@@ -2070,13 +2074,55 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     color: #1e1e1e;
 }
 
+/* The body's frame: the lines above and below the scrolling body, and under them the
+   scroll-dependent shadows, shown while content is cut off in that direction
+   (is-clipped-top / is-clipped-bottom from the overlay). The lines stay; the shadow adds
+   that the content continues. Overlays on the frame rather than anything inside the body:
+   nothing there scrolls or pads them away, and the cards of the decision surface stay
+   beneath. Its own stacking context keeps the overlays under the publish-path panel. */
+.pblsh--upload-result__body-frame {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    border-block: 1px solid var(--border-color-light);
+}
+
+.pblsh--upload-result__body-frame::before,
+.pblsh--upload-result__body-frame::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    z-index: 1;
+    height: 0.75rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.pblsh--upload-result__body-frame::before {
+    top: 0;
+    background: linear-gradient(rgba(0, 0, 0, 0.1), transparent);
+}
+
+.pblsh--upload-result__body-frame::after {
+    bottom: 0;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.1));
+}
+
+.pblsh--upload-result__body-frame.is-clipped-top::before,
+.pblsh--upload-result__body-frame.is-clipped-bottom::after {
+    opacity: 1;
+}
+
 .pblsh--upload-result__body {
     flex: 1;
     min-height: 0;
     overflow: auto;
     overscroll-behavior: contain;
     padding: 2rem;
-    border-block: 1px solid var(--border-color-light);
 }
 
 .pblsh--checklist {
@@ -2206,6 +2252,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     border-radius: 0.75rem; /* 12px */
     box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
     overflow: hidden;
+    outline: none;
 }
 .pblsh--modal::backdrop {
     background: rgba(0,0,0,0.7);

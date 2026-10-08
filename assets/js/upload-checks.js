@@ -180,7 +180,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         };
     }
 
-    // The consequence of the header's current-release switch, said for the sites. The title
+    // The consequence of the current-release switch above the checklist, said for the sites. The title
     // names the outcome. The text puts the row's main fact first — the lock's reason, the
     // rollback, the replace, the pointer that could not be read — then the reach, then the
     // pre-release with its receipt; where the pre-release is the only fact, it comes first.

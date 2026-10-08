@@ -1421,17 +1421,30 @@ class WporgPluginSvnClient {
         return $path;
     }
 
+    /**
+     * The opening and closing tag of an element as regex parts: its exact local name, any
+     * namespace prefix. Exact, because a name may occur inside another tag's attributes — a
+     * log item's copyfrom-path=".../trunk/updates" contains "date".
+     *
+     * @return array{0:string, 1:string}
+     */
+    private function element_tags(string $name): array {
+        $quoted = preg_quote($name, '~');
+        return [ '<(?:[\w.-]+:)?' . $quoted . '(?:\s[^>]*)?>', '</(?:[\w.-]+:)?' . $quoted . '>' ];
+    }
+
     private function first_prop(string $xml, string $property): string {
-        $quoted = preg_quote($property, '~');
-        if (preg_match('~<[^>]*:?' . $quoted . '[^>]*>(.*?)</[^>]*:?' . $quoted . '>~s', $xml, $m)) {
+        [ $open, $close ] = $this->element_tags($property);
+        if (preg_match('~' . $open . '(.*?)' . $close . '~s', $xml, $m)) {
             return trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_XML1));
         }
         return '';
     }
 
     private function first_nested_href(string $xml, string $property): string {
-        $quoted = preg_quote($property, '~');
-        if (preg_match('~<[^>]*:?' . $quoted . '[^>]*>.*?<[^>]*:?href[^>]*>(.*?)</[^>]*:?href>~s', $xml, $m)) {
+        [ $open ] = $this->element_tags($property);
+        [ $href_open, $href_close ] = $this->element_tags('href');
+        if (preg_match('~' . $open . '.*?' . $href_open . '(.*?)' . $href_close . '~s', $xml, $m)) {
             return trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_XML1));
         }
         return '';

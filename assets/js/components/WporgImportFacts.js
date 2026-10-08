@@ -27,8 +27,8 @@ const WporgImportFacts = ({
 } = {}) => {
     const { __, _n, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement } = wp.element;
-    const { FaqLink, NoticeBox } = Pblsh.Components;
-    const { getSvgIcon, getGeopatternIconUrl, formatRelativeTime } = Pblsh.Utils;
+    const { FaqLink, NoticeBox, RelativeTime } = Pblsh.Components;
+    const { getSvgIcon, getGeopatternIconUrl } = Pblsh.Utils;
 
     const hint = directoryHint && typeof directoryHint === 'object' ? directoryHint : {};
     // "Fresh" only means the directory has never seen a release — the repository
@@ -39,15 +39,12 @@ const WporgImportFacts = ({
     const isRecentlyCreated = !isNaN(createdTime) && Date.now() - createdTime <= RECENTLY_CREATED_DAYS * 24 * 60 * 60 * 1000;
 
 
-    // Relative time of the repository creation commit — recency is the whole point
-    // of the fresh states.
-    const formatCommitTime = (iso) => formatRelativeTime(iso) ?? __('recently', 'peak-publisher');
-
-    // The relative time wrapped in <time datetime> — machine-readable, with the
-    // precise localized moment as native hover tooltip.
-    const withCommitTime = (text, iso) => {
-        return createInterpolateElement(text, { time: createElement('time', Pblsh.Utils.getTimeTooltipProps(iso)) });
-    };
+    // The relative time of the repository creation commit as the sentence's <time />,
+    // "recently" when the commit's date is unknown — recency is the whole point of the
+    // fresh states. The exact moment stays the native title: this is a dialog.
+    const withCommitTime = (text, iso) => createInterpolateElement(text, {
+        time: createElement(RelativeTime, { value: iso, fallback: __('recently', 'peak-publisher') }),
+    });
 
     // Celebration box — the fresh states' hero element, sitting where the other
     // states show the identity card (matching outer spacing). The own plugin
@@ -64,16 +61,10 @@ const WporgImportFacts = ({
                 ? __('The plugin has recently been approved! 🎉', 'peak-publisher')
                 : __('The plugin has been approved, but not yet released.', 'peak-publisher'));
         const desc = isOwn
-            ? withCommitTime(
-                sprintf(__('wordpress.org created your repository <time>%s</time>. Import the still empty state and ship your very first release.', 'peak-publisher'), formatCommitTime(hint.created)),
-                hint.created,
-            )
+            ? withCommitTime(__('wordpress.org created your repository <time />. Import the still empty state and ship your very first release.', 'peak-publisher'), hint.created)
             : (isNaN(createdTime)
                 ? __('wordpress.org created the repository, but it is still empty.', 'peak-publisher')
-                : withCommitTime(
-                    sprintf(__('wordpress.org created the repository <time>%s</time>.', 'peak-publisher'), formatCommitTime(hint.created)),
-                    hint.created,
-                ));
+                : withCommitTime(__('wordpress.org created the repository <time />.', 'peak-publisher'), hint.created));
         return createElement('div', { className: 'pblsh--wporg-import-facts__celebrate' + (importing ? ' pblsh--importing-stripes' : '') },
             createElement('span', { className: 'pblsh--wporg-import-facts__celebrate-icon', 'aria-hidden': 'true' },
                 getSvgIcon('shimmer', { size: 24 })),

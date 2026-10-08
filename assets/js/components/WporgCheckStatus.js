@@ -6,32 +6,18 @@
 // shows it only while a check failed. Muted fragments, ' · ' separated, no period. Wording
 // from Pblsh.WporgCheckUtils.
 const WporgCheckStatus = ({ plugins, children = null }) => {
-    const { createElement, createInterpolateElement, useState, useEffect } = wp.element;
+    const { createElement, createInterpolateElement } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip } = wp.components;
     const { __ } = wp.i18n;
-    const { getTimeTooltipProps, msUntilRelativeTimeChanges } = Pblsh.Utils;
+    const { RelativeTime } = Pblsh.Components;
     const { getCheck, getCheckedText, getCheckErrorText } = Pblsh.WporgCheckUtils;
 
     const checking = useSelect((select) => select('pblsh/plugins').isRefreshingWporg(), []);
     const check = getCheck(plugins);
-    // "2 minutes ago" ages while the line stands: it is read anew exactly when its wording
-    // changes — and when the tab comes back into view, where a hidden tab's timers ran late.
-    const [reading, setReading] = useState(0);
-    useEffect(() => {
-        const wait = msUntilRelativeTimeChanges(check.checkedAt);
-        if (wait === null) return undefined;
-        const timer = setTimeout(() => setReading((count) => count + 1), wait);
-        return () => clearTimeout(timer);
-    }, [check.checkedAt, reading]);
-    useEffect(() => {
-        const onVisibility = () => setReading((count) => count + 1);
-        document.addEventListener('visibilitychange', onVisibility);
-        return () => document.removeEventListener('visibilitychange', onVisibility);
-    }, []);
 
     const fragments = [
-        createInterpolateElement(getCheckedText(check.checkedAt, checking), { time: createElement('time', getTimeTooltipProps(check.checkedAt)) }),
+        createInterpolateElement(getCheckedText(check.checkedAt, checking), { time: createElement(RelativeTime, { value: check.checkedAt, tooltip: true }) }),
         check.error && !checking && createElement(Tooltip, { text: getCheckErrorText(check.error) },
             createElement('span', { tabIndex: 0 }, __('Last check failed', 'peak-publisher'))),
         children,

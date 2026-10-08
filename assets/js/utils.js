@@ -54,19 +54,6 @@ lodash.set(window, 'Pblsh.Utils', {
         return (Math.round(age / 60000) + 0.5) * 60000 - age;
     },
 
-    // Props for a <time> element with the shared precise-moment affordance: the
-    // dotted underline (class pblsh--time-tooltip) signals the exact localized
-    // timestamp in the native tooltip. Empty props for missing/invalid input.
-    getTimeTooltipProps: (value) => {
-        const then = value ? new Date(value) : null;
-        if (!then || isNaN(then.getTime())) return {};
-        return {
-            className: 'pblsh--time-tooltip',
-            dateTime: then.toISOString(),
-            title: then.toLocaleString(),
-        };
-    },
-
     // Channel presentation — one home for every surface that renders a channel
     // (choice cards, destination rows, publish-path trigger). Label and
     // description come from the server config (authoritative source:

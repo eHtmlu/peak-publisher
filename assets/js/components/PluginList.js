@@ -4,8 +4,8 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
-    const { showAlert, getSvgIcon, getPluginStatus, getTimeTooltipProps, formatRelativeTime } = Pblsh.Utils;
-    const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus } = Pblsh.Components;
+    const { showAlert, getSvgIcon, getPluginStatus } = Pblsh.Utils;
+    const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus, RelativeTime } = Pblsh.Components;
     const { getCheck } = Pblsh.WporgCheckUtils;
     //const { exportPlugin } = Pblsh.API;
 
@@ -111,12 +111,9 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                 createElement('td', { className: 'pblsh--table__version-cell' },
                                     createElement(CurrentVersion, { plugin })
                                 ),
-                                // When the current release was published — relative, the exact moment as the
-                                // time element's tooltip; nothing to date without a current release.
+                                // When the current release was published; nothing to date without one.
                                 createElement('td', { className: 'pblsh--table__updated-cell' },
-                                    plugin.last_updated
-                                        ? createElement('time', getTimeTooltipProps(plugin.last_updated), formatRelativeTime(plugin.last_updated))
-                                        : '—'
+                                    plugin.last_updated ? createElement(RelativeTime, { value: plugin.last_updated, tooltip: true }) : '—'
                                 ),
                                 showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' },
                                     createElement(InstallationsCount, { plugin })

@@ -1892,9 +1892,9 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin-top: 0;
 }
 
-/* Shared <time> affordance (Pblsh.Utils.getTimeTooltipProps) — the dotted
-   underline signals the precise localized moment in the native tooltip. */
-.pblsh--time-tooltip {
+/* The RelativeTime component's <time> — the dotted underline signals the exact
+   moment behind the relative wording (native title, or the Tooltip component). */
+.pblsh--relative-time {
     cursor: help;
     text-decoration: underline dotted;
     text-underline-offset: 2px;

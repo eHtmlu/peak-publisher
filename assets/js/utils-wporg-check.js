@@ -19,11 +19,11 @@ lodash.set(window, 'Pblsh.WporgCheckUtils', (() => {
         };
     }
 
-    // The line itself: the moment inside <time></time> for the caller's exact-timestamp tooltip.
+    // The line itself: <time /> is the caller's RelativeTime of the moment.
     function getCheckedText(checkedAt, checking) {
         if (checking) return __('Checking wordpress.org…', 'peak-publisher');
         if (!checkedAt) return __('Not checked against wordpress.org yet', 'peak-publisher');
-        return sprintf(__('Checked against wordpress.org <time>%s</time>', 'peak-publisher'), formatRelativeTime(checkedAt));
+        return __('Checked against wordpress.org <time />', 'peak-publisher');
     }
 
     // The last check that did not complete, as the line's tooltip explains it: when, and the

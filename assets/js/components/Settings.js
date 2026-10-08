@@ -5,7 +5,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, ToggleControl, TextControl, TextareaControl } = wp.components;
     const { showAlert, getSvgIcon, getChannelLabel, getChannelIcon } = Pblsh.Utils;
-    const { WporgAccountForm, NoticeBox, ScrollFrame } = Pblsh.Components;
+    const { WporgAccountForm, NoticeBox, ScrollFrame, RelativeTime } = Pblsh.Components;
     const settingsController = window.Pblsh.Controllers.Settings;
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
@@ -177,10 +177,8 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             return stateBadge('is-blocked', 'close_circle', __('Password re-entry required', 'peak-publisher'));
         }
         if (storedAccount.verified_at) {
-            const verifiedDate = new Date(storedAccount.verified_at * 1000);
             return stateBadge('is-verified', 'check_circle', __('Verified', 'peak-publisher'),
-                createElement('time', Pblsh.Utils.getTimeTooltipProps(verifiedDate),
-                    Pblsh.Utils.formatRelativeTime(verifiedDate)));
+                createElement(RelativeTime, { value: storedAccount.verified_at * 1000 }));
         }
         return stateBadge('is-unknown', 'help_circle_outline', __('Not verified yet', 'peak-publisher'));
     };

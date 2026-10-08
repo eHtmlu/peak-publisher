@@ -88,6 +88,7 @@ class AdminUI {
             'components/NoticeBox.js',
             'components/Figure.js',
             'components/ScrollFrame.js',
+            'components/RelativeTime.js',
             'components/UpgradeNotice.js',
             'components/ChannelChoiceCards.js',
             'components/WporgAccountForm.js',

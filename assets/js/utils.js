@@ -37,7 +37,11 @@ lodash.set(window, 'Pblsh.Utils', {
         if (hours < 24) return sprintf(_n('%d hour ago', '%d hours ago', hours, 'peak-publisher'), hours);
         const days = Math.round(hours / 24);
         if (days <= 30) return sprintf(_n('%d day ago', '%d days ago', days, 'peak-publisher'), days);
-        return sprintf(__('on %s', 'peak-publisher'), then.toLocaleDateString());
+        // Calendar averages, rounded like the units before them.
+        const months = Math.round(days / 30.4375);
+        if (months < 12) return sprintf(_n('%d month ago', '%d months ago', months, 'peak-publisher'), months);
+        const years = Math.round(days / 365.25);
+        return sprintf(_n('%d year ago', '%d years ago', years, 'peak-publisher'), years);
     },
 
     // How long formatRelativeTime() keeps saying what it says now, in ms: until

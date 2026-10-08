@@ -1920,6 +1920,11 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
        default (13px) is the app's de-facto text size. */
 }
 
+/* The list's load error, first in the content: the header owns the distance above it. */
+.pblsh--notice-box.pblsh--list-load-error {
+    margin-top: 0;
+}
+
 /* The variants only pick the color: every colored part (bar, border, tint, icon)
    derives from this one property, so overriding it recolors the whole box. */
 .pblsh--notice-box--info {
@@ -2379,7 +2384,11 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 
 /* Plugin List View */
 .pblsh--list {
-    margin: 1.25rem 0; /* 20px */
+    margin-bottom: 1.25rem; /* 20px */
+}
+/* At the top of the content: the header owns the distance above (--pblsh-page-inset). */
+.pblsh--list > :first-child {
+    margin-top: 0;
 }
 /* The freshness of the wordpress.org rows while a check failed, right-aligned over the table
    it speaks for */
@@ -2393,7 +2402,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 /* The one-time upgrade notice above the plugin list — aligned with the list's margin;
    one section per migration topic, each led by its own heading line */
 .pblsh--upgrade-notice {
-    margin: 1.25rem 0 0; /* 20px */
+    margin: 0 0 1.25rem; /* 20px to the list below */
 }
 .pblsh--upgrade-notice__topic {
     display: block;
@@ -2404,10 +2413,14 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
    across the content area and held right below the admin bar while the page scrolls — below
    600px the admin bar scrolls away (WordPress makes it absolute there), and so does the header.
    Below it, --pblsh-sticky-top is where content sticking under the header stops, and focus and
-   jumps with it. Full width by undoing #wpcontent's left padding; its own padding aligns title
-   and actions with .wrap's content below. Above the content (the assets bar), below the admin
-   menu's flyouts (z-index 9990) and the upload overlay. */
+   jumps with it. The page keeps one inset around its content, --pblsh-page-inset: WordPress's
+   left padding of #wpcontent, which .wrap takes on the right and the header below itself — the
+   header owns that distance, so nothing at the top of the content brings a top margin of its
+   own. Full width by undoing the padding, the header's own padding aligns title and actions
+   with the content. Above the content (the assets bar), below the admin menu's flyouts
+   (z-index 9990) and the upload overlay. */
 :root:has(#pblsh-header) {
+    --pblsh-page-inset: 20px;
     --pblsh-header-height: 3.75rem; /* 60px */
     --pblsh-sticky-top: calc(var(--wp-admin--admin-bar--height, 32px) + var(--pblsh-header-height));
     scroll-padding-top: var(--pblsh-sticky-top);
@@ -2423,17 +2436,22 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     gap: 1rem;
     box-sizing: border-box;
     height: var(--pblsh-header-height);
-    margin: 0 0 1.875rem -20px; /* the content's distance below; #wpcontent's left padding */
-    padding: 0 20px 0 22px; /* .wrap's margins: 20px right, 2px left on top of the padding */
+    margin: 0 0 var(--pblsh-page-inset) calc(-1 * var(--pblsh-page-inset));
+    padding: 0 var(--pblsh-page-inset);
     background: #fff;
     border-bottom: 1px solid var(--border-color-medium);
 }
 
-@media (max-width: 48.875rem) { /* 782px — WordPress's narrower content padding and .wrap margins */
-    .pblsh--header {
-        margin-left: -10px;
-        padding: 0 12px 0 10px;
+@media (max-width: 48.875rem) { /* 782px — WordPress's narrower content padding */
+    :root:has(#pblsh-header) {
+        --pblsh-page-inset: 10px;
     }
+}
+
+/* The admin's .wrap on this page: the inset on the right, none on the left (#wpcontent's padding
+   is it) and none on top (the header's margin is it) — in place of WordPress's 10px 20px 0 2px. */
+.pblsh-app .wrap {
+    margin: 0 var(--pblsh-page-inset) 0 0;
 }
 
 @media (max-width: 37.5rem) { /* 600px — the admin bar scrolls with the page, the header too */
@@ -2953,7 +2971,6 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     font-style: italic;
     background: #f9f9f9;
     border-radius: 0.5rem; /* 8px */
-    margin-top: 1.25rem; /* 20px */
 }
 
 /* Responsive Table */
@@ -3114,7 +3131,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 }
 
 .pblsh--editor {
-    margin: 1.25rem 0; /* 20px */
+    margin-bottom: 1.25rem; /* 20px */
 }
 
 .pblsh--settings {

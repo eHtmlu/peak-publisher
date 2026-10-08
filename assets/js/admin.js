@@ -406,7 +406,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             } else {
                 if (listError) {
-                    return createElement(NoticeBox, { variant: 'error', title: __('The plugins could not be loaded', 'peak-publisher'), error: listError },
+                    return createElement(NoticeBox, { variant: 'error', className: 'pblsh--list-load-error', title: __('The plugins could not be loaded', 'peak-publisher'), error: listError },
                         createElement('p', null, createElement(Button, { isLink: true, onClick: loadApp }, __('Try again', 'peak-publisher'))),
                     );
                 }

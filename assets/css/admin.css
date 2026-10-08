@@ -2409,8 +2409,9 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin: 1em 0 0.25em;
 }
 
-/* The page header (AdminUI::render_peak_publisher()): one row, the title in its middle and the
-   actions at its end — two equal outer columns keep the title centered on the header, white
+/* The page header (AdminUI::render_peak_publisher()): one row, the editor's way back at its start,
+   the title in its middle and the actions at its end — two equal outer columns keep the title
+   centered on the header, white
    across the content area and held right below the admin bar while the page scrolls — below
    600px the admin bar scrolls away (WordPress makes it absolute there), and so does the header.
    Below it, --pblsh-sticky-top is where content sticking under the header stops, and focus and
@@ -2472,6 +2473,12 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
    content apart from the first element's own margin. */
 .pblsh-app .wp-header-end {
     display: none;
+}
+
+/* The editor's way back to the list, at the header's start. */
+.pblsh--header__back {
+    grid-column: 1;
+    justify-self: start;
 }
 
 /* A page title, outside .wrap — sized like the admin's own; a long one is cut, not wrapped. */
@@ -2864,12 +2871,6 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     display: flex;
     flex-direction: column;
 }
-.pblsh--plugin-info__row {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--content-padding-block);
-}
-.pblsh--plugin-info__right { flex: 1; }
 .pblsh--loading--table { padding: 2rem; }
 .pblsh--plugin-header {
     display: flex;

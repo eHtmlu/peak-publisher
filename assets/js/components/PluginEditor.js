@@ -1,5 +1,5 @@
 // PluginEditor Component (simplified overview + releases list)
-lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, refreshWporg, onTogglePluginStatus, pendingPluginStatus, onBack, initialTab, onTabChange }) => {
+lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, refreshWporg, onTogglePluginStatus, pendingPluginStatus, initialTab, onTabChange }) => {
     const { __, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
@@ -85,120 +85,107 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         // and its age in the tooltip.
         const wporgFigures = isWporg ? { downloads: getDownloads(pluginData), rating: getRating(pluginData) } : null;
         return [
-                createElement('div', { className: 'pblsh--card pblsh--card--plugin-info' },
-                createElement('div', { className: 'pblsh--plugin-info__row' },
-                    createElement('div', { className: 'pblsh--plugin-info__left' },
+            createElement('div', { className: 'pblsh--card pblsh--card--plugin-info' },
+                createElement('div', { className: 'pblsh--plugin-header' },
+                    createElement('div', { className: 'pblsh--plugin-header__main' },
+                        pluginData?.icon_url ? createElement('img', {
+                            className: 'pblsh--plugin-header__icon',
+                            src: pluginData.icon_url,
+                            alt: '',
+                            width: 80,
+                            height: 80,
+                        }) : null,
+                        createElement('div', null,
+                            createElement('h3', { className: 'pblsh--plugin-title' }, pluginData?.name),
+                            createElement('div', { className: 'pblsh--plugin-meta' },
+                                createElement(Pblsh.Components.ChannelPath, { channel: pluginData?.hosting_type, slug: safe(pluginData?.slug) || '—' }),
+                            ),
+                        ),
+                    ),
+                    // The status button above, and at the header's foot the wordpress.org line:
+                    // how fresh the plugin's data is, with Refresh — locked only while its own
+                    // refresh runs: a click during the automatic check is taken, the store runs
+                    // it next — and the link to the plugin's public page.
+                    createElement('div', { className: 'pblsh--plugin-header__actions' },
                         createElement(Button, {
                             isTertiary: true,
-                            className: 'has-icon',
-                            label: __('Back to list', 'peak-publisher'),
-                            icon: getSvgIcon('arrow_back', { size: 24 }),
-                            onClick: () => { if (typeof onBack === 'function') onBack(); },
-                        })
-                    ),
-                    createElement('div', { className: 'pblsh--plugin-info__right' },
-                        createElement('div', { className: 'pblsh--plugin-header' },
-                            createElement('div', { className: 'pblsh--plugin-header__main' },
-                                pluginData?.icon_url ? createElement('img', {
-                                    className: 'pblsh--plugin-header__icon',
-                                    src: pluginData.icon_url,
-                                    alt: '',
-                                    width: 80,
-                                    height: 80,
-                                }) : null,
-                                createElement('div', null,
-                                    createElement('h3', { className: 'pblsh--plugin-title' }, pluginData?.name),
-                                    createElement('div', { className: 'pblsh--plugin-meta' },
-                                        createElement(Pblsh.Components.ChannelPath, { channel: pluginData?.hosting_type, slug: safe(pluginData?.slug) || '—' }),
-                                    ),
-                                ),
-                            ),
-                            // The status button above, and at the header's foot the wordpress.org line:
-                            // how fresh the plugin's data is, with Refresh — locked only while its own
-                            // refresh runs: a click during the automatic check is taken, the store runs
-                            // it next — and the link to the plugin's public page.
-                            createElement('div', { className: 'pblsh--plugin-header__actions' },
+                            className: 'pblsh--status-btn pblsh--status-btn--' + getPluginStatus(pluginData?.status).modifier,
+                            label: getPluginStatus(pluginData?.status).label,
+                            icon: getSvgIcon('circle'),
+                            isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
+                            disabled: isWporg || (Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id)),
+                            onClick: () => {
+                                if (isWporg) return;
+                                if (typeof onTogglePluginStatus === 'function' && pluginData?.id) {
+                                    const next = pluginData.status === 'publish' ? 'draft' : 'publish';
+                                    onTogglePluginStatus(pluginData.id, next);
+                                }
+                            },
+                        }, getPluginStatus(pluginData?.status).label),
+                        isWporg && createElement('div', { className: 'pblsh--plugin-header__check' },
+                            createElement(WporgCheckStatus, { plugins: [ pluginData ] },
                                 createElement(Button, {
-                                    isTertiary: true,
-                                    className: 'pblsh--status-btn pblsh--status-btn--' + getPluginStatus(pluginData?.status).modifier,
-                                    label: getPluginStatus(pluginData?.status).label,
-                                    icon: getSvgIcon('circle'),
-                                    isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id),
-                                    disabled: isWporg || (Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(pluginData?.id)),
-                                    onClick: () => {
-                                        if (isWporg) return;
-                                        if (typeof onTogglePluginStatus === 'function' && pluginData?.id) {
-                                            const next = pluginData.status === 'publish' ? 'draft' : 'publish';
-                                            onTogglePluginStatus(pluginData.id, next);
-                                        }
-                                    },
-                                }, getPluginStatus(pluginData?.status).label),
-                                isWporg && createElement('div', { className: 'pblsh--plugin-header__check' },
-                                    createElement(WporgCheckStatus, { plugins: [ pluginData ] },
-                                        createElement(Button, {
-                                            isLink: true,
-                                            isBusy: refreshingWporg,
-                                            disabled: refreshingWporg,
-                                            onClick: refreshFromWporg,
-                                        }, __('Refresh', 'peak-publisher')),
-                                        createElement('a', {
-                                            className: 'pblsh--plugin-header__wporg-link',
-                                            href: getWporgPluginUrl(pluginData.slug),
-                                            target: '_blank',
-                                            rel: 'noreferrer',
-                                        },
-                                            __('View on wordpress.org', 'peak-publisher'),
-                                            createElement('span', { className: 'pblsh--plugin-header__wporg-link-icon', 'aria-hidden': 'true' }, getSvgIcon('open_in_new', { size: 14 })),
-                                        ),
-                                    ),
+                                    isLink: true,
+                                    isBusy: refreshingWporg,
+                                    disabled: refreshingWporg,
+                                    onClick: refreshFromWporg,
+                                }, __('Refresh', 'peak-publisher')),
+                                createElement('a', {
+                                    className: 'pblsh--plugin-header__wporg-link',
+                                    href: getWporgPluginUrl(pluginData.slug),
+                                    target: '_blank',
+                                    rel: 'noreferrer',
+                                },
+                                    __('View on wordpress.org', 'peak-publisher'),
+                                    createElement('span', { className: 'pblsh--plugin-header__wporg-link-icon', 'aria-hidden': 'true' }, getSvgIcon('open_in_new', { size: 14 })),
                                 ),
                             ),
                         ),
-                        createElement('div', { className: 'pblsh--plugin-grid' },
-                            createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
-                                // From the plugin like the current release beside it — the one payload the header reads.
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, String(Number(pluginData?.count_of_releases) || 0))
+                    ),
+                ),
+                createElement('div', { className: 'pblsh--plugin-grid' },
+                    createElement('div', { className: 'pblsh--plugin-grid__item' },
+                        createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
+                        // From the plugin like the current release beside it — the one payload the header reads.
+                        createElement('div', { className: 'pblsh--plugin-grid__value' }, String(Number(pluginData?.count_of_releases) || 0))
+                    ),
+                    createElement('div', { className: 'pblsh--plugin-grid__item' },
+                        createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Current Release', 'peak-publisher')),
+                        createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(CurrentVersion, { plugin: pluginData })),
+                        // Second line of a grid item: muted fragments, ' · ' separated, no period.
+                        // Only when the latest release is not the current one.
+                        pluginData?.latest_version && pluginData.latest_version !== pluginData.version && createElement('div', { className: 'pblsh--plugin-grid__hint' },
+                            sprintf(__('Latest: %s', 'peak-publisher'), pluginData.latest_version)
+                        ),
+                    ),
+                    // Not shown while the counting is switched off (a deliberate choice —
+                    // the setting defaults to on); wordpress.org figures are always there.
+                    pluginData && pluginData.installations.state !== 'disabled' && createElement('div', { className: 'pblsh--plugin-grid__item' },
+                        createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
+                        createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(InstallationsCount, { plugin: pluginData })),
+                    ),
+                    wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
+                        createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Downloads', 'peak-publisher')),
+                        createElement('div', { className: 'pblsh--plugin-grid__value' },
+                            createElement(Figure, { title: wporgFigures.downloads.title }, wporgFigures.downloads.text),
+                        ),
+                    ),
+                    // Stars with the number of ratings beside them, the way the plugin installer
+                    // shows a rating — the count qualifies the stars; the tooltip spells both out.
+                    wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
+                        createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Rating', 'peak-publisher')),
+                        createElement('div', { className: 'pblsh--plugin-grid__value' },
+                            createElement(Figure, { title: wporgFigures.rating.title },
+                                wporgFigures.rating.stars
+                                    ? createElement('span', { className: 'pblsh--rating-stars', 'aria-hidden': 'true' },
+                                        ...wporgFigures.rating.stars.map((icon, index) => createElement('span', { key: index, className: 'pblsh--rating-stars__star' }, getSvgIcon(icon, { size: 32 }))),
+                                        createElement('span', { className: 'pblsh--rating-stars__count' }, '(' + wporgFigures.rating.count + ')'),
+                                    )
+                                    : wporgFigures.rating.text,
                             ),
-                            createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Current Release', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(CurrentVersion, { plugin: pluginData })),
-                                // Second line of a grid item: muted fragments, ' · ' separated, no period.
-                                // Only when the latest release is not the current one.
-                                pluginData?.latest_version && pluginData.latest_version !== pluginData.version && createElement('div', { className: 'pblsh--plugin-grid__hint' },
-                                    sprintf(__('Latest: %s', 'peak-publisher'), pluginData.latest_version)
-                                ),
-                            ),
-                            // Not shown while the counting is switched off (a deliberate choice —
-                            // the setting defaults to on); wordpress.org figures are always there.
-                            pluginData && pluginData.installations.state !== 'disabled' && createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(InstallationsCount, { plugin: pluginData })),
-                            ),
-                            wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Downloads', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' },
-                                    createElement(Figure, { title: wporgFigures.downloads.title }, wporgFigures.downloads.text),
-                                ),
-                            ),
-                            // Stars with the number of ratings beside them, the way the plugin installer
-                            // shows a rating — the count qualifies the stars; the tooltip spells both out.
-                            wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
-                                createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Rating', 'peak-publisher')),
-                                createElement('div', { className: 'pblsh--plugin-grid__value' },
-                                    createElement(Figure, { title: wporgFigures.rating.title },
-                                        wporgFigures.rating.stars
-                                            ? createElement('span', { className: 'pblsh--rating-stars', 'aria-hidden': 'true' },
-                                                ...wporgFigures.rating.stars.map((icon, index) => createElement('span', { key: index, className: 'pblsh--rating-stars__star' }, getSvgIcon(icon, { size: 32 }))),
-                                                createElement('span', { className: 'pblsh--rating-stars__count' }, '(' + wporgFigures.rating.count + ')'),
-                                            )
-                                            : wporgFigures.rating.text,
-                                    ),
-                                ),
-                            ),
-                        )
-                    )
-                )
+                        ),
+                    ),
+                ),
             ),
         ];
     };

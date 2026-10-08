@@ -314,10 +314,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // The header's title and actions for the current view — rendered into the header place.
         // The settings stay within reach in every view; the add-new flow trades "Add New Plugin"
-        // for its Cancel.
+        // for its Cancel; the editor leads back to the list from the header's start.
         const renderHeader = () => {
             const adding = view === 'addition-process';
             return createElement(Fragment, null,
+                view === 'editor' && createElement(Button, {
+                    isTertiary: true,
+                    className: 'pblsh--header__back',
+                    label: __('Back to list', 'peak-publisher'),
+                    icon: Pblsh.Utils.getSvgIcon('arrow_back', { size: 24 }),
+                    onClick: handleCancel,
+                    __next40pxDefaultSize: true,
+                }),
                 createElement('h1', { className: 'pblsh--header__title' },
                     __('Peak Publisher', 'peak-publisher'),
                     adding && ' - ',
@@ -400,7 +408,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     refreshWporg,
                     onTogglePluginStatus: togglePluginStatus,
                     pendingPluginStatus: pendingPluginStatus,
-                    onBack: handleCancel,
                     initialTab: initialTab,
                     onTabChange: (tab) => setQuery({ tab: tab === 'releases' ? null : tab }),
                 });

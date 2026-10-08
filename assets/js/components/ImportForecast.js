@@ -28,6 +28,6 @@ lodash.set(window, 'Pblsh.Components.ImportForecast', ({ forecast, slug }) => {
     }[forecast.reason];
     if (!text) return null;
     return createElement('span', { className: 'pblsh--import-forecast' },
-        createInterpolateElement(text, { a: createElement('a', { href: 'https://wordpress.org/plugins/' + encodeURIComponent(slug) + '/', target: '_blank', rel: 'noreferrer' }) }),
+        createInterpolateElement(text, { a: createElement('a', { href: Pblsh.Utils.getWporgPluginUrl(slug), target: '_blank', rel: 'noreferrer' }) }),
     );
 });

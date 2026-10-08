@@ -2813,15 +2813,28 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     gap: 0.75rem;
     min-width: 0;
 }
+/* The status button at the top, the wordpress.org line at the foot — stretched to the
+   header's height, so the line stands right above the header's rule. */
 .pblsh--plugin-header__actions {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: space-between;
+    align-self: stretch;
     gap: 1rem;
 }
 
-/* The freshness of the plugin's wordpress.org data beside its status button */
+/* The freshness of the plugin's wordpress.org data with Refresh and the link to its page */
 .pblsh--plugin-header__check {
     text-align: right;
+}
+.pblsh--plugin-header__wporg-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+}
+.pblsh--plugin-header__wporg-link-icon {
+    display: inline-flex;
 }
 
 /* How fresh the wordpress.org data on screen is (WporgCheckStatus): one muted line of

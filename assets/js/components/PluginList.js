@@ -4,7 +4,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
-    const { showAlert, getSvgIcon, getPluginStatus } = Pblsh.Utils;
+    const { showAlert, getSvgIcon, getPluginStatus, getWporgPluginUrl } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus, RelativeTime } = Pblsh.Components;
     const { getCheck } = Pblsh.WporgCheckUtils;
     //const { exportPlugin } = Pblsh.API;
@@ -138,6 +138,16 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                                     getSvgIcon('download', { size: 24 }),
                                                     __('Download Installable', 'peak-publisher')
                                                 ), */
+                                                plugin.hosting_type === 'wporg' && createElement(MenuItem, {
+                                                    key: 'wporg-page',
+                                                    href: getWporgPluginUrl(plugin.slug),
+                                                    target: '_blank',
+                                                    rel: 'noreferrer',
+                                                    onClick: onClose,
+                                                },
+                                                    getSvgIcon('open_in_new', { size: 24 }),
+                                                    __('View on wordpress.org', 'peak-publisher')
+                                                ),
                                                 plugin.slug !== PblshData.currentPlugin && createElement(MenuItem, {
                                                     key: 'delete',
                                                     isDestructive: true,

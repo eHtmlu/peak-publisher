@@ -28,7 +28,7 @@ const WporgImportFacts = ({
     const { __, _n, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement } = wp.element;
     const { FaqLink, NoticeBox, RelativeTime } = Pblsh.Components;
-    const { getSvgIcon, getGeopatternIconUrl } = Pblsh.Utils;
+    const { getSvgIcon, getGeopatternIconUrl, getWporgPluginUrl } = Pblsh.Utils;
 
     const hint = directoryHint && typeof directoryHint === 'object' ? directoryHint : {};
     // "Fresh" only means the directory has never seen a release — the repository
@@ -84,7 +84,7 @@ const WporgImportFacts = ({
     // verify "is this really my plugin?" with screenshots, description and author.
     const identityCard = accessStatus === 'ok' && ['published', 'closed', 'unknown'].includes(hint.state) ? createElement('a', {
         className: 'pblsh--wporg-import-facts__plugin' + (importing ? ' pblsh--importing-stripes' : ''),
-        href: 'https://wordpress.org/plugins/' + encodeURIComponent(slug) + '/',
+        href: getWporgPluginUrl(slug),
         target: '_blank',
         rel: 'noreferrer',
     },

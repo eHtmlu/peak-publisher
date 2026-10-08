@@ -4,7 +4,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
     const { Tooltip, Button, Spinner } = wp.components;
-    const { getSvgIcon, getPluginStatus } = Pblsh.Utils;
+    const { getSvgIcon, getPluginStatus, getWporgPluginUrl } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
     const { getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
     const { getChangesText } = Pblsh.WporgCheckUtils;
@@ -113,20 +113,11 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                     ),
                                 ),
                             ),
+                            // The status button above, and at the header's foot the wordpress.org line:
+                            // how fresh the plugin's data is, with Refresh — locked only while its own
+                            // refresh runs: a click during the automatic check is taken, the store runs
+                            // it next — and the link to the plugin's public page.
                             createElement('div', { className: 'pblsh--plugin-header__actions' },
-                                // How fresh the plugin's wordpress.org data is, with the Refresh link —
-                                // locked only while its own refresh runs: a click during the automatic
-                                // check is taken, the store runs it next.
-                                isWporg && createElement('div', { className: 'pblsh--plugin-header__check' },
-                                    createElement(WporgCheckStatus, { plugins: [ pluginData ] },
-                                        createElement(Button, {
-                                            isLink: true,
-                                            isBusy: refreshingWporg,
-                                            disabled: refreshingWporg,
-                                            onClick: refreshFromWporg,
-                                        }, __('Refresh', 'peak-publisher')),
-                                    ),
-                                ),
                                 createElement(Button, {
                                     isTertiary: true,
                                     className: 'pblsh--status-btn pblsh--status-btn--' + getPluginStatus(pluginData?.status).modifier,
@@ -141,7 +132,26 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                             onTogglePluginStatus(pluginData.id, next);
                                         }
                                     },
-                                }, getPluginStatus(pluginData?.status).label)
+                                }, getPluginStatus(pluginData?.status).label),
+                                isWporg && createElement('div', { className: 'pblsh--plugin-header__check' },
+                                    createElement(WporgCheckStatus, { plugins: [ pluginData ] },
+                                        createElement(Button, {
+                                            isLink: true,
+                                            isBusy: refreshingWporg,
+                                            disabled: refreshingWporg,
+                                            onClick: refreshFromWporg,
+                                        }, __('Refresh', 'peak-publisher')),
+                                        createElement('a', {
+                                            className: 'pblsh--plugin-header__wporg-link',
+                                            href: getWporgPluginUrl(pluginData.slug),
+                                            target: '_blank',
+                                            rel: 'noreferrer',
+                                        },
+                                            __('View on wordpress.org', 'peak-publisher'),
+                                            createElement('span', { className: 'pblsh--plugin-header__wporg-link-icon', 'aria-hidden': 'true' }, getSvgIcon('open_in_new', { size: 14 })),
+                                        ),
+                                    ),
+                                ),
                             ),
                         ),
                         createElement('div', { className: 'pblsh--plugin-grid' },

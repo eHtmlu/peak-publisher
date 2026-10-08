@@ -10,7 +10,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
     const { useState, useEffect, useRef, createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, TextControl, Spinner } = wp.components;
-    const { getGeopatternIconUrl, getSvgIcon } = Pblsh.Utils;
+    const { getGeopatternIconUrl, getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
     const { formatWporgActiveInstalls } = Pblsh.InstallationsUtils;
     const { ChannelPath, Figure } = Pblsh.Components;
 
@@ -588,7 +588,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
         return hasDirectoryPage
             ? createElement('a', {
                 className: 'pblsh--wporg-import__plugin-identity',
-                href: 'https://wordpress.org/plugins/' + encodeURIComponent(row.slug) + '/',
+                href: getWporgPluginUrl(row.slug),
                 target: '_blank',
                 rel: 'noreferrer',
             }, ...identity)

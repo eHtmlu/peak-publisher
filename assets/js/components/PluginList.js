@@ -1,9 +1,9 @@
 // PluginList Component
-lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, onExport, onCreateNew, onToggleStatus, pendingPluginStatus }) => {
+lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, onExport, onCreateNew }) => {
     const { __, _n, sprintf } = wp.i18n;
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
-    const { Button, DropdownMenu, MenuItem, Icon } = wp.components;
+    const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
     const { showAlert, getSvgIcon, getPluginStatus } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus } = Pblsh.Components;
     const { getCheck } = Pblsh.WporgCheckUtils;
@@ -45,6 +45,23 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     // said here: the rows would age without a word.
     const checkFailed = wporgPlugins.length > 0 && !!getCheck(wporgPlugins).error;
 
+    // Only the exceptions are marked — a public plugin is the normal case. The badge says
+    // the status in the status vocabulary's word and color; it is a mark, not a control:
+    // the switch is the editor's (self-hosted only). The consequence is its tooltip,
+    // reachable by keyboard like the row's other tooltips.
+    const renderStatusBadge = (plugin) => {
+        const status = getPluginStatus(plugin.status);
+        const consequence = plugin.status === 'closed'
+            ? __('Closed on wordpress.org. The directory distributes nothing.', 'peak-publisher')
+            : __('Sites receive nothing while the plugin is a draft. Switch it in the editor.', 'peak-publisher');
+        return createElement(Tooltip, { text: consequence },
+            createElement('span', {
+                className: 'pblsh--table__status-badge pblsh--table__status-badge--' + status.modifier,
+                tabIndex: 0,
+            }, status.label),
+        );
+    };
+
     return createElement('div', { className: 'pblsh--list' },
         !hasLoadedList
             ? createElement('div', { className: 'pblsh--loading' },
@@ -61,7 +78,6 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                 createElement('table', { className: 'pblsh--table' },
                     createElement('thead', null,
                         createElement('tr', null,
-                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__icon-header' }),
                             createElement('th', { className: 'pblsh--table__name-header' }, __('Plugin Name', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
@@ -72,21 +88,6 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                     createElement('tbody', null,
                         plugins.map(plugin => 
                             createElement('tr', { key: plugin.id, className: 'pblsh--row' },
-                                createElement('td', { className: 'pblsh--table__status-cell' },
-                                    createElement(wp.components.Button, {
-                                        isTertiary: true,
-                                        className: 'pblsh--status-btn pblsh--status-btn--' + getPluginStatus(plugin.status).modifier,
-                                        label: getPluginStatus(plugin.status).label,
-                                        icon: Pblsh.Utils.getSvgIcon('circle'),
-                                        isBusy: Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id),
-                                        disabled: plugin.hosting_type === 'wporg' || (Array.isArray(pendingPluginStatus) && pendingPluginStatus.includes(plugin.id)),
-                                        onClick: () => {
-                                            if (plugin.hosting_type === 'wporg') return;
-                                            const next = plugin.status === 'publish' ? 'draft' : 'publish';
-                                            if (typeof onToggleStatus === 'function') onToggleStatus(plugin.id, next);
-                                        },
-                                    })
-                                ),
                                 createElement('td', { className: 'pblsh--table__icon-cell' },
                                     plugin.icon_url && createElement('img', {
                                         src: plugin.icon_url,
@@ -98,7 +99,10 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                 ),
                                 createElement('td', { className: 'pblsh--table__name-cell' },
                                     createElement('div', { className: 'pblsh--table__name-content' },
-                                        createElement('strong', null, plugin.name),
+                                        createElement('div', { className: 'pblsh--table__name-line' },
+                                            plugin.status !== 'publish' && renderStatusBadge(plugin),
+                                            createElement('strong', null, plugin.name),
+                                        ),
                                         createElement(ChannelPath, { channel: plugin.hosting_type, slug: plugin.slug })
                                     )
                                 ),

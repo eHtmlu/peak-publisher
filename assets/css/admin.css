@@ -16,6 +16,7 @@
     /* --color-blue: #0073aa; */
     --color-blue: #4180ff;
     --color-gray: #ccd6e0;
+    --color-gray-dark: #646970; /* WordPress's admin gray — the draft state: chosen, not a problem */
     --color-red: #dc3232;
     --color-orange: #f29309;
     --color-gold: #d4a017;
@@ -2510,11 +2511,12 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     min-width: 12.5rem; /* 200px */
 }
 
+/* The first column: the table's inline padding on its outer side only. */
 .pblsh--table__icon-header,
 .pblsh--table__icon-cell {
     width: 3rem;
     text-align: right;
-    padding: 0 !important;
+    padding: 0 0 0 var(--content-padding-inline) !important;
 }
 .pblsh--table__icon {
     /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
@@ -2545,9 +2547,39 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     gap: 0.25rem;
 }
 
-/* The row's anchor — lifted above the table's 13px base. */
-.pblsh--table__name-content strong {
+/* The name line: the row's anchor, lifted above the table's 13px base — led, for the
+   exceptions only, by the status badge in the text flow, so a name that wraps keeps
+   the badge on its first line. */
+.pblsh--table__name-line {
     font-size: 0.9375rem; /* 15px */
+}
+
+/* Only the exceptions are marked (a public plugin is the normal case): the status word
+   in the status vocabulary's color — a mark, not a control, in the badge language of the
+   upload dialog's release type. Draft is the chosen state (dark gray, white text: seen,
+   not alarming), closed the directory's verdict (red). */
+.pblsh--table__status-badge {
+    display: inline-block;
+    vertical-align: middle;
+    margin-inline-end: 0.5rem;
+    white-space: nowrap;
+    font-size: 0.6875rem; /* 11px */
+    line-height: 1;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem; /* 4px */
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+}
+
+.pblsh--table__status-badge--draft {
+    background: var(--color-gray-dark);
+    color: #fff;
+}
+
+.pblsh--table__status-badge--closed {
+    background: var(--color-red);
+    color: #fff;
 }
 
 /* ChannelPath — the publish path in short (channel icon + slug), shared by
@@ -2738,38 +2770,11 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     font-size: 0.8125rem;
 }
 
-/* Status Column */
-.pblsh--table__status-cell {
-    width: 6.25rem; /* 100px */
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 1px;
-}
-
-.pblsh--badge {
-    display: inline-block;
-    padding: 0.125rem 0.5rem; /* 2px 8px */
-    border-radius: 0.1875rem; /* 3px */
-    font-size: 0.75rem; /* 12px */
-    font-weight: 500;
-}
-
-.pblsh--badge--active {
-    background: #46b450;
-    color: white;
-}
-
-.pblsh--badge--inactive {
-    background: #f1f1f1;
-    color: #666;
-}
-
 /* Status button variations (icon colored via currentColor) */
 .components-button.is-tertiary.pblsh--status-btn svg { width: 1rem; height: 1rem; }
 .components-button.is-tertiary.pblsh--status-btn { color: #000 !important; }
 .components-button.is-tertiary.pblsh--status-btn--public { color: var(--color-green) !important; }
-.components-button.is-tertiary.pblsh--status-btn--draft { color: var(--color-gray) !important; }
+.components-button.is-tertiary.pblsh--status-btn--draft { color: var(--color-gray-dark) !important; }
 /* Closed on wordpress.org: the directory distributes nothing */
 .components-button.is-tertiary.pblsh--status-btn--closed { color: var(--color-red) !important; }
 
@@ -2888,8 +2893,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
         min-width: 6.25rem; /* 100px */
         font-size: 0.8125rem; /* 13px */
     }
-    .pblsh--table__version-cell,
-    .pblsh--table__status-cell {
+    .pblsh--table__version-cell {
         font-size: 0.75rem; /* 12px */
     }
     .pblsh--table__actions {

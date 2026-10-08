@@ -430,8 +430,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         onEdit: handleEdit,
                         onDelete: handleDelete,
                         onCreateNew: () => handleAddNewPlugin(),
-                        onToggleStatus: togglePluginStatus,
-                        pendingPluginStatus: pendingPluginStatus,
                     }),
                 );
             }

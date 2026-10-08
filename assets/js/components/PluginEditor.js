@@ -215,11 +215,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         }
     };
 
-    // Notices above the releases table, in this order: transient success → closed on
-    // wordpress.org → the pointer state (no current release).
+    // Notices above the releases table, in this order: transient success → nothing is
+    // distributed (closed on wordpress.org, or a self-hosted draft) → the pointer state
+    // (no current release).
     const renderReleaseNotices = () => {
         const issue = getCurrentReleaseIssue(pluginData);
         const closed = isWporg ? pluginData.wporg_stats.closed : null;
+        const draft = !isWporg && pluginData.status !== 'publish';
         return [
             // The self-hosted sentence has no <revision /> slot: the link stays unrendered there.
             flipOutcome && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--tab-panel__notice' },
@@ -229,6 +231,15 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             // nothing is distributed, whatever the pointer says.
             closed && createElement(NoticeBox, { key: 'closed', variant: 'warning', className: 'pblsh--tab-panel__notice' },
                 createElement('p', null, getWporgClosedNotice(closed)),
+            ),
+            // A draft is the self-hosted way of distributing nothing — chosen, and undone
+            // with the status button right above, which the remedy names.
+            draft && createElement(NoticeBox, { key: 'draft', variant: 'warning', className: 'pblsh--tab-panel__notice' },
+                createElement('p', null,
+                    __('This plugin is a draft. Sites get no updates and cannot install it while it is a draft.', 'peak-publisher'),
+                    createElement('br'),
+                    createElement('strong', null, __('Make it public with the status button above.', 'peak-publisher')),
+                ),
             ),
             // The fact, then the remedy emphasized on its own line — one paragraph, as the box
             // holds a single thought.

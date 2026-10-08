@@ -230,6 +230,19 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         setCurrentReleaseDecision({ relation: null, pre_release: null, deviate: false });
     }, [validationResult?.upload_id]);
 
+    // The checklist's receipts belong to one destination (channel × slug): a channel switch or
+    // a slug change shows other facts, and what was ticked for the old ones is withdrawn.
+    // Keyed on the destination, so later updates of the same result (finalize errors, the
+    // post-import refresh) keep the ticks.
+    const activeDestination = (() => {
+        const meta = validationResult?.data || {};
+        const key = getActiveTargetKey(meta);
+        return key ? key + ':' + (meta.hosting_type_targets?.[key]?.slug || '') : '';
+    })();
+    useEffect(() => {
+        uploadChecks.reset();
+    }, [validationResult?.upload_id, activeDestination]);
+
     async function runUploadWorkflow(file, context, uploadStartOptions = {}) {
         setUploadProgress(0);
 

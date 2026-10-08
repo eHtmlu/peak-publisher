@@ -231,7 +231,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const renderReleaseNotices = () => {
         const issue = getCurrentReleaseIssue(pluginData);
         const closed = isWporg ? pluginData.wporg_stats.closed : null;
-        const draft = !isWporg && pluginData.status !== 'publish';
+        const draft = pluginData?.hosting_type === 'self_hosted' && pluginData.status !== 'publish';
         return [
             // The self-hosted sentence has no <revision /> slot: the link stays unrendered there.
             flipOutcome && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--tab-panel__notice' },

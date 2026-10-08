@@ -10,7 +10,6 @@ use Pblsh\WporgSvnException;
 use function Pblsh\confirm_wporg_directory_check;
 use function Pblsh\get_wporg_directory;
 use function Pblsh\is_wporg_directory_check_due;
-use function Pblsh\is_wporg_figures_due;
 use function Pblsh\record_wporg_directory_check_error;
 use function Pblsh\refresh_wporg_directory;
 use function Pblsh\serialize_self_hosted_installations;
@@ -21,11 +20,12 @@ use const Pblsh\PBLSH_WPORG_DIRECTORY_CHECKED_OPTION;
 use const Pblsh\PBLSH_WPORG_DIRECTORY_META;
 
 /**
- * The directory cache of wordpress.org plugins (includes/wporg_directory.php): the daily
- * figures — when a fetch is due, the claim before the remote call, one batched request, what
- * a success, a miss and a failure leave behind —, the directory stamp that tells the list a
- * plugin changed on wordpress.org, and the check's record: when a plugin was last brought in
- * step, completed only once a moved stamp's SVN refresh did.
+ * The directory cache of wordpress.org plugins (includes/wporg_directory.php): who is asked —
+ * every marker when the site-wide check is due, given markers always —, the claim before the
+ * remote call, one batched request, the figures every listing brings and what a success, a
+ * miss and a failure leave behind, the directory stamp that tells the list a plugin changed on
+ * wordpress.org, and the check's record: when a plugin was last brought in step, completed only
+ * once a moved stamp's SVN refresh did.
  */
 final class WporgDirectoryTest extends TestCase {
 
@@ -60,32 +60,25 @@ final class WporgDirectoryTest extends TestCase {
         return $query;
     }
 
-    // ---- the rule ----
-
-    public function test_the_automatic_path_fetches_once_a_day_after_the_utc_cut_off(): void {
-        $noon = 1_800_000_000 - (1_800_000_000 % DAY_IN_SECONDS) + 12 * HOUR_IN_SECONDS;
-        self::assertTrue(is_wporg_figures_due($this->stats([]), $noon), 'never fetched');
-        self::assertTrue(is_wporg_figures_due($this->stats([ 'fetched_at' => $noon - DAY_IN_SECONDS, 'attempted_at' => $noon - DAY_IN_SECONDS ]), $noon), 'fetched yesterday');
-        self::assertFalse(is_wporg_figures_due($this->stats([ 'fetched_at' => $noon - 11 * HOUR_IN_SECONDS, 'attempted_at' => $noon - 11 * HOUR_IN_SECONDS ]), $noon), 'fetched today after 00:00 UTC');
-        self::assertFalse(is_wporg_figures_due($this->stats([ 'attempted_at' => $noon - 10 * MINUTE_IN_SECONDS ]), $noon), 'a claim younger than an hour blocks the automatic path');
-        self::assertTrue(is_wporg_figures_due($this->stats([ 'attempted_at' => $noon - 2 * HOUR_IN_SECONDS ]), $noon), 'an hour after a dead claim the automatic path retries');
-    }
+    // ---- the stored shape ----
 
     public function test_a_foreign_meta_shape_reads_as_never(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, 'not an array');
         self::assertSame('never', get_wporg_directory($marker->ID)['state']);
 
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, [ 'foreign' => 1, 'state' => 'ok', 'active_installs' => 10 ]);
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, [ 'foreign' => 1, 'fetched_at' => 5, 'state' => 'ok', 'active_installs' => 10 ]);
         $stats = get_wporg_directory($marker->ID);
         self::assertSame('ok', $stats['state']);
+        self::assertSame(10, $stats['active_installs']);
         self::assertArrayNotHasKey('foreign', $stats);
-        self::assertSame(0, $stats['fetched_at']);
+        self::assertArrayNotHasKey('fetched_at', $stats, 'a key of no longer stored shape is dropped');
+        self::assertSame(0, $stats['checked_at']);
     }
 
     // ---- the refresh ----
 
-    public function test_refresh_claims_then_writes_every_marker_from_one_batched_request(): void {
+    public function test_a_due_check_writes_every_marker_from_one_batched_request(): void {
         $a = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         $b = $this->create_plugin('pblsh_wporg_plugin', 'plugin-b');
         $c = $this->create_plugin('pblsh_wporg_plugin', 'plugin-c');
@@ -99,7 +92,7 @@ final class WporgDirectoryTest extends TestCase {
 
         self::assertSame([], refresh_wporg_directory(), 'a first look moves no stamp');
 
-        self::assertCount(1, FakeWordPress::$http_requests, 'one request for every due marker');
+        self::assertCount(1, FakeWordPress::$http_requests, 'one request for every marker');
         $query = $this->request_query();
         self::assertEqualsCanonicalizing([ 'plugin-a', 'plugin-b', 'plugin-c' ], explode(',', $query['request']['slugs']));
         self::assertStringContainsString(',downloaded,', ',' . $query['request']['fields'] . ',', 'downloaded must be requested positively');
@@ -113,9 +106,6 @@ final class WporgDirectoryTest extends TestCase {
         self::assertSame('ok', $stats_a['state']);
         self::assertSame([ 1000, 977, 100, 4 ], [ $stats_a['active_installs'], $stats_a['downloaded'], $stats_a['rating'], $stats_a['num_ratings'] ]);
         self::assertNull($stats_a['closed']);
-        self::assertNull($stats_a['last_error']);
-        self::assertGreaterThanOrEqual($before, $stats_a['fetched_at']);
-        self::assertSame($stats_a['attempted_at'], $stats_a['fetched_at'], 'a success sets fetched_at to the claim time');
 
         $stats_b = get_wporg_directory($b->ID);
         self::assertSame('closed', $stats_b['state']);
@@ -134,13 +124,27 @@ final class WporgDirectoryTest extends TestCase {
         }
     }
 
-    public function test_a_marker_fetched_today_is_left_alone(): void {
-        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'fetched_at' => time(), 'attempted_at' => time() ]));
+    public function test_a_check_that_is_not_due_asks_nothing(): void {
+        $fetched = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        update_post_meta($fetched->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10 ]));
+        $this->create_plugin('pblsh_wporg_plugin', 'plugin-b');
         update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, time());
 
         self::assertSame([], refresh_wporg_directory());
-        self::assertSame([], FakeWordPress::$http_requests);
+        self::assertSame([], FakeWordPress::$http_requests, 'not even a plugin without figures: they come with the next check');
+    }
+
+    public function test_every_check_takes_the_figures_it_gets(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => 1000, 'downloaded' => 977, 'rating' => 100, 'num_ratings' => 4 ]) ]);
+        refresh_wporg_directory();
+
+        update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, 0);
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => 2000, 'downloaded' => 1026, 'rating' => 96, 'num_ratings' => 5 ]) ]);
+        refresh_wporg_directory();
+
+        $stats = get_wporg_directory($marker->ID);
+        self::assertSame([ 2000, 1026, 96, 5 ], [ $stats['active_installs'], $stats['downloaded'], $stats['rating'], $stats['num_ratings'] ], 'wordpress.org publishes new figures at any hour');
     }
 
     public function test_refresh_of_one_marker_touches_only_that_marker(): void {
@@ -174,19 +178,18 @@ final class WporgDirectoryTest extends TestCase {
         self::assertSame('never', get_wporg_directory($c->ID)['state']);
     }
 
-    public function test_a_look_at_given_markers_neither_consults_nor_claims_the_site_wide_check(): void {
+    public function test_given_markers_are_always_asked_and_leave_the_site_wide_check_alone(): void {
         $a = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         $b = $this->create_plugin('pblsh_wporg_plugin', 'plugin-b');
-        $today = time();
-        update_post_meta($a->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'fetched_at' => $today, 'attempted_at' => $today ]));
+        update_post_meta($a->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10 ]));
 
-        self::assertSame([], refresh_wporg_directory([ $a->ID ]), 'the site-wide check is due, this marker is not');
-        self::assertSame([], FakeWordPress::$http_requests);
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => 20 ]) ]);
+        self::assertSame([], refresh_wporg_directory([ $a->ID ]));
+        self::assertSame(20, get_wporg_directory($a->ID)['active_installs'], 'a plugin with figures is asked all the same');
 
         $this->answer([ 'plugin-b' => $this->listing([ 'slug' => 'plugin-b' ]) ]);
-        refresh_wporg_directory([ $b->ID ]);
-        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a' ]) ]);
-        refresh_wporg_directory([ $a->ID ], true);
+        refresh_wporg_directory([ $b->ID ], true);
+        self::assertCount(2, FakeWordPress::$http_requests);
         self::assertSame(0, (int) get_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, 0), 'the list still gets its check');
     }
 
@@ -197,56 +200,40 @@ final class WporgDirectoryTest extends TestCase {
         self::assertSame([], FakeWordPress::$http_requests);
     }
 
-    public function test_a_transport_failure_records_the_error_beside_the_last_good_figures(): void {
+    public function test_an_unreachable_directory_is_the_failed_check_and_keeps_the_last_figures(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
-        $yesterday = time() - DAY_IN_SECONDS;
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 1000, 'downloaded' => 5, 'fetched_at' => $yesterday, 'attempted_at' => $yesterday ]));
+        $stamp = [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [] ];
+        $checked = time() - HOUR_IN_SECONDS;
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 1000, 'downloaded' => 5, 'stamp' => $stamp, 'checked_at' => $checked ]));
         FakeWordPress::$http_responses[] = new \WP_Error('http_request_failed', 'cURL error 28');
+        $before = time();
 
-        refresh_wporg_directory();
+        self::assertSame([], refresh_wporg_directory());
 
         $stats = get_wporg_directory($marker->ID);
         self::assertSame('ok', $stats['state'], 'the state survives');
-        self::assertSame(1000, $stats['active_installs']);
-        self::assertSame(5, $stats['downloaded']);
-        self::assertSame($yesterday, $stats['fetched_at']);
-        self::assertGreaterThan($yesterday, $stats['attempted_at'], 'the claim was written before the call');
-        self::assertSame('wporg_api_unavailable', $stats['last_error']['code']);
-        self::assertNotSame('', $stats['last_error']['message']);
-        self::assertSame($stats['attempted_at'], $stats['last_error']['at']);
-        self::assertSame($stats['last_error'], $stats['check_error'], 'an unreachable directory is the failed check too');
-        self::assertSame(0, $stats['checked_at']);
+        self::assertSame([ 1000, 5 ], [ $stats['active_installs'], $stats['downloaded'] ]);
+        self::assertSame('wporg_api_unavailable', $stats['check_error']['code']);
+        self::assertNotSame('', $stats['check_error']['message']);
+        self::assertGreaterThanOrEqual($before, $stats['check_error']['at']);
+        self::assertSame($checked, $stats['checked_at'], 'the last completed check stands');
+        self::assertSame($stamp, $stats['stamp']);
     }
 
-    public function test_a_listing_without_installation_figures_records_its_own_error(): void {
+    public function test_a_listing_without_installation_figures_is_a_failed_check(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
-        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => null ]) ]);
+        $stamp = [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [] ];
+        $checked = time() - HOUR_IN_SECONDS;
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'stamp' => $stamp, 'checked_at' => $checked ]));
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => null, 'last_updated' => 'B' ]) ]);
 
-        refresh_wporg_directory();
+        self::assertSame([], refresh_wporg_directory(), 'its stamp is not compared: the check failed');
 
         $stats = get_wporg_directory($marker->ID);
-        self::assertSame('never', $stats['state']);
-        self::assertNull($stats['active_installs']);
-        self::assertSame('wporg_stats_incomplete', $stats['last_error']['code']);
-        self::assertGreaterThan(0, $stats['checked_at'], 'the directory answered: the check itself completed');
-        self::assertNull($stats['check_error']);
-    }
-
-    public function test_force_fetches_regardless_of_the_cut_off_and_the_last_attempt(): void {
-        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
-        $now = time();
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'fetched_at' => $now - MINUTE_IN_SECONDS, 'attempted_at' => $now - MINUTE_IN_SECONDS ]));
-        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => 100 ]) ]);
-
-        refresh_wporg_directory([ $marker->ID ], true);
-        self::assertSame(100, get_wporg_directory($marker->ID)['active_installs'], 'force right after a success fetches again');
-
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'attempted_at' => $now - MINUTE_IN_SECONDS, 'last_error' => [ 'code' => 'wporg_api_unavailable', 'message' => 'x', 'at' => $now - MINUTE_IN_SECONDS ] ]));
-        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'active_installs' => 200 ]) ]);
-        refresh_wporg_directory([ $marker->ID ], true);
-        self::assertSame(200, get_wporg_directory($marker->ID)['active_installs'], 'force right after a failure fetches again');
-        self::assertNull(get_wporg_directory($marker->ID)['last_error'], 'the success clears the failure');
-        self::assertCount(2, FakeWordPress::$http_requests);
+        self::assertSame(10, $stats['active_installs'], 'the last figures stand');
+        self::assertSame('wporg_stats_incomplete', $stats['check_error']['code']);
+        self::assertSame($checked, $stats['checked_at']);
+        self::assertSame($stamp, $stats['stamp'], 'the next check tries again');
     }
 
     public function test_a_failing_chunk_marks_only_its_own_markers(): void {
@@ -270,9 +257,9 @@ final class WporgDirectoryTest extends TestCase {
         $states = [ 'ok' => 0, 'failed' => 0 ];
         foreach ($ids as $id) {
             $stats = get_wporg_directory($id);
-            if ($stats['state'] === 'ok' && $stats['last_error'] === null && $stats['check_error'] === null) {
+            if ($stats['state'] === 'ok' && $stats['check_error'] === null) {
                 $states['ok']++;
-            } elseif ($stats['state'] === 'never' && ($stats['last_error']['code'] ?? '') === 'wporg_api_unavailable' && ($stats['check_error']['code'] ?? '') === 'wporg_api_unavailable') {
+            } elseif ($stats['state'] === 'never' && ($stats['check_error']['code'] ?? '') === 'wporg_api_unavailable') {
                 $states['failed']++;
             }
         }
@@ -366,7 +353,7 @@ final class WporgDirectoryTest extends TestCase {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         $checked = time() - HOUR_IN_SECONDS;
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([
-            'state' => 'ok', 'active_installs' => 10, 'fetched_at' => time(), 'attempted_at' => time(),
+            'state' => 'ok', 'active_installs' => 10,
             'stamp' => [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ], 'checked_at' => $checked,
         ]));
         $listing = $this->listing([ 'slug' => 'plugin-a', 'version' => '1.0.0', 'last_updated' => '2026-10-04 8:02am GMT', 'active_installs' => 999 ]);
@@ -377,7 +364,7 @@ final class WporgDirectoryTest extends TestCase {
         $stored = get_wporg_directory($marker->ID);
         self::assertSame('2026-10-01 9:15am GMT', $stored['stamp']['last_updated'], 'the old stamp stands until the SVN refresh completed');
         self::assertSame($checked, $stored['checked_at']);
-        self::assertSame(10, $stored['active_installs'], 'the figures were not due and stay');
+        self::assertSame(999, $stored['active_installs'], 'the figures come with the listing while the check stays open');
 
         update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, 0);
         $this->answer([ 'plugin-a' => $listing ]);
@@ -419,7 +406,7 @@ final class WporgDirectoryTest extends TestCase {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         $now = time();
         $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ];
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'fetched_at' => $now, 'attempted_at' => $now, 'stamp' => $stamp ]));
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'active_installs' => 10, 'stamp' => $stamp ]));
         $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT' ]) ]);
 
         self::assertSame([], refresh_wporg_directory());
@@ -433,7 +420,7 @@ final class WporgDirectoryTest extends TestCase {
         $b = $this->create_plugin('pblsh_wporg_plugin', 'plugin-b');
         $stamp = [ 'version' => '1.0.0', 'last_updated' => '2026-10-01 9:15am GMT', 'assets' => [] ];
         foreach ([ $a, $b ] as $marker) {
-            update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => $stamp, 'fetched_at' => time(), 'attempted_at' => time() ]));
+            update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => $stamp ]));
         }
         $this->answer([ 'plugin-a' => $this->closed_listing('plugin-a'), 'plugin-b' => [ 'error' => 'Plugin not found.' ] ]);
 
@@ -445,7 +432,7 @@ final class WporgDirectoryTest extends TestCase {
     public function test_force_checks_the_stamp_of_one_marker_regardless_of_the_interval(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         update_option(PBLSH_WPORG_DIRECTORY_CHECKED_OPTION, time());
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [] ], 'fetched_at' => time(), 'attempted_at' => time() ]));
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([ 'state' => 'ok', 'stamp' => [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [] ] ]));
         $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'version' => '1.1.0', 'last_updated' => 'B' ]) ]);
 
         self::assertSame([ $marker->ID => [ 'version' => '1.1.0', 'last_updated' => 'B', 'assets' => [] ] ], refresh_wporg_directory([ $marker->ID ], true));
@@ -488,24 +475,18 @@ final class WporgDirectoryTest extends TestCase {
     public function test_serialize_wporg_directory_turns_timestamps_into_iso_8601_and_never_into_null(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         self::assertSame([
-            'installations' => [ 'state' => 'never', 'count' => null, 'fetched_at' => null, 'attempted_at' => null, 'last_error' => null ],
-            'wporg_stats' => [ 'downloaded' => null, 'rating' => null, 'num_ratings' => null, 'closed' => null, 'fetched_at' => null ],
+            'installations' => [ 'state' => 'never', 'count' => null ],
+            'wporg_stats' => [ 'downloaded' => null, 'rating' => null, 'num_ratings' => null, 'closed' => null ],
             'wporg_check' => [ 'checked_at' => null, 'error' => null ],
-        ], serialize_wporg_directory($marker->ID));
+        ], serialize_wporg_directory($marker->ID), 'installations in the shape of the self-hosted count');
 
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, $this->stats([
             'state' => 'ok', 'active_installs' => 1000, 'downloaded' => 977, 'rating' => 100, 'num_ratings' => 4,
-            'fetched_at' => 1_800_000_000, 'attempted_at' => 1_800_003_600,
-            'last_error' => [ 'code' => 'wporg_api_unavailable', 'message' => 'unavailable', 'at' => 1_800_003_600 ],
             'checked_at' => 1_800_000_000, 'check_error' => [ 'code' => 'svn_unreachable', 'message' => 'down', 'at' => 1_800_003_600 ],
         ]));
         $out = serialize_wporg_directory($marker->ID);
-        self::assertSame('2027-01-15T08:00:00Z', $out['installations']['fetched_at']);
-        self::assertSame('2027-01-15T09:00:00Z', $out['installations']['attempted_at']);
-        self::assertSame([ 'code' => 'wporg_api_unavailable', 'message' => 'unavailable', 'at' => '2027-01-15T09:00:00Z' ], $out['installations']['last_error']);
-        self::assertSame(1000, $out['installations']['count']);
-        self::assertSame(977, $out['wporg_stats']['downloaded']);
-        self::assertSame('2027-01-15T08:00:00Z', $out['wporg_stats']['fetched_at']);
+        self::assertSame([ 'state' => 'ok', 'count' => 1000 ], $out['installations']);
+        self::assertSame([ 'downloaded' => 977, 'rating' => 100, 'num_ratings' => 4, 'closed' => null ], $out['wporg_stats']);
         self::assertSame([ 'checked_at' => '2027-01-15T08:00:00Z', 'error' => [ 'code' => 'svn_unreachable', 'message' => 'down', 'at' => '2027-01-15T09:00:00Z' ] ], $out['wporg_check']);
     }
 

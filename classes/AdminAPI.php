@@ -604,13 +604,13 @@ class AdminAPI {
 
     /**
      * Brings the client's wordpress.org plugins up to date, in two forms. Without `plugin_id`
-     * the automatic look: the due figures and the stamp check (refresh_wporg_directory(), the
-     * server alone decides what is due), and the SVN refresh of every marker whose stamp moved
-     * — tags, trunk readme, assets mirror. With `plugin_id` the editor's Refresh: that
-     * plugin's figures and its SVN refresh whatever the directory says, which lags SVN by
-     * wordpress.org's import. A marker's check completes with its SVN refresh; one that
-     * failed is recorded on the marker and shows through `wporg_check`, never as an error of
-     * this request — and what it changed before it failed is told all the same.
+     * the automatic look: the stamp check, whose listings bring every plugin's figures along
+     * (refresh_wporg_directory(); the server alone decides when it is due), and the SVN refresh
+     * of every marker whose stamp moved — tags, trunk readme, assets mirror. With `plugin_id`
+     * the editor's Refresh: that plugin's figures and its SVN refresh whatever the directory
+     * says, which lags SVN by wordpress.org's import. A marker's check completes with its SVN
+     * refresh; one that failed is recorded on the marker and shows through `wporg_check`, never
+     * as an error of this request — and what it changed before it failed is told all the same.
      *
      * Answers what the client then holds: `stats` — figures and check of every marker in
      * scope —, `plugins` — the list row of every marker that moved underneath the client's

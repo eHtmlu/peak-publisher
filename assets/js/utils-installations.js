@@ -63,7 +63,7 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
         const inst = plugin.installations;
         if (plugin.hosting_type !== 'wporg') {
             return inst.state === 'disabled'
-                ? { text: '—', title: __('Counting is disabled in Settings › Analytics', 'peak-publisher') }
+                ? { text: '—', title: __('Counting is disabled in Settings › Self-hosted', 'peak-publisher') }
                 : { text: String(inst.count), title: sprintf(_n('%d site checked for updates in the last 24 hours', '%d sites checked for updates in the last 24 hours', inst.count, 'peak-publisher'), inst.count) };
         }
         switch (inst.state) {

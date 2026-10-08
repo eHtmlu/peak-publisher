@@ -4,7 +4,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     const { useState, useEffect, createElement, createInterpolateElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, ToggleControl, TextControl, TextareaControl } = wp.components;
-    const { showAlert, getSvgIcon } = Pblsh.Utils;
+    const { showAlert, getSvgIcon, getChannelLabel, getChannelIcon } = Pblsh.Utils;
     const { WporgAccountForm, NoticeBox, ScrollFrame } = Pblsh.Components;
     const settingsController = window.Pblsh.Controllers.Settings;
 
@@ -20,7 +20,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         count_plugin_installations: false,
         standalone_redirect_url: '',
     });
-    const [currentSection, setCurrentSection] = useState('general');
+    const [currentPage, setCurrentPage] = useState('general');
     const [wporgAccountEditing, setWporgAccountEditing] = useState(false);
     // Avatar loading can fail (Gravatar blocked, offline admin) — an empty-avatar
     // placeholder (person icon in the avatar's round footprint) steps in then.
@@ -138,14 +138,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             ),
         );
     }
-    const sections = [
-        { id: 'general', title: __('General', 'peak-publisher'), icon: 'cog' },
-        { id: 'analytics', title: __('Analytics', 'peak-publisher'), icon: 'chart_line' },
-        { id: 'uploads', title: __('Uploads', 'peak-publisher'), icon: 'cloud_upload' },
-        { id: 'security', title: __('Security', 'peak-publisher'), icon: 'security' },
-        { id: 'wordpress-org', title: __('wordpress.org', 'peak-publisher'), icon: 'wordpress', separatorBefore: true },
-    ];
-
     // Tests the stored (masked) credentials against wordpress.org — the endpoint
     // records the verdict on the account. Success feedback is the badge jumping
     // to a fresh "Verified" time after the reload; failures alert their message.
@@ -281,152 +273,135 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         );
     };
 
-    const renderSection = () => {
-        if (currentSection === 'general') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('General', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(ToggleControl, {
-                            label: __('Standalone mode', 'peak-publisher'),
-                            help: [
-                                __('Attention: This disables the frontend, several admin menus and other features not needed for Peak Publisher. However, you can simply deactivate standalone mode again at any time, and everything will be back.', 'peak-publisher'),
-                            ],
-                            checked: settings.standalone_mode,
-                            onChange: (val) => setField('standalone_mode', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                        settings.standalone_mode ? createElement('div', {
-                                style: {
-                                    marginInlineStart: '40px',
-                                },
-                            },
-                            createElement(TextControl, {
-                                type: 'url',
-                                label: __('Frontend redirect URL', 'peak-publisher'),
-                                help: __('Leave blank to show a white page.', 'peak-publisher'),
-                                value: settings.standalone_redirect_url,
-                                placeholder: 'https://',
-                                onChange: (val) => setField('standalone_redirect_url', val),
-                                __next40pxDefaultSize: true,
-                            })
-                        ) : null,
-                        createElement('p', null, createElement('strong', null, __('Peak Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Peak Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'peak-publisher'))),
+    const renderSettingsSection = (title, ...content) => createElement('section', { className: 'pblsh--settings--main__section' },
+        createElement('h2', null, title),
+        createElement('div', { className: 'pblsh--settings--main__section-content' }, ...content),
+    );
+
+    const renderSiteSection = () => renderSettingsSection(__('Standalone mode', 'peak-publisher'),
+        createElement('p', null, createElement('strong', null, __('Peak Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Peak Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'peak-publisher'))),
+        createElement(ToggleControl, {
+            label: __('Standalone mode', 'peak-publisher'),
+            help: [
+                __('Attention: This disables the frontend, several admin menus and other features not needed for Peak Publisher. However, you can simply deactivate standalone mode again at any time, and everything will be back.', 'peak-publisher'),
+            ],
+            checked: settings.standalone_mode,
+            onChange: (val) => setField('standalone_mode', val),
+            __next40pxDefaultSize: true,
+        }),
+        settings.standalone_mode ? createElement('div', {
+                style: {
+                    marginInlineStart: '40px',
+                },
+            },
+            createElement(TextControl, {
+                type: 'url',
+                label: __('Frontend redirect URL', 'peak-publisher'),
+                help: __('Leave blank to show a white page.', 'peak-publisher'),
+                value: settings.standalone_redirect_url,
+                placeholder: 'https://',
+                onChange: (val) => setField('standalone_redirect_url', val),
+                __next40pxDefaultSize: true,
+            })
+        ) : null,
+    );
+
+    const renderUploadsSection = () => renderSettingsSection(__('Automatic cleanup of your uploads', 'peak-publisher'),
+        createElement(ToggleControl, {
+            label: __('Remove workspace artifacts', 'peak-publisher'),
+            help: [
+                __('Keeps your installation files small and clean by removing files and folders of your operating system and development environment.', 'peak-publisher'),
+            ],
+            checked: settings.auto_remove_workspace_artifacts,
+            onChange: (val) => setField('auto_remove_workspace_artifacts', val),
+            __next40pxDefaultSize: true,
+        }),
+        createElement('div', {
+                style: {
+                    marginInlineStart: '40px',
+                },
+            },
+            createElement(TextareaControl, {
+                label: __('Files and folders to remove', 'peak-publisher'),
+                help: [
+                    __('One file or folder name per line (no paths). Examples: .git, .svn', 'peak-publisher'),
+                    createElement('br', null),
+                    __('Use * to match any sequence of characters. Examples: *.bak, .env.*', 'peak-publisher'),
+                    createElement('br', null),
+                    createInterpolateElement(__('For more special patterns check out the <a>PHP fnmatch documentation</a>.', 'peak-publisher'),
+                        {
+                            a: createElement('a', { href: 'https://www.php.net/manual/en/function.fnmatch.php', target: '_blank', rel: 'noreferrer' }),
+                        }
                     ),
-                ),
-            );
-        }
-        if (currentSection === 'analytics') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Analytics', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(ToggleControl, {
-                            label: __('Count installations', 'peak-publisher'),
-                            help: [
-                                __('Counts unique plugin installations based on update checks. For technical reasons, there is always a delay of up to 24 hours in the displayed number of installations.', 'peak-publisher'),
-                            ],
-                            checked: !!settings.count_plugin_installations,
-                            onChange: (val) => setField('count_plugin_installations', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                    ),
-                ),
-            );
-        }
-        if (currentSection === 'uploads') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Automatic cleanup of your uploads', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(ToggleControl, {
-                            label: __('Remove workspace artifacts', 'peak-publisher'),
-                            help: [
-                                __('Keeps your installation files small and clean by removing files and folders of your operating system and development environment.', 'peak-publisher'),
-                            ],
-                            checked: settings.auto_remove_workspace_artifacts,
-                            onChange: (val) => setField('auto_remove_workspace_artifacts', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                        createElement('div', {
-                                style: {
-                                    marginInlineStart: '40px',
-                                },
-                            },
-                            createElement(TextareaControl, {
-                                label: __('Files and folders to remove', 'peak-publisher'),
-                                help: [
-                                    __('One file or folder name per line (no paths). Examples: .git, .svn', 'peak-publisher'),
-                                    createElement('br', null),
-                                    __('Use * to match any sequence of characters. Examples: *.bak, .env.*', 'peak-publisher'),
-                                    createElement('br', null),
-                                    createInterpolateElement(__('For more special patterns check out the <a>PHP fnmatch documentation</a>.', 'peak-publisher'),
-                                        {
-                                            a: createElement('a', { href: 'https://www.php.net/manual/en/function.fnmatch.php', target: '_blank', rel: 'noreferrer' }),
-                                        }
-                                    ),
-                                ],
-                                value: settings.wordspace_artifacts_to_remove,
-                                onChange: (val) => setField('wordspace_artifacts_to_remove', val),
-                                rows: 6,
-                                __next40pxDefaultSize: true,
-                            })
-                        ),
-                    ),
-                ),
-            );
-        }
-        if (currentSection === 'security') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Restrict access to the plugins', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(TextareaControl, {
-                            label: __('Whitelist of allowed IP addresses or domain names (one per line)', 'peak-publisher'),
-                            help: [
-                                createElement('strong', null, __('SECURITY NOTICE:', 'peak-publisher')),
-                                ' ',
-                                __('Domain names are resolved to the IP address, and only the IP address can be reliably verified. So, there is a risk that a website on the same server could pretend to be the legitimate website. Never store sensitive data directly in the plugin files.', 'peak-publisher'),
-                                //createElement('br', null),
-                                //createElement('br', null),
-                                //__('CIDR notation is also allowed (e.g. 192.168.1.0/24)', 'peak-publisher'),
-                            ],
-                            value: settings.ip_whitelist,
-                            placeholder: __('Leave blank to allow access from anywhere', 'peak-publisher'),
-                            onChange: (val) => setField('ip_whitelist', val),
-                            rows: 6,
-                            __next40pxDefaultSize: true,
-                        })
-                    ),
-                ),
-            );
-        }
-        if (currentSection === 'wordpress-org') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('wordpress.org', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        renderWporgAccountCard(),
-                    )
-                )
-            );
-        }
-        return null;
-    };
+                ],
+                value: settings.wordspace_artifacts_to_remove,
+                onChange: (val) => setField('wordspace_artifacts_to_remove', val),
+                rows: 6,
+                __next40pxDefaultSize: true,
+            })
+        ),
+    );
+
+    const renderAccountSection = () => renderSettingsSection(__('Account', 'peak-publisher'),
+        renderWporgAccountCard(),
+    );
+
+    const renderAnalyticsSection = () => renderSettingsSection(__('Analytics', 'peak-publisher'),
+        createElement(ToggleControl, {
+            label: __('Count installations', 'peak-publisher'),
+            help: [
+                __('Counts unique plugin installations based on update checks. For technical reasons, there is always a delay of up to 24 hours in the displayed number of installations.', 'peak-publisher'),
+            ],
+            checked: !!settings.count_plugin_installations,
+            onChange: (val) => setField('count_plugin_installations', val),
+            __next40pxDefaultSize: true,
+        }),
+    );
+
+    const renderAccessSection = () => renderSettingsSection(__('Restrict access to the plugins', 'peak-publisher'),
+        createElement(TextareaControl, {
+            label: __('Whitelist of allowed IP addresses or domain names (one per line)', 'peak-publisher'),
+            help: [
+                createElement('strong', null, __('SECURITY NOTICE:', 'peak-publisher')),
+                ' ',
+                __('Domain names are resolved to the IP address, and only the IP address can be reliably verified. So, there is a risk that a website on the same server could pretend to be the legitimate website. Never store sensitive data directly in the plugin files.', 'peak-publisher'),
+                //createElement('br', null),
+                //createElement('br', null),
+                //__('CIDR notation is also allowed (e.g. 192.168.1.0/24)', 'peak-publisher'),
+            ],
+            value: settings.ip_whitelist,
+            placeholder: __('Leave blank to allow access from anywhere', 'peak-publisher'),
+            onChange: (val) => setField('ip_whitelist', val),
+            rows: 6,
+            __next40pxDefaultSize: true,
+        }),
+    );
+
+    // The settings pages: the sidebar lists them, the main area stacks the current
+    // page's sections. The settings of the whole installation come first, then one
+    // page per channel in the channels' display order, named and iconed from the
+    // channel vocabulary — a setting that concerns one channel alone sits on that
+    // channel's page, so the structure states its scope and no help text has to.
+    const pages = [
+        { id: 'general', title: __('General', 'peak-publisher'), icon: 'cog', sections: [renderSiteSection] },
+        { id: 'uploads', title: __('Uploads', 'peak-publisher'), icon: 'cloud_upload', sections: [renderUploadsSection] },
+        { id: 'wporg', title: getChannelLabel('wporg'), icon: getChannelIcon('wporg'), separatorBefore: true, sections: [renderAccountSection] },
+        { id: 'self_hosted', title: getChannelLabel('self_hosted'), icon: getChannelIcon('self_hosted'), sections: [renderAnalyticsSection, renderAccessSection] },
+    ];
 
     return createElement('div', { className: 'pblsh--settings' },
         createElement('div', { className: 'pblsh--settings__inner' },
             createElement('div', { className: 'pblsh--settings--sidebar' },
                 createElement('div', { className: 'pblsh--settings--sidebar__nav' },
-                    sections.map(section =>
-                        createElement(wp.element.Fragment, { key: section.id },
-                            section.separatorBefore ? createElement('div', { className: 'pblsh--settings--sidebar__nav-separator' }) : null,
+                    pages.map(page =>
+                        createElement(wp.element.Fragment, { key: page.id },
+                            page.separatorBefore ? createElement('div', { className: 'pblsh--settings--sidebar__nav-separator' }) : null,
                             createElement('div', {
-                                className: `pblsh--settings--sidebar__nav-item ${currentSection === section.id ? 'pblsh--settings--sidebar__nav-item--active' : ''}`,
-                                onClick: () => setCurrentSection(section.id)
+                                className: `pblsh--settings--sidebar__nav-item ${currentPage === page.id ? 'pblsh--settings--sidebar__nav-item--active' : ''}`,
+                                onClick: () => setCurrentPage(page.id)
                             },
-                                Pblsh.Utils.getSvgIcon(section.icon),
-                                createElement('span', { className: 'pblsh--settings--sidebar__nav-title' }, section.title)
+                                getSvgIcon(page.icon),
+                                createElement('span', { className: 'pblsh--settings--sidebar__nav-title' }, page.title)
                             )
                         )
                     )
@@ -435,7 +410,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             createElement('div', { className: 'pblsh--settings--main' },
                 createElement('div', { className: 'pblsh--settings--main__inner' },
                     createElement(ScrollFrame, { className: 'pblsh--settings--main__frame', scrollerClassName: 'pblsh--settings--main__content' },
-                        renderSection()
+                        ...pages.find((page) => page.id === currentPage).sections.map((renderSection) => renderSection()),
                     ),
                     createElement('section', { className: 'pblsh--settings--main__section pblsh--settings--main__section--buttons' },
                         createElement('div', { className: 'pblsh--settings--main__section-content pblsh--settings--main__section-content--buttons' },

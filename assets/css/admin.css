@@ -2625,7 +2625,6 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 /* Released Column: when a release was published — in the plugin list the current one. */
 .pblsh--table__released-header,
 .pblsh--table__released-cell {
-    width: 8.75rem; /* 140px */
     white-space: nowrap;
 }
 

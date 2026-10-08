@@ -2400,21 +2400,74 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin: 1em 0 0.25em;
 }
 
-/* Main Header - Always visible */
+/* The page header (AdminUI::render_peak_publisher()): title and actions in one row, white
+   across the content area and held right below the admin bar while the page scrolls — below
+   600px the admin bar scrolls away (WordPress makes it absolute there), and so does the header.
+   Below it, --pblsh-sticky-top is where content sticking under the header stops, and focus and
+   jumps with it. Full width by undoing #wpcontent's left padding; its own padding aligns title
+   and actions with .wrap's content below. Above the content (the assets bar), below the admin
+   menu's flyouts (z-index 9990) and the upload overlay. */
+:root:has(#pblsh-header) {
+    --pblsh-header-height: 3.75rem; /* 60px */
+    --pblsh-sticky-top: calc(var(--wp-admin--admin-bar--height, 32px) + var(--pblsh-header-height));
+    scroll-padding-top: var(--pblsh-sticky-top);
+}
+
 .pblsh--header {
+    position: sticky;
+    top: var(--wp-admin--admin-bar--height, 32px);
+    z-index: 100;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.875rem; /* 30px */
-    padding-top: 2.5rem; /* 40px */
-    padding-bottom: 1.25rem; /* 20px */
+    gap: 1rem;
+    box-sizing: border-box;
+    height: var(--pblsh-header-height);
+    margin: 0 0 1.875rem -20px; /* the content's distance below; #wpcontent's left padding */
+    padding: 0 20px 0 22px; /* .wrap's margins: 20px right, 2px left on top of the padding */
+    background: #fff;
     border-bottom: 1px solid var(--border-color-medium);
 }
 
+@media (max-width: 48.875rem) { /* 782px — WordPress's narrower content padding and .wrap margins */
+    .pblsh--header {
+        margin-left: -10px;
+        padding: 0 12px 0 10px;
+    }
+}
+
+@media (max-width: 37.5rem) { /* 600px — the admin bar scrolls with the page, the header too */
+    :root:has(#pblsh-header) {
+        --pblsh-sticky-top: var(--wp-admin--admin-bar--height);
+    }
+    .pblsh--header {
+        position: static;
+        flex-wrap: wrap;
+        height: auto;
+        min-height: var(--pblsh-header-height);
+        padding-block: 0.625rem;
+    }
+}
+
+/* WordPress's marker for admin notices (AdminUI::render_peak_publisher()) only anchors where
+   WordPress moves them; out of the flow, it does not keep the header's distance from the
+   content apart from the first element's own margin. */
+.pblsh-app .wp-header-end {
+    display: none;
+}
+
+/* A page title, outside .wrap — sized like the admin's own; a long one is cut, not wrapped. */
 .pblsh--header__title {
+    min-width: 0;
     margin: 0;
-    font-size: 1.8em;
-    color: #23282d;
+    padding: 0;
+    font-size: 1.4375rem; /* 23px — the admin page-title size */
+    font-weight: 600;
+    line-height: 1.3;
+    color: #1d2327;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .pblsh--header__actions {
@@ -3531,12 +3584,6 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
         flex: 1;
     }
 
-    .pblsh--header {
-        flex-direction: column;
-        gap: 0.9375rem; /* 15px */
-        align-items: stretch;
-    }
-    
     .pblsh--table__actions {
         flex-direction: column;
     }
@@ -3891,11 +3938,12 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 
 /* wordpress.org: the bar above the groups — the working copy's changes on the left and what
    to do with them on the right, or the commit under way; wraps on narrow screens. It sticks
-   below the admin bar while the groups scroll under it, within its card: what is not committed
-   stays in view as long as the assets do. The same blue tint as the bands and the info box. */
+   below the page header while the groups scroll under it, within its card: what is not
+   committed stays in view as long as the assets do. The same blue tint as the bands and the
+   info box. */
 .pblsh--assets-bar {
     position: sticky;
-    top: calc(var(--wp-admin--admin-bar--height, 32px) - 1px);
+    top: calc(var(--pblsh-sticky-top) - 1px);
     z-index: 1;
     display: flex;
     flex-wrap: wrap;

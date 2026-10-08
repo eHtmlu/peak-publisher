@@ -6,8 +6,8 @@ defined('ABSPATH') || exit;
 
 
 /**
- * The admin page: registers the Peak Publisher menu entry, renders the mount point of the
- * single-page app (#pblsh-app) and enqueues its scripts and styles — the JS files one by one
+ * The admin page: registers the Peak Publisher menu entry, renders the mount points of the
+ * single-page app (#pblsh-header, #pblsh-app) and enqueues its scripts and styles — the JS files one by one
  * in load order ($script_files; there is no bundler), with PblshData carrying the server's
  * facts for the app. Loaded for admin requests only; everything the app does afterwards goes
  * through AdminAPI.
@@ -52,10 +52,15 @@ class AdminUI {
     }
 
     /**
-     * Render Peak Publisher page.
+     * Renders the page's places: the header (#pblsh-header), which the app fills through a
+     * portal and which sticks below the admin bar — itself the sticky element, so it can stick
+     * across the whole page —, and the admin's .wrap with WordPress's marker for admin notices,
+     * which WordPress moves right after it — below the header, aligned with the app's content;
+     * the app puts the notices WordPress leaves above the page right before it —, and the app. The outer .pblsh-app is the scope of the app's variables and base styles for
+     * both.
      */
     public function render_peak_publisher(): void {
-        echo '<div class="wrap"><div id="pblsh-app" class="pblsh-app"></div></div>';
+        echo '<div class="pblsh-app"><header id="pblsh-header" class="pblsh--header"></header><div class="wrap"><hr class="wp-header-end"><div id="pblsh-app"></div></div></div>';
     }
 
     /**

@@ -3,18 +3,30 @@ document.addEventListener('DOMContentLoaded', function() {
     'use strict';
     
     const { __, sprintf } = wp.i18n;
-    const { useState, useEffect, useRef, createElement, render } = wp.element;
+    const { useState, useEffect, useRef, createElement, createPortal, Fragment, render } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
     const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog, UpgradeNotice, NoticeBox } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
 
+    // The page's header place (AdminUI::render_peak_publisher()): every view renders its
+    // title and actions into it through a portal — the place itself sticks below the admin bar.
+    const headerPlace = document.getElementById('pblsh-header');
+
+    // Notices WordPress leaves above the page — its mover (common.js) skips those marked
+    // "inline", the core update nag among them — go right before its marker at the top of
+    // .wrap: the header attaches to the admin bar, and they lead the notices WordPress moves
+    // after the marker. Before it, not after: whichever of the two movers runs first, the order
+    // comes out the same.
+    document.querySelector('.pblsh-app .wp-header-end').before(...document.querySelectorAll('#wpbody-content > :is(div.updated, div.error, div.notice)'));
+
     // Permalink check — shown instead of the app when permalinks are set to "Plain"
     const PermalinkNotice = () => {
         const { permalinkPlain, permalinkDayAndName } = PblshData.i18n;
-        return createElement('div', { className: 'pblsh-app' },
-            createElement('div', { className: 'pblsh--header' },
-                createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher'))
+        return createElement(Fragment, null,
+            createPortal(
+                createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
+                headerPlace
             ),
             createElement('div', { className: 'pblsh--permalink-notice' },
                 createElement('div', { className: 'pblsh--permalink-notice__icon' },
@@ -296,11 +308,11 @@ document.addEventListener('DOMContentLoaded', function() {
             try { if (dlg.open) dlg.close(); } catch (e) {}
         };
 
-        // Render header based on current view
+        // The header's title and actions for the current view — rendered into the header place.
         const renderHeader = () => {
             if (view === 'addition-process') {
-                return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, 
+                return createElement(Fragment, null,
+                    createElement('h1', { className: 'pblsh--header__title' },
                         __('Peak Publisher', 'peak-publisher'),
                         ' - ',
                         __('Add New Plugin', 'peak-publisher')
@@ -316,8 +328,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 );
             }
             else if (view === 'editor') {
-                return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
+                return createElement(Fragment, null,
+                    createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--header__actions' },
                         createElement(Button, {
                             isPrimary: true,
@@ -335,8 +347,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     )
                 );
             } else {
-                return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
+                return createElement(Fragment, null,
+                    createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
                     createElement('div', { className: 'pblsh--header__actions' },
                         createElement(Button, {
                             isPrimary: true,
@@ -442,12 +454,12 @@ document.addEventListener('DOMContentLoaded', function() {
             ); */
         };
 
-        return createElement('div', { className: 'pblsh-app' },
+        return createElement(Fragment, null,
             // Global drop overlay (always mounted)
             createElement(GlobalDropOverlay, { onCreated: handleCreated, activeUploadContext }),
 
-            // Header (always visible)
-            renderHeader(),
+            // Header (always visible), in the page's header place
+            createPortal(renderHeader(), headerPlace),
 
             // Main content (with loading state)
             renderMainContent(),

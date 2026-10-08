@@ -2622,6 +2622,18 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     max-width: 1px;
 }
 
+/* Last Updated Column: when the current release was published. */
+.pblsh--table__updated-header,
+.pblsh--table__updated-cell {
+    width: 8.75rem; /* 140px */
+    white-space: nowrap;
+}
+
+.pblsh--table__updated-cell {
+    color: #666;
+    font-size: 0.875rem; /* 14px */
+}
+
 /* Current version (list cell, editor header): the version, or what sites get
    instead, with a state glyph whose tooltip explains it (CurrentVersion.js) */
 .pblsh--current-version {
@@ -2889,7 +2901,8 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
         min-width: 10.25rem; /* 164px */
         font-size: 0.8125rem; /* 13px */
     }
-    .pblsh--table__version-cell {
+    .pblsh--table__version-cell,
+    .pblsh--table__updated-cell {
         font-size: 0.75rem; /* 12px */
     }
     .pblsh--table__actions {

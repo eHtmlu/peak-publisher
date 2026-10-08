@@ -4,7 +4,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
-    const { showAlert, getSvgIcon, getPluginStatus } = Pblsh.Utils;
+    const { showAlert, getSvgIcon, getPluginStatus, getTimeTooltipProps, formatRelativeTime } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus } = Pblsh.Components;
     const { getCheck } = Pblsh.WporgCheckUtils;
     //const { exportPlugin } = Pblsh.API;
@@ -80,6 +80,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                         createElement('tr', null,
                             createElement('th', { className: 'pblsh--table__plugin-header' }, __('Plugin', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__updated-header' }, __('Last updated', 'peak-publisher')),
                             showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher'))
                         )
@@ -109,6 +110,13 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                 ),
                                 createElement('td', { className: 'pblsh--table__version-cell' },
                                     createElement(CurrentVersion, { plugin })
+                                ),
+                                // When the current release was published — relative, the exact moment as the
+                                // time element's tooltip; nothing to date without a current release.
+                                createElement('td', { className: 'pblsh--table__updated-cell' },
+                                    plugin.last_updated
+                                        ? createElement('time', getTimeTooltipProps(plugin.last_updated), formatRelativeTime(plugin.last_updated))
+                                        : '—'
                                 ),
                                 showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' },
                                     createElement(InstallationsCount, { plugin })

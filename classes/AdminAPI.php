@@ -276,6 +276,8 @@ class AdminAPI {
     /**
      * Serialize a plugin post for admin REST responses. `version` is the current release —
      * the one sites receive — `latest_version` the highest; both null when absent.
+     * `last_updated` is when the current release was published (the moment the public
+     * info API reports as last_updated), null without one.
      * `installations` is the channel's figure with its state (self-hosted the exact
      * 24-hour count or 'disabled', wordpress.org the cached public figure), `wporg_stats`
      * the wordpress.org dashboard figures, `wporg_check` and `wporg_token` the state of the
@@ -302,6 +304,7 @@ class AdminAPI {
             // the meta value) — shown as the mechanics line and sent back as the expected
             // value of a flip.
             'pointer' => $current['pointer'],
+            'last_updated' => $current['release'] instanceof \WP_Post ? gmdate('Y-m-d\TH:i:s\Z', strtotime($current['release']->post_date_gmt . ' UTC')) : null,
             // The distribution switch: self-hosted the post status, wordpress.org the
             // directory's verdict — 'closed' there means nothing is distributed.
             'status' => !$is_self_hosted && $wporg_directory['wporg_stats']['closed'] !== null ? 'closed' : $post->post_status,

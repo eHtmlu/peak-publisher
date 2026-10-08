@@ -8,7 +8,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
     const { getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
     const { getChangesText } = Pblsh.WporgCheckUtils;
-    const { NoticeBox, CurrentVersion, InstallationsCount, Figure, WporgCheckStatus, WporgRevisionLink } = Pblsh.Components;
+    const { NoticeBox, CurrentVersion, InstallationsCount, Figure, WporgCheckStatus, WporgRevisionLink, RelativeTime } = Pblsh.Components;
 
     const safe = (val) => (val === undefined || val === null) ? '' : val;
     const isWporg = pluginData && pluginData.hosting_type === 'wporg';
@@ -287,7 +287,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('tr', null,
                             createElement('th', { className: 'pblsh--table__current-header' }, __('Current', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
-                            createElement('th', null, __('Date', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__released-header' }, __('Released', 'peak-publisher')),
                             showReleaseInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher')),
                         ),
@@ -332,7 +332,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                 ),
                                     ),
                                     createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.version)),
-                                    createElement('td', null, safe(rel.date)),
+                                    createElement('td', { className: 'pblsh--table__released-cell' }, createElement(RelativeTime, { value: rel.released_at, tooltip: true })),
                                     showReleaseInstallations && createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
                                     createElement('td', { className: 'pblsh--table__actions-cell' },
                                         createElement('div', { className: 'pblsh--table__actions' },

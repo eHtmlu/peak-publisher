@@ -80,7 +80,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                         createElement('tr', null,
                             createElement('th', { className: 'pblsh--table__plugin-header' }, __('Plugin', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
-                            createElement('th', { className: 'pblsh--table__updated-header' }, __('Last updated', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__released-header' }, __('Released', 'peak-publisher')),
                             showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher'))
                         )
@@ -112,8 +112,8 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                     createElement(CurrentVersion, { plugin })
                                 ),
                                 // When the current release was published; nothing to date without one.
-                                createElement('td', { className: 'pblsh--table__updated-cell' },
-                                    plugin.last_updated ? createElement(RelativeTime, { value: plugin.last_updated, tooltip: true }) : '—'
+                                createElement('td', { className: 'pblsh--table__released-cell' },
+                                    plugin.released_at ? createElement(RelativeTime, { value: plugin.released_at, tooltip: true }) : '—'
                                 ),
                                 showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' },
                                     createElement(InstallationsCount, { plugin })

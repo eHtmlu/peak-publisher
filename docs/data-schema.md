@@ -13,7 +13,10 @@ code in this repository creates today:
   cache `{revision, release_count, fetched_at, trunk_readme}`), `pblsh_release` (child of the
   plugin, `post_title` = version, `post_name` from `get_release_slug()`; `post_content` = for
   self-hosted the upload state `$data` of finalize, for wporg the tag snapshot
-  `{tag_revision, plugin_data, plugin_info, plugin_readme_txt}`; status always `publish`).
+  `{tag_revision, plugin_data, plugin_info, plugin_readme_txt}`; `post_date` = when the version
+  was first published: self-hosted the upload, kept by a Replace; wporg the first creation of
+  its tag in SVN (`wporg_tag_publication_times()`), kept on every later change of the tag;
+  status always `publish`).
 - **Post meta:** plugin `_pblsh_current_release` (version string of the current release, `''` =
   none; written only by finalize, the flip and the migration), the assets manifest
   `assets_icons` / `assets_banners` / `assets_screenshots` (keyed by filename, one entry per

@@ -931,38 +931,39 @@ class WporgPluginSvnClient {
     }
 
     /**
-     * The path's log as items — a log REPORT from the node's last-changed revision downward
-     * (newest first) or from revision 0 upward, $limit items, with the changed paths when
-     * asked: revision, SVN's date string, author, message, and the paths with their action
-     * A|M|D|R. The one place that builds and reads a log report. Empty when the node does not
-     * exist.
+     * The path's log as items — a log REPORT newest first (down to revision 0) or oldest first
+     * (up from revision 0), $limit items or the whole history (null), with the changed paths
+     * when asked: revision, SVN's date string, author, message, and the paths with their action
+     * A|M|D|R. No revision number has to be read first: the omitted end of the range is the
+     * server's newest revision (the text "HEAD" would be read as 0). $date_only asks for the
+     * date alone among the revision properties, which keeps a long history small; author and
+     * message are empty then. The one place that builds and reads a log report. Empty when the
+     * node does not exist.
      *
      * @return array<int, array{revision:int, date:string, author:string, message:string, paths:array<string, string>}>
      * @throws WporgSvnException svn_read_failed for an unexpected log response; transport errors as they are
      */
-    private function log_items(string $path, int $limit, bool $newest_first, bool $with_paths): array {
+    private function log_items(string $path, ?int $limit, bool $newest_first, bool $with_paths, bool $date_only = false): array {
         $path = trim($path, '/');
-        if ($path === '' || $limit < 1) {
+        if ($path === '' || ($limit !== null && $limit < 1)) {
             throw new \RuntimeException('invalid_svn_log_request');
         }
         $root_path = $path . '/';
-        // The log report needs numeric revisions — the node's last-changed revision stands in for HEAD.
-        $head = $this->first_prop((string) ($this->propfind($root_path, 0)['body'] ?? ''), 'version-name');
-        if ($head === '' || !ctype_digit($head)) {
-            return [];
-        }
 
-        [ $start, $end ] = $newest_first ? [ $head, '0' ] : [ '0', $head ];
         $body = '<?xml version="1.0" encoding="utf-8"?>' .
             '<S:log-report xmlns:S="svn:">' .
-            '<S:start-revision>' . $start . '</S:start-revision>' .
-            '<S:end-revision>' . $end . '</S:end-revision>' .
-            '<S:limit>' . $limit . '</S:limit>' .
+            ($newest_first ? '<S:end-revision>0</S:end-revision>' : '<S:start-revision>0</S:start-revision>') .
+            ($limit !== null ? '<S:limit>' . $limit . '</S:limit>' : '') .
             ($with_paths ? '<S:discover-changed-paths/>' : '') .
+            ($date_only ? '<S:revprop>svn:date</S:revprop>' : '') .
             '<S:path></S:path>' .
             '</S:log-report>';
         $report = $this->request('REPORT', $root_path, [ 'Content-Type' => 'text/xml; charset=utf-8' ], $body);
-        if (!$this->is_success_status((int) ($report['status'] ?? 0))) {
+        $status = (int) ($report['status'] ?? 0);
+        if ($status === 404) {
+            return [];
+        }
+        if (!$this->is_success_status($status)) {
             throw new WporgSvnException('svn_read_failed', __('wordpress.org SVN returned an unexpected log response.', 'peak-publisher'), 502);
         }
 
@@ -1006,20 +1007,20 @@ class WporgPluginSvnClient {
     }
 
     /**
-     * The path's last $limit log entries with their changed paths — what wordpress.org's SVN
-     * watcher reads to schedule imports. Paths are repository-absolute
-     * (/slug/trunk/readme.txt), the action A|M|D|R. Newest first; empty when the node does
-     * not exist.
+     * The path's last $limit log entries, or its whole history (null), with their changed
+     * paths — what wordpress.org's SVN watcher reads to schedule imports, and what dates the
+     * tags. Paths are repository-absolute (/slug/trunk/readme.txt), the action A|M|D|R. Newest
+     * first; empty when the node does not exist.
      *
      * @return array<int, array{revision:int, time:int, paths:array<string, string>}>
      * @throws WporgSvnException svn_read_failed for an unexpected log response; transport errors as they are
      */
-    public function get_log_entries(string $path, int $limit): array {
+    public function get_log_entries(string $path, ?int $limit): array {
         return array_map(static fn(array $item): array => [
             'revision' => $item['revision'],
             'time' => (int) strtotime($item['date']),
             'paths' => $item['paths'],
-        ], $this->log_items($path, $limit, true, true));
+        ], $this->log_items($path, $limit, true, true, true));
     }
 
     /**

@@ -240,6 +240,12 @@ namespace {
         return $value;
     }
 
+    /** WordPress's sanitize_title_with_dashes() for ASCII input: lowercase, only a-z 0-9 _ -, spaces as dashes. */
+    function sanitize_title(string $title): string {
+        $title = preg_replace('/[^a-z0-9 _-]/', '', strtolower(strip_tags($title))) ?? '';
+        return trim(preg_replace('/-+/', '-', str_replace(' ', '-', $title)) ?? '', '-');
+    }
+
     function sanitize_file_name(string $filename): string {
         return preg_replace('/[^A-Za-z0-9._-]/', '-', basename($filename));
     }
@@ -271,6 +277,11 @@ namespace {
 
     function wp_json_encode($data, int $flags = 0, int $depth = 512) {
         return json_encode($data, $flags, $depth);
+    }
+
+    /** The fake site's timezone is UTC: the local time is the GMT time. */
+    function get_date_from_gmt(string $date_string, string $format = 'Y-m-d H:i:s'): string {
+        return gmdate($format, (int) strtotime($date_string . ' UTC'));
     }
 
     /**

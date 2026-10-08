@@ -258,6 +258,8 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
         }
     }
 
+    // The tags' first creations — read once, and only when a release post is created.
+    $publication_times = null;
     foreach ($tags_by_version as $version => $tag) {
         $existing = $existing_by_version[$version] ?? null;
         $current_tag_revision = (int) ($tag['revision'] ?? 0);
@@ -269,16 +271,17 @@ function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null
             continue;
         }
 
-        $tag_data = WporgOperations::fetch_tag_data($plugin_post->post_name, $version);
-        $result = wporg_upsert_release_post_from_wporg_tag($plugin_post, $version, $tag, $tag_data, $existing);
-        if (is_wp_error($result)) {
-            throw new \RuntimeException($result->get_error_message());
-        }
-
+        $snapshot = wporg_release_snapshot($tag, WporgOperations::fetch_tag_data($plugin_post->post_name, $version));
         if ($existing instanceof \WP_Post) {
+            $result = wporg_update_release_post($existing, $snapshot);
             $summary['updated']++;
         } else {
+            $publication_times ??= wporg_tag_publication_times(WporgOperations::fetch_tags_log($plugin_post->post_name), $plugin_post->post_name);
+            $result = wporg_create_release_post($plugin_post, $version, $snapshot, wporg_tag_publication_time($publication_times, $tag));
             $summary['created']++;
+        }
+        if (is_wp_error($result)) {
+            throw new \RuntimeException($result->get_error_message());
         }
     }
 
@@ -329,6 +332,7 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
             }
         }
         $tag_data_by_version = WporgOperations::fetch_tags_data_batch($wporg_slug, $versions);
+        $publication_times = wporg_tag_publication_times(WporgOperations::fetch_tags_log($wporg_slug), $wporg_slug);
     } catch (\Throwable $e) {
         return new \WP_Error(
             'access_check_failed',
@@ -355,14 +359,10 @@ function fetch_wporg_import_cache_bundle(string $wporg_slug) {
             continue;
         }
 
-        $tag_data = $tag_data_by_version[$version] ?? [];
         $releases[] = [
             'version' => $version,
-            'tag_revision' => (int) ($tag['revision'] ?? 0),
-            'date' => (string) ($tag['date'] ?? ''),
-            'plugin_data' => $tag_data['plugin_data'] ?? null,
-            'plugin_info' => $tag_data['plugin_info'] ?? null,
-            'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? default_plugin_readme_txt_data(),
+            'snapshot' => wporg_release_snapshot($tag, $tag_data_by_version[$version] ?? []),
+            'published_at' => wporg_tag_publication_time($publication_times, $tag),
         ];
     }
 
@@ -464,27 +464,7 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
                 continue;
             }
 
-            $content = wp_json_encode([
-                'tag_revision' => (int) ($release['tag_revision'] ?? 0),
-                'plugin_data' => $release['plugin_data'] ?? null,
-                'plugin_info' => $release['plugin_info'] ?? null,
-                'plugin_readme_txt' => $release['plugin_readme_txt'] ?? default_plugin_readme_txt_data(),
-            ]);
-            if (!is_string($content)) {
-                throw new \RuntimeException('wporg_import_release_encode_failed');
-            }
-
-            [$post_date, $post_date_gmt] = wporg_svn_date_to_post_dates((string) ($release['date'] ?? ''));
-            $release_id = wp_insert_post([
-                'post_type' => 'pblsh_release',
-                'post_status' => 'publish',
-                'post_parent' => $created_marker_id,
-                'post_title' => $version,
-                'post_name' => get_release_slug('wporg', $wporg_slug, $version),
-                'post_content' => wp_slash($content),
-                'post_date' => $post_date,
-                'post_date_gmt' => $post_date_gmt,
-            ], true);
+            $release_id = wporg_create_release_post($marker, $version, $release['snapshot'], $release['published_at']);
             if (is_wp_error($release_id)) {
                 throw new \RuntimeException($release_id->get_error_message());
             }
@@ -561,10 +541,15 @@ function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version
             );
         }
 
-        // Upsert the local release mirror for that tag
-        $tag_data = WporgOperations::fetch_tag_data($plugin_post->post_name, $version);
+        // Write the local release mirror for that tag: an overwritten tag keeps its date.
+        $snapshot = wporg_release_snapshot($tag, WporgOperations::fetch_tag_data($plugin_post->post_name, $version));
         $existing = wporg_find_release_post_by_version((int) $plugin_post->ID, $version);
-        $release_id = wporg_upsert_release_post_from_wporg_tag($plugin_post, $version, $tag, $tag_data, $existing);
+        if ($existing instanceof \WP_Post) {
+            $release_id = wporg_update_release_post($existing, $snapshot);
+        } else {
+            $publication_times = wporg_tag_publication_times(WporgOperations::fetch_tags_log($plugin_post->post_name), $plugin_post->post_name);
+            $release_id = wporg_create_release_post($plugin_post, $version, $snapshot, wporg_tag_publication_time($publication_times, $tag));
+        }
 
         if (is_wp_error($release_id)) {
             return $release_id;
@@ -648,46 +633,102 @@ function wporg_find_release_post_by_version(int $plugin_id, string $version): ?\
 }
 
 
-function wporg_upsert_release_post_from_wporg_tag(
-    \WP_Post $plugin_post,
-    string $version,
-    array $tag,
-    array $tag_data,
-    ?\WP_Post $existing = null
-) {
-    // Encode the wporg release snapshot stored in post_content
-    $content = wp_json_encode([
+/**
+ * When each tag was first created, by version (Unix time). A version is published once:
+ * overwriting its tag, replacing it, or deleting and creating it anew later corrects the same
+ * version and keeps its date. A tag is created where its own directory is added or replaced;
+ * the oldest such commit counts. $log_entries is the history of tags/
+ * (WporgOperations::fetch_tags_log()), its paths repository-absolute.
+ *
+ * @return array<string, int>
+ */
+function wporg_tag_publication_times(array $log_entries, string $wporg_slug): array {
+    $prefix = '/' . $wporg_slug . '/tags/';
+    $times = [];
+    foreach ($log_entries as $entry) {
+        foreach ($entry['paths'] as $path => $action) {
+            if (($action !== 'A' && $action !== 'R') || !str_starts_with($path, $prefix)) {
+                continue;
+            }
+            $version = substr($path, strlen($prefix));
+            if ($version === '' || str_contains($version, '/')) {
+                continue;
+            }
+            $times[$version] = min($times[$version] ?? PHP_INT_MAX, $entry['time']);
+        }
+    }
+    return $times;
+}
+
+
+/**
+ * The publication of a listed tag (WporgOperations::list_tags()): its first creation from
+ * wporg_tag_publication_times(). Deliberate exception: a tag whose own creation the history
+ * does not show, because it arrived inside a copied parent directory, is dated by its last
+ * change, the only date SVN names for it.
+ */
+function wporg_tag_publication_time(array $publication_times, array $tag): int {
+    return $publication_times[$tag['version']] ?? (int) strtotime($tag['last_modified']);
+}
+
+
+/** The release post's content: the tag snapshot, regenerable from SVN. */
+function wporg_release_snapshot(array $tag, array $tag_data): array {
+    return [
         'tag_revision' => (int) ($tag['revision'] ?? 0),
         'plugin_data' => $tag_data['plugin_data'] ?? null,
         'plugin_info' => $tag_data['plugin_info'] ?? null,
         'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? default_plugin_readme_txt_data(),
-    ]);
+    ];
+}
+
+
+/**
+ * Creates the release post of a wordpress.org tag, dated by the release's publication
+ * (wporg_tag_publication_time()) — the one moment its date is written: an update keeps it.
+ *
+ * @return int|\WP_Error
+ */
+function wporg_create_release_post(\WP_Post $marker, string $version, array $snapshot, int $published_at) {
+    $post_date_gmt = gmdate('Y-m-d H:i:s', $published_at);
+    return wporg_persisted_release_id(wp_insert_post([
+        'post_type' => 'pblsh_release',
+        'post_status' => 'publish',
+        'post_parent' => (int) $marker->ID,
+        'post_title' => $version,
+        'post_name' => get_release_slug('wporg', $marker->post_name, $version),
+        'post_content' => wp_slash(wporg_encode_release_snapshot($snapshot)),
+        'post_date' => get_date_from_gmt($post_date_gmt),
+        'post_date_gmt' => $post_date_gmt,
+    ], true));
+}
+
+
+/**
+ * Writes a changed tag's snapshot into its release post. The date stays: the version was
+ * published when the post was created.
+ *
+ * @return int|\WP_Error
+ */
+function wporg_update_release_post(\WP_Post $release_post, array $snapshot) {
+    return wporg_persisted_release_id(wp_update_post([
+        'ID' => (int) $release_post->ID,
+        'post_content' => wp_slash(wporg_encode_release_snapshot($snapshot)),
+    ], true));
+}
+
+
+function wporg_encode_release_snapshot(array $snapshot): string {
+    $content = wp_json_encode($snapshot);
     if (!is_string($content)) {
         throw new \RuntimeException('wporg_release_encode_failed');
     }
+    return $content;
+}
 
-    // Use the SVN tag date as the release post date
-    [$post_date, $post_date_gmt] = wporg_svn_date_to_post_dates((string) ($tag['date'] ?? ''));
-    $post_data = [
-        'post_type' => 'pblsh_release',
-        'post_status' => 'publish',
-        'post_parent' => (int) $plugin_post->ID,
-        'post_title' => $version,
-        'post_name' => get_release_slug('wporg', $plugin_post->post_name, $version),
-        'post_content' => wp_slash($content),
-        'post_date' => $post_date,
-        'post_date_gmt' => $post_date_gmt,
-    ];
 
-    // Insert or update the release post
-    if ($existing instanceof \WP_Post) {
-        $post_data['ID'] = (int) $existing->ID;
-        $post_data['edit_date'] = true;
-        $release_id = wp_update_post($post_data, true);
-    } else {
-        $release_id = wp_insert_post($post_data, true);
-    }
-
+/** @return int|\WP_Error */
+function wporg_persisted_release_id($release_id) {
     if (is_wp_error($release_id)) {
         return $release_id;
     }
@@ -698,7 +739,6 @@ function wporg_upsert_release_post_from_wporg_tag(
             [ 'status' => 500 ]
         );
     }
-
     return (int) $release_id;
 }
 
@@ -769,16 +809,4 @@ function wporg_log_cache_error(\WP_Post $plugin_post, string $stage, \Throwable 
             $error->getMessage()
         ));
     }
-}
-
-
-function wporg_svn_date_to_post_dates(string $last_modified): array {
-    $timestamp = strtotime($last_modified);
-    if (!is_int($timestamp) || $timestamp <= 0) {
-        $timestamp = time();
-    }
-
-    $post_date_gmt = gmdate('Y-m-d H:i:s', $timestamp);
-    $post_date = get_date_from_gmt($post_date_gmt);
-    return [$post_date, $post_date_gmt];
 }

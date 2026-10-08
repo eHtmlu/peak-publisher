@@ -334,9 +334,10 @@ class WporgOperations {
                 continue;
             }
 
+            // last_modified and revision are the tag directory's last change anywhere beneath it.
             $tags[] = [
                 'version' => $version,
-                'date' => (string) ($entry['last_modified'] ?? ''),
+                'last_modified' => (string) ($entry['last_modified'] ?? ''),
                 'revision' => (int) ($entry['revision'] ?? 0),
             ];
         }
@@ -476,6 +477,15 @@ class WporgOperations {
             }
             throw $e;
         }
+    }
+
+    /**
+     * The whole history of the plugin's tags/ with changed paths, newest first — one request,
+     * the input that dates every tag (wporg_tag_publication_times()). Empty when tags/ does not
+     * exist.
+     */
+    public static function fetch_tags_log(string $wporg_slug): array {
+        return self::svn_client()->get_log_entries(self::normalize_slug_or_throw($wporg_slug) . '/tags', null);
     }
 
     /**

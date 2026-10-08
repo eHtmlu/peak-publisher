@@ -2622,14 +2622,14 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     max-width: 1px;
 }
 
-/* Last Updated Column: when the current release was published. */
-.pblsh--table__updated-header,
-.pblsh--table__updated-cell {
+/* Released Column: when a release was published — in the plugin list the current one. */
+.pblsh--table__released-header,
+.pblsh--table__released-cell {
     width: 8.75rem; /* 140px */
     white-space: nowrap;
 }
 
-.pblsh--table__updated-cell {
+.pblsh--table__released-cell {
     color: #666;
     font-size: 0.875rem; /* 14px */
 }
@@ -2915,7 +2915,7 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
         font-size: 0.8125rem; /* 13px */
     }
     .pblsh--table__version-cell,
-    .pblsh--table__updated-cell {
+    .pblsh--table__released-cell {
         font-size: 0.75rem; /* 12px */
     }
     .pblsh--table__actions {

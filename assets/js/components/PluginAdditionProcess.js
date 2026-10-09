@@ -517,8 +517,9 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onFin
         || (hostingType === 'wporg' && wporgSituation === 'approved');
 
     return createElement('div', { className: 'pblsh--addition-process' },
-        // The page's title, on every screen of the flow — the header carries the app's name only.
-        createElement('h2', { className: 'pblsh--addition-process__title' }, __('Add New Plugin', 'peak-publisher')),
+        // The page's title, on every screen of the flow — the header carries the app's name only,
+        // and takes this title in once it has scrolled under it (admin.js).
+        createElement('h2', { className: 'pblsh--addition-process__title', 'data-pblsh-title': '' }, __('Add New Plugin', 'peak-publisher')),
         isWizard
             ? createElement('div', { className: 'pblsh--wizard' },
                 createElement('header', { className: 'pblsh--wizard__header' },

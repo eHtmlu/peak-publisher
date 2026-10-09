@@ -12,6 +12,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // The page's header place (AdminUI::render_peak_publisher()): every view renders the app's
     // name and its actions into it through a portal — the place itself sticks below the admin bar.
     const headerPlace = document.getElementById('pblsh-header');
+    // The page column (AdminUI::render_peak_publisher()): a scroll frame like the dialogs'
+    // (ScrollFrame.js), with the sticky header and footer as its edges — it carries
+    // is-clipped-top / is-clipped-bottom while content continues under either. The window
+    // is its scroller, so the app measures it (measurePage).
+    const pageElement = headerPlace.closest('.pblsh-app');
 
     // Notices WordPress leaves above the page — its mover (common.js) skips those marked
     // "inline", the core update nag among them — go right before its marker at the top of
@@ -312,12 +317,47 @@ document.addEventListener('DOMContentLoaded', function() {
             try { if (dlg.open) dlg.close(); } catch (e) {}
         };
 
+        // The page's clipping and the docked title, measured on scroll, on resize, when the
+        // page's size changes and after every render, since the content follows the state —
+        // the counterpart of ScrollFrame's measure for the window. The view's title in the
+        // body (data-pblsh-title: the editor's plugin name, the add-new flow's heading) docks
+        // into the header once it has scrolled under it: the header's center then shows it in
+        // place of the app's label.
+        const [docked, setDocked] = useState(false);
+        const measurePage = wp.element.useCallback(() => {
+            const scroller = document.scrollingElement;
+            pageElement.classList.toggle('is-clipped-top', scroller.scrollTop > 0);
+            pageElement.classList.toggle('is-clipped-bottom', scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1);
+            const title = document.querySelector('[data-pblsh-title]');
+            const isDocked = !!title && title.getBoundingClientRect().bottom <= headerPlace.getBoundingClientRect().bottom;
+            setDocked((state) => state === isDocked ? state : isDocked);
+        }, []);
+        useEffect(() => {
+            window.addEventListener('scroll', measurePage, { passive: true });
+            window.addEventListener('resize', measurePage);
+            const resizeObserver = new ResizeObserver(measurePage);
+            resizeObserver.observe(pageElement);
+            return () => {
+                window.removeEventListener('scroll', measurePage);
+                window.removeEventListener('resize', measurePage);
+                resizeObserver.disconnect();
+            };
+        }, [measurePage]);
+        useEffect(measurePage);
+
         // The header for the current view — rendered into the header place. Its title is the
-        // app's name, always: a view names itself in the body. The settings stay within reach
-        // in every view; the add-new flow trades "Add New Plugin" for its Cancel; the editor
-        // leads back to the list from the header's start.
+        // app's name, always: a view names itself in the body, and once that title has
+        // scrolled under the header, the header's center shows it instead (the title stack,
+        // docked by measurePage). The settings stay within reach in every view; the add-new
+        // flow trades "Add New Plugin" for its Cancel; the editor leads back to the list from
+        // the header's start.
         const renderHeader = () => {
             const adding = view === 'addition-process';
+            // What docks: the plugin with its icon in the editor — icon and name are a plugin's
+            // identity in the list and the card alike —, the heading in the add-new flow.
+            const dockingTitle = view === 'editor'
+                ? (currentPlugin ? { text: currentPlugin.name, icon: currentPlugin.icon_url } : null)
+                : (adding ? { text: __('Add New Plugin', 'peak-publisher') } : null);
             return createElement(Fragment, null,
                 view === 'editor' && createElement(Button, {
                     isTertiary: true,
@@ -327,7 +367,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     onClick: handleCancel,
                     __next40pxDefaultSize: true,
                 }),
-                createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
+                createElement('div', { className: 'pblsh--header__titles' + (docked && dockingTitle ? ' is-docked' : '') },
+                    createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
+                    dockingTitle && createElement('div', { className: 'pblsh--header__docked-title', 'aria-hidden': 'true' },
+                        dockingTitle.icon && createElement('img', { className: 'pblsh--header__docked-icon', src: dockingTitle.icon, alt: '', width: 24, height: 24 }),
+                        createElement('span', { className: 'pblsh--header__docked-text' }, dockingTitle.text),
+                    ),
+                ),
                 createElement('div', { className: 'pblsh--header__actions' },
                     adding
                         ? createElement(Button, {

@@ -2106,8 +2106,13 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     min-height: 0;
 }
 
+/* The shadow that says content continues past an edge — one look for the frame's edges and
+   for the page's bars, the header's lower edge and the footer's upper one: the page column
+   carries the same is-clipped classes (set in admin.js). Where each edge lies is its owner's. */
 .pblsh--scroll-frame::before,
-.pblsh--scroll-frame::after {
+.pblsh--scroll-frame::after,
+.pblsh--header::after,
+.pblsh--footer::before {
     content: '';
     position: absolute;
     inset-inline: 0;
@@ -2118,18 +2123,28 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     transition: opacity 0.15s ease;
 }
 
+.pblsh--scroll-frame::before,
+.pblsh--header::after {
+    background: linear-gradient(rgba(0, 0, 0, 0.1), transparent);
+}
+
+.pblsh--scroll-frame::after,
+.pblsh--footer::before {
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.1));
+}
+
 .pblsh--scroll-frame::before {
     top: 0;
-    background: linear-gradient(rgba(0, 0, 0, 0.1), transparent);
 }
 
 .pblsh--scroll-frame::after {
     bottom: 0;
-    background: linear-gradient(transparent, rgba(0, 0, 0, 0.1));
 }
 
 .pblsh--scroll-frame.is-clipped-top::before,
-.pblsh--scroll-frame.is-clipped-bottom::after {
+.pblsh--scroll-frame.is-clipped-bottom::after,
+.pblsh-app.is-clipped-top .pblsh--header::after,
+.pblsh-app.is-clipped-bottom .pblsh--footer::before {
     opacity: 1;
 }
 
@@ -2474,6 +2489,11 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     border-bottom: 1px solid var(--border-color-medium);
 }
 
+/* The header's shadow, right below it (the shared shadow at .pblsh--scroll-frame). */
+.pblsh--header::after {
+    top: 100%;
+}
+
 @media (max-width: 48.875rem) { /* 782px — WordPress's narrower content padding */
     :root:has(#pblsh-header) {
         --pblsh-page-inset: 10px;
@@ -2498,6 +2518,10 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
         min-height: var(--pblsh-header-height);
         padding-block: 0.625rem;
     }
+    /* Scrolling away, it casts no shadow. */
+    .pblsh--header::after {
+        display: none;
+    }
 }
 
 /* WordPress's marker for admin notices (AdminUI::render_peak_publisher()) only anchors where
@@ -2513,23 +2537,72 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     justify-self: start;
 }
 
-/* The app's name as the bar's label, the page's h1 outside .wrap: small, uppercase and in
-   the footer's gray, so the bar stays quiet chrome and the views name themselves in the body;
-   a long one is cut, not wrapped. */
-.pblsh--header__title {
+/* The header's center, a one-line clip over two lines: the app's name as the bar's label,
+   the page's h1 outside .wrap — small, uppercase and in the footer's gray, so the bar stays
+   quiet chrome and the views name themselves in the body — and below it the view's title,
+   which slides up into the label's place once the title in the body has scrolled under the
+   header (is-docked, set in admin.js) and slides back when it returns. A long line is cut,
+   not wrapped. */
+.pblsh--header__titles {
     grid-column: 2;
     min-width: 0;
+    height: 1.5rem;
+    overflow: hidden;
+    text-align: center;
+}
+
+.pblsh--header__title,
+.pblsh--header__docked-title {
     margin: 0;
     padding: 0;
+    height: 1.5rem;
     font-size: 1rem;
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.5rem;
+    white-space: nowrap;
+    transition: transform 0.2s ease;
+}
+
+.pblsh--header__title {
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: #646970;
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* The docked line: the plugin's icon, line-high, and its name, which carries the ellipsis. */
+.pblsh--header__docked-title {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    color: #1d2327;
+}
+
+.pblsh--header__docked-icon {
+    /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
+    flex: none;
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.pblsh--header__docked-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pblsh--header__titles.is-docked .pblsh--header__title,
+.pblsh--header__titles.is-docked .pblsh--header__docked-title {
+    transform: translateY(-100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pblsh--header__title,
+    .pblsh--header__docked-title {
+        transition: none;
+    }
 }
 
 .pblsh--header__actions {
@@ -2565,6 +2638,11 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     font-size: 0.875rem; /* 14px */
     color: #646970;
     white-space: nowrap;
+}
+
+/* The footer's shadow, right above it (the shared shadow at .pblsh--scroll-frame). */
+.pblsh--footer::before {
+    bottom: 100%;
 }
 
 .pblsh--footer__identity {

@@ -96,7 +96,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             height: 80,
                         }) : null,
                         createElement('div', null,
-                            createElement('h3', { className: 'pblsh--plugin-title' }, pluginData?.name),
+                            // The view's title: it docks into the page header once it has scrolled under it (admin.js).
+                            createElement('h3', { className: 'pblsh--plugin-title', 'data-pblsh-title': '' }, pluginData?.name),
                             createElement('div', { className: 'pblsh--plugin-meta' },
                                 createElement(Pblsh.Components.ChannelPath, { channel: pluginData?.hosting_type, slug: safe(pluginData?.slug) || '—' }),
                             ),

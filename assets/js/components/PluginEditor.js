@@ -147,11 +147,6 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                 ),
                 createElement('div', { className: 'pblsh--plugin-grid' },
                     createElement('div', { className: 'pblsh--plugin-grid__item' },
-                        createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Releases', 'peak-publisher')),
-                        // From the plugin like the current release beside it — the one payload the header reads.
-                        createElement('div', { className: 'pblsh--plugin-grid__value' }, String(Number(pluginData?.count_of_releases) || 0))
-                    ),
-                    createElement('div', { className: 'pblsh--plugin-grid__item' },
                         createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Current Release', 'peak-publisher')),
                         createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(CurrentVersion, { plugin: pluginData })),
                         // Second line of a grid item: muted fragments, ' · ' separated, no period.
@@ -422,12 +417,19 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         ];
     };
 
+    // The releases tab carries its count — what lies behind it, from the plugin like the
+    // figures above (the one payload the header reads); the assets tab none, their number is
+    // the assets store's, loaded with the tab.
     const renderTabNav = () => createElement('div', { className: 'pblsh--tab-nav' },
         createElement('button', {
             type: 'button',
             className: 'pblsh--tab-nav__tab' + (activeTab === 'releases' ? ' pblsh--tab-nav__tab--active' : ''),
             onClick: () => switchToTab('releases'),
-        }, __('Releases', 'peak-publisher')),
+        }, sprintf(
+            /* translators: %s: number of releases */
+            __('Releases (%s)', 'peak-publisher'),
+            (Number(pluginData?.count_of_releases) || 0).toLocaleString(),
+        )),
         createElement('button', {
             type: 'button',
             className: 'pblsh--tab-nav__tab' + (activeTab === 'assets' ? ' pblsh--tab-nav__tab--active' : ''),

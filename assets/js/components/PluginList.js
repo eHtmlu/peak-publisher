@@ -78,7 +78,12 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                 createElement('table', { className: 'pblsh--table' },
                     createElement('thead', null,
                         createElement('tr', null,
-                            createElement('th', { className: 'pblsh--table__plugin-header' }, __('Plugin', 'peak-publisher')),
+                            // The column's head carries the count, like the releases tab in the editor.
+                            createElement('th', { className: 'pblsh--table__plugin-header' }, sprintf(
+                                /* translators: %s: number of plugins */
+                                __('Plugins (%s)', 'peak-publisher'),
+                                plugins.length.toLocaleString(),
+                            )),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__released-header' }, __('Released', 'peak-publisher')),
                             showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),

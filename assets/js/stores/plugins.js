@@ -124,9 +124,21 @@
                 return state;
         }
     }
+    // The list's order, decided here and nowhere else: by name, the way the admin's own
+    // plugin screen orders — natural, so "Plugin 2" stands before "Plugin 10", case-insensitive,
+    // in the admin's language —, the same name by channel, wporg first as everywhere, and the
+    // same name on a channel by slug, unique there: a total order, so a plugin stands where it
+    // stands whenever it was added, a new one at its place at once.
+    var channelRank = { wporg: 0, self_hosted: 1 };
+    var compareText = new Intl.Collator(document.documentElement.lang, { numeric: true, sensitivity: 'accent' }).compare;
+    var comparePlugins = function(a, b) {
+        return compareText(a.name, b.name)
+            || (channelRank[a.hosting_type] - channelRank[b.hosting_type])
+            || compareText(a.slug, b.slug);
+    };
     var selectors = {
         getPlugins: function(state) {
-            return state.ids.map(function(id){ return state.byId[id]; });
+            return state.ids.map(function(id){ return state.byId[id]; }).sort(comparePlugins);
         },
         isLoadingList: function(state) {
             return !!state.isLoadingList;

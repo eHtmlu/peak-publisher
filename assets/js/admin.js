@@ -432,13 +432,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
 
-        // Render footer
-        const renderFooter = () => {
-            /* return createElement('div', { className: 'pblsh--footer' },
-                
-            ); */
-        };
-
         return createElement(Fragment, null,
             // Global drop overlay (always mounted)
             createElement(GlobalDropOverlay, { onCreated: handleCreated, activeUploadContext }),
@@ -448,9 +441,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Main content (with loading state)
             renderMainContent(),
-
-            // Footer (always visible)
-            renderFooter(),
 
             // Settings dialog (always mounted)
             createElement('dialog', { className: 'pblsh--modal pblsh--modal--settings', ref: settingsDialogRef, onClick: (e) => { if (e.target === e.currentTarget) { closeSettings(); } } },

@@ -7,7 +7,7 @@ defined('ABSPATH') || exit;
 
 /**
  * The admin page: registers the Peak Publisher menu entry, renders the mount points of the
- * single-page app (#pblsh-header, #pblsh-app) and enqueues its scripts and styles — the JS files one by one
+ * single-page app (#pblsh-header, #pblsh-app, #pblsh-footer) and enqueues its scripts and styles — the JS files one by one
  * in load order ($script_files; there is no bundler), with PblshData carrying the server's
  * facts for the app. Loaded for admin requests only; everything the app does afterwards goes
  * through AdminAPI.
@@ -54,13 +54,16 @@ class AdminUI {
     /**
      * Renders the page's places: the header (#pblsh-header), which the app fills through a
      * portal and which sticks below the admin bar — itself the sticky element, so it can stick
-     * across the whole page —, and the admin's .wrap with WordPress's marker for admin notices,
+     * across the whole page —, the admin's .wrap with WordPress's marker for admin notices,
      * which WordPress moves right after it — below the header, aligned with the app's content;
-     * the app puts the notices WordPress leaves above the page right before it —, and the app. The outer .pblsh-app is the scope of the app's variables and base styles for
-     * both.
+     * the app puts the notices WordPress leaves above the page right before it —, and the app,
+     * and the footer (#pblsh-footer), the header's counterpart held at the window's bottom, in
+     * place of WordPress's own footer on this page. The outer .pblsh-app is the scope of the
+     * app's variables and base styles for all of them, and the column that keeps the footer at
+     * the bottom of a short page.
      */
     public function render_peak_publisher(): void {
-        echo '<div class="pblsh-app"><header id="pblsh-header" class="pblsh--header"></header><div class="wrap"><hr class="wp-header-end"><div id="pblsh-app"></div></div></div>';
+        echo '<div class="pblsh-app"><header id="pblsh-header" class="pblsh--header"></header><div class="wrap"><hr class="wp-header-end"><div id="pblsh-app"></div></div><footer id="pblsh-footer" class="pblsh--footer"></footer></div>';
     }
 
     /**

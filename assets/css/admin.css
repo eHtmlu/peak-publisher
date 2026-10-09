@@ -287,10 +287,9 @@
 }
 
 /* The flow's title, centered under the header's app name and sized like the admin's own page
-   title. Its top margin is the whole distance from the header: nothing between the two holds
-   the margins apart, so they collapse into this one. */
+   title, with more room above than the header's inset gives: its top margin adds to it. */
 .pblsh--addition-process__title {
-    margin: 3rem 0 1.5rem;
+    margin: 1.75rem 0 1.5rem;
     font-size: 1.4375rem; /* 23px — the admin page-title size */
     font-weight: 600;
     line-height: 1.3;
@@ -2395,9 +2394,6 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 
 
 /* Plugin List View */
-.pblsh--list {
-    margin-bottom: 1.25rem; /* 20px */
-}
 /* At the top of the content: the header owns the distance above (--pblsh-page-inset). */
 .pblsh--list > :first-child {
     margin-top: 0;
@@ -2430,14 +2426,36 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
    jumps with it. The page keeps one inset around its content, --pblsh-page-inset: WordPress's
    left padding of #wpcontent, which .wrap takes on the right and the header below itself — the
    header owns that distance, so nothing at the top of the content brings a top margin of its
-   own. Full width by undoing the padding, the header's own padding aligns title and actions
+   own: the page's column lets none collapse into the inset, one that wants more room adds it.
+   Full width by undoing the padding, the header's own padding aligns title and actions
    with the content. Above the content (the assets bar), below the admin menu's flyouts
-   (z-index 9990) and the upload overlay. */
+   (z-index 9990) and the upload overlay. The footer (.pblsh--footer) is its counterpart at the
+   window's bottom; jumps stop above it. */
 :root:has(#pblsh-header) {
     --pblsh-page-inset: 20px;
     --pblsh-header-height: 3.75rem; /* 60px */
+    --pblsh-footer-height: 3.75rem; /* 60px */
     --pblsh-sticky-top: calc(var(--wp-admin--admin-bar--height, 32px) + var(--pblsh-header-height));
     scroll-padding-top: var(--pblsh-sticky-top);
+    scroll-padding-bottom: var(--pblsh-footer-height);
+}
+
+/* The page's column: header, content and footer, at least as tall as the window below the
+   admin bar — the content takes what the bars leave, so the footer is at the window's bottom
+   under a short list too. WordPress's own footer and the room #wpbody-content keeps for it go:
+   the page's footer takes their place. */
+.pblsh-app {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - var(--wp-admin--admin-bar--height, 32px));
+}
+
+:root:has(#pblsh-footer) #wpfooter {
+    display: none;
+}
+
+#wpbody-content:has(> .pblsh-app) {
+    padding-bottom: 0;
 }
 
 .pblsh--header {
@@ -2463,8 +2481,10 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 }
 
 /* The admin's .wrap on this page: the inset on the right, none on the left (#wpcontent's padding
-   is it) and none on top (the header's margin is it) — in place of WordPress's 10px 20px 0 2px. */
+   is it) and none on top (the header's margin is it) — in place of WordPress's 10px 20px 0 2px.
+   It fills the column between the bars. */
 .pblsh-app .wrap {
+    flex: 1 0 auto;
     margin: 0 var(--pblsh-page-inset) 0 0;
 }
 
@@ -2517,6 +2537,21 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 
 .pblsh--header__actions .button {
     margin: 0;
+}
+
+/* The page footer: white across the content area, held at the window's bottom while the
+   content passes above, with the inset above itself — the footer owns that distance, so
+   nothing at the bottom of the content brings a bottom margin of its own. */
+.pblsh--footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 100;
+    box-sizing: border-box;
+    height: var(--pblsh-footer-height);
+    margin: var(--pblsh-page-inset) 0 0 calc(-1 * var(--pblsh-page-inset));
+    padding: 0 var(--pblsh-page-inset);
+    background: #fff;
+    border-top: 1px solid var(--border-color-medium);
 }
 
 /* Table Styles */
@@ -3144,10 +3179,6 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     width: 5rem;
     height: 5rem;
     flex-shrink: 0;
-}
-
-.pblsh--editor {
-    margin-bottom: 1.25rem; /* 20px */
 }
 
 .pblsh--settings {

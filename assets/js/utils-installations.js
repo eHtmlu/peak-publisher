@@ -64,8 +64,22 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
         }
     }
 
-    // The editor's Downloads figure: the all-time total, or what stands in for it.
+    // The editor's Downloads figure: the all-time total, or what stands in for it — a
+    // self-hosted plugin's counted here, the recent windows in the tooltip; a wordpress.org
+    // plugin's as the directory reports it.
     function getDownloads(plugin) {
+        if (plugin.hosting_type === 'self_hosted') {
+            const { total, last_7_days, last_30_days } = plugin.downloads;
+            return {
+                text: total.toLocaleString(),
+                title: sprintf(
+                    /* translators: 1: downloads of the last 7 days, 2: downloads of the last 30 days */
+                    __('Total downloads · Counted by Peak Publisher · %1$s in the last 7 days · %2$s in the last 30 days', 'peak-publisher'),
+                    last_7_days.toLocaleString(),
+                    last_30_days.toLocaleString(),
+                ),
+            };
+        }
         if (plugin.installations.state === 'closed') return { text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) };
         const downloaded = plugin.wporg_stats.downloaded;
         return typeof downloaded === 'number'

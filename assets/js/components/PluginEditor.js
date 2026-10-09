@@ -81,9 +81,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     };
 
     const renderInfoBox = () => {
-        // The wordpress.org dashboard figures beside Installations; each names its source
-        // and its age in the tooltip.
-        const wporgFigures = isWporg ? { downloads: getDownloads(pluginData), rating: getRating(pluginData) } : null;
+        // The figures beside Installations: the downloads of both channels, the rating of
+        // wordpress.org; each names its source and its age in the tooltip.
+        const downloads = pluginData ? getDownloads(pluginData) : null;
+        const wporgFigures = isWporg ? { rating: getRating(pluginData) } : null;
         return [
             createElement('div', { className: 'pblsh--card pblsh--card--plugin-info' },
                 createElement('div', { className: 'pblsh--plugin-header' },
@@ -165,10 +166,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Installations', 'peak-publisher')),
                         createElement('div', { className: 'pblsh--plugin-grid__value' }, createElement(InstallationsCount, { plugin: pluginData })),
                     ),
-                    wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
+                    downloads && createElement('div', { className: 'pblsh--plugin-grid__item' },
                         createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Downloads', 'peak-publisher')),
                         createElement('div', { className: 'pblsh--plugin-grid__value' },
-                            createElement(Figure, { title: wporgFigures.downloads.title }, wporgFigures.downloads.text),
+                            createElement(Figure, { title: downloads.title }, downloads.text),
                         ),
                     ),
                     // Stars with the number of ratings beside them, the way the plugin installer

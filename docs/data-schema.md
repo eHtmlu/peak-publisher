@@ -23,7 +23,9 @@ code in this repository creates today:
   slot: `{filename, revision, resolution, filesize, width, height}` — revision is the time of
   the last change; `includes/assets.php`), `assets_banners_color` (the average color of the
   first banner file, for the generated icon),
-  `_pblsh_installations` (24-hour counting cache, regenerable, not declared); marker: the same
+  `_pblsh_installations` (24-hour counting cache, regenerable, not declared), `_pblsh_downloads`
+  (the download history: UTC day `Y-m-d` → delivered release ZIPs, unbounded, absent = none
+  yet; its total is the sum of its days; `includes/functions.php`); marker: the same
   manifest metas and `assets_banners_color` describing the assets mirror (revision = the SVN
   revision the file was last changed in; regenerable from SVN), `_pblsh_wporg_assets`
   (`{revision, other_files, color_source, pending}` — the revision of `assets/` the

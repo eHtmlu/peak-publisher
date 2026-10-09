@@ -224,6 +224,68 @@ function get_plugin_installations_list(int $plugin_post_id): array {
 function set_plugin_installations_list(int $plugin_post_id, array $list): void {
     update_post_meta($plugin_post_id, '_pblsh_installations', $list);
 }
+
+/** The download history of a plugin: UTC day (Y-m-d) → delivered release ZIPs (docs/data-schema.md). */
+const PBLSH_DOWNLOADS_META = '_pblsh_downloads';
+
+/**
+ * Records one delivered release ZIP of a plugin on the current UTC day — the history is
+ * kept day by day and unbounded, its total the sum of its days. UTC, not the site's
+ * calendar day: a timezone change would shift past days, and wordpress.org counts its days
+ * in UTC too. Counted always, unlike the installations: a day's number holds no identity.
+ */
+function record_plugin_download(int $plugin_post_id): void {
+    if ($plugin_post_id <= 0) {
+        return;
+    }
+    $days = get_plugin_downloads($plugin_post_id);
+    $day = gmdate('Y-m-d');
+    $days[$day] = ($days[$day] ?? 0) + 1;
+    update_post_meta($plugin_post_id, PBLSH_DOWNLOADS_META, $days);
+}
+
+/**
+ * The download history of a plugin, in day order; empty without one. Read back from
+ * persistence, so the shape is re-validated here: only Y-m-d keys with a positive count.
+ *
+ * @return array<string, int>
+ */
+function get_plugin_downloads(int $plugin_post_id): array {
+    $stored = get_post_meta($plugin_post_id, PBLSH_DOWNLOADS_META, true);
+    $days = [];
+    foreach (is_array($stored) ? $stored : [] as $day => $count) {
+        if (is_string($day) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) === 1 && is_numeric($count) && (int) $count > 0) {
+            $days[$day] = (int) $count;
+        }
+    }
+    ksort($days, SORT_STRING);
+    return $days;
+}
+
+/**
+ * The figures of a download history: the all-time total and the last 7 and 30 days, today
+ * included (`$today` as a UTC Y-m-d; the current day by default).
+ *
+ * @param array<string, int> $days
+ * @return array{total: int, last_7_days: int, last_30_days: int}
+ */
+function summarize_plugin_downloads(array $days, ?string $today = null): array {
+    $end = new \DateTimeImmutable($today ?? gmdate('Y-m-d'), new \DateTimeZone('UTC'));
+    $today = $end->format('Y-m-d');
+    $since_7 = $end->modify('-6 days')->format('Y-m-d');
+    $since_30 = $end->modify('-29 days')->format('Y-m-d');
+    $out = [ 'total' => 0, 'last_7_days' => 0, 'last_30_days' => 0 ];
+    foreach ($days as $day => $count) {
+        $out['total'] += $count;
+        if ($day >= $since_30 && $day <= $today) {
+            $out['last_30_days'] += $count;
+            if ($day >= $since_7) {
+                $out['last_7_days'] += $count;
+            }
+        }
+    }
+    return $out;
+}
 /**
  * Raises the PHP execution time limit for request cycles that perform many
  * sequential wordpress.org SVN requests (deploys, tag syncs, imports).

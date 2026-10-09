@@ -304,6 +304,8 @@ class PublicAPI {
 		$result['short_description'] = $current_release_content['plugin_readme_txt']['content']['short_description'] ?? $plugin_data['Description'] ?? '';
 		$result['description']       = $result['sections']['description'] ?? $result['short_description'];
 		$result['download_link']     = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $current_release->post_title);
+		// The all-time figure, as wordpress.org serves it: every delivered release ZIP, counted here.
+		$result['downloaded']        = summarize_plugin_downloads(get_plugin_downloads((int) $plugin->ID))['total'];
 		$result['upgrade_notice']    = $current_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';
 
         require_once __DIR__ . '/AssetManager.php';
@@ -421,6 +423,10 @@ class PublicAPI {
         if ($data === false) {
             return new \WP_Error('no_file', 'File not found', ['status' => 404]);
         }
+
+        // Every delivery counts, a site's update as much as a download by hand — the
+        // download history (record_plugin_download()).
+        record_plugin_download((int) $plugin_infos['plugin']->ID);
 
         $filename = basename($zip_abs);
         nocache_headers();

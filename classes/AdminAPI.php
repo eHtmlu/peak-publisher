@@ -279,9 +279,11 @@ class AdminAPI {
      * `released_at` is when the current release was published (its post date: the upload,
      * or the first creation of its wordpress.org tag), null without one.
      * `installations` is the channel's figure with its state (self-hosted the exact
-     * 24-hour count or 'disabled', wordpress.org the cached public figure), `wporg_stats`
-     * the wordpress.org dashboard figures, `wporg_check` and `wporg_token` the state of the
-     * copy against wordpress.org (all three null self-hosted).
+     * 24-hour count or 'disabled', wordpress.org the cached public figure), `downloads` the
+     * figures of the download history counted here (self-hosted only; null wordpress.org,
+     * whose all-time total is the directory's), `wporg_stats` the wordpress.org dashboard
+     * figures, `wporg_check` and `wporg_token` the state of the copy against wordpress.org
+     * (all three null self-hosted).
      *
      * @param \WP_Post[] $releases The plugin's release posts.
      */
@@ -312,6 +314,7 @@ class AdminAPI {
             'installations' => $is_self_hosted
                 ? serialize_self_hosted_installations((int) $post->ID)
                 : $wporg_directory['installations'],
+            'downloads' => $is_self_hosted ? summarize_plugin_downloads(get_plugin_downloads((int) $post->ID)) : null,
             'wporg_stats' => $is_self_hosted ? null : $wporg_directory['wporg_stats'],
             // When the plugin was last brought in step with wordpress.org, and what its copy
             // here was made from — sent back with the next refresh (wporg_sync_token()).

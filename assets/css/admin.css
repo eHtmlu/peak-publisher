@@ -3064,8 +3064,12 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 /* Closed on wordpress.org: the directory distributes nothing */
 .components-button.is-tertiary.pblsh--status-btn--closed { color: var(--color-red) !important; }
 
-/* Plugin info card */
+/* Plugin info card: the icon in a gutter of its own, name, slug and the figures in one
+   column beside it with the rule between them — one left edge for everything but the icon.
+   The gutter's width is the icon's and the gap's, declared once here. */
 .pblsh--card--plugin-info {
+    --plugin-icon-size: 5rem;   /* 80px */
+    --plugin-icon-gap: 0.75rem; /* 12px */
     display: flex;
     flex-direction: column;
 }
@@ -3076,17 +3080,15 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     justify-content: space-between;
     gap: 1rem;
     padding-bottom: var(--content-padding-block);
-    border-bottom: 1px solid var(--border-color-medium);
-    margin-bottom: var(--content-padding-block);
 }
 .pblsh--plugin-header__main {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--plugin-icon-gap);
     min-width: 0;
 }
 /* The status button at the top, the wordpress.org line at the foot — stretched to the
-   header's height, so the line stands right above the header's rule. */
+   header's height, so the line stands right above the rule of the figures below. */
 .pblsh--plugin-header__actions {
     display: flex;
     flex-direction: column;
@@ -3131,7 +3133,21 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 }
 .pblsh--plugin-meta { display: flex; gap: 0.5rem; align-items: center; color: #666; }
 .pblsh--plugin-meta .pblsh--plugin-version { font-weight: 600; }
-.pblsh--plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.75rem; }
+/* The figures, in the column beside the icon's gutter, the rule with them; below 600px the
+   gutter would cost a column's worth of the card, so the figures take the card's width. */
+.pblsh--plugin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: 0.75rem;
+    margin-left: calc(var(--plugin-icon-size) + var(--plugin-icon-gap));
+    padding-top: var(--content-padding-block);
+    border-top: 1px solid var(--border-color-medium);
+}
+@media (max-width: 37.5rem) { /* 600px */
+    .pblsh--plugin-grid {
+        margin-left: 0;
+    }
+}
 .pblsh--plugin-grid__label { color: #666; font-size: 0.8125rem; }
 .pblsh--plugin-grid__value {
     font-size: 1.5rem;
@@ -3327,8 +3343,8 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 }
 .pblsh--plugin-header__icon {
     /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
-    width: 5rem;
-    height: 5rem;
+    width: var(--plugin-icon-size);
+    height: var(--plugin-icon-size);
     flex-shrink: 0;
 }
 

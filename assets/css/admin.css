@@ -286,6 +286,18 @@
     /* --max-content-height: 60rem; */
 }
 
+/* The flow's title, centered under the header's app name and sized like the admin's own page
+   title. Its top margin is the whole distance from the header: nothing between the two holds
+   the margins apart, so they collapse into this one. */
+.pblsh--addition-process__title {
+    margin: 3rem 0 1.5rem;
+    font-size: 1.4375rem; /* 23px — the admin page-title size */
+    font-weight: 600;
+    line-height: 1.3;
+    color: #1d2327;
+    text-align: center;
+}
+
 /* The wizard panel — stepper header, step body, and navigation footer share
    one card (the app's dialog anatomy: the body carries both divider lines).
    Decision screens (channel choice, situation triage, import) render outside

@@ -9,8 +9,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog, UpgradeNotice, NoticeBox } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
 
-    // The page's header place (AdminUI::render_peak_publisher()): every view renders its
-    // title and actions into it through a portal — the place itself sticks below the admin bar.
+    // The page's header place (AdminUI::render_peak_publisher()): every view renders the app's
+    // name and its actions into it through a portal — the place itself sticks below the admin bar.
     const headerPlace = document.getElementById('pblsh-header');
 
     // Notices WordPress leaves above the page — its mover (common.js) skips those marked
@@ -312,9 +312,10 @@ document.addEventListener('DOMContentLoaded', function() {
             try { if (dlg.open) dlg.close(); } catch (e) {}
         };
 
-        // The header's title and actions for the current view — rendered into the header place.
-        // The settings stay within reach in every view; the add-new flow trades "Add New Plugin"
-        // for its Cancel; the editor leads back to the list from the header's start.
+        // The header for the current view — rendered into the header place. Its title is the
+        // app's name, always: a view names itself in the body. The settings stay within reach
+        // in every view; the add-new flow trades "Add New Plugin" for its Cancel; the editor
+        // leads back to the list from the header's start.
         const renderHeader = () => {
             const adding = view === 'addition-process';
             return createElement(Fragment, null,
@@ -326,11 +327,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     onClick: handleCancel,
                     __next40pxDefaultSize: true,
                 }),
-                createElement('h1', { className: 'pblsh--header__title' },
-                    __('Peak Publisher', 'peak-publisher'),
-                    adding && ' - ',
-                    adding && __('Add New Plugin', 'peak-publisher'),
-                ),
+                createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
                 createElement('div', { className: 'pblsh--header__actions' },
                     adding
                         ? createElement(Button, {

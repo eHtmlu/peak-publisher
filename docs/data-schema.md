@@ -33,11 +33,14 @@ code in this repository creates today:
   work: slot id → `{action: put|copy|delete, file (put), from {slot, filename, revision} (copy),
   base {filename, revision}|null, ext, filesize, width, height, at, user {id, login}}`;
   `includes/wporg_assets.php`),
+  `_pblsh_downloads` (the download history from the stats API, merged day by day: UTC day
+  `Y-m-d` → downloads; the API's window of 730 days moves on, what it leaves behind stays
+  here and is not regenerable; `includes/wporg_directory.php`),
   `_pblsh_wporg_account_username`, `_pblsh_wporg_operations` (the operations log: every SVN
   write Peak Publisher committed, newest first, unbounded — `{operation, at, user {id, login},
   username, revision, details}`), `_pblsh_wporg_directory` (the directory cache: the daily info API figures and the
   check's record — the stamp `{version, last_updated, assets: filename → revision}` of the last completed check, when that
-  was and the last failure since —, regenerable, not declared), `_pblsh_wporg_import` (the import forecast
+  was and the last failure since — and the day's claim of the download history's fetch, regenerable, not declared), `_pblsh_wporg_import` (the import forecast
   `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
   wporg `_pblsh_upload_state` (the deploy's upload state).
 - **Options:** `pblsh_settings` (settings incl. `wporg_accounts` with AES-256-GCM encrypted

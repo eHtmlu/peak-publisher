@@ -64,27 +64,29 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
         }
     }
 
-    // The editor's Downloads figure: the all-time total, or what stands in for it — a
-    // self-hosted plugin's counted here, the recent windows in the tooltip; a wordpress.org
-    // plugin's as the directory reports it.
+    // The editor's Downloads figure: the all-time total, or what stands in for it, with the
+    // last 7 and 30 days in the tooltip — a self-hosted plugin's counted here, a
+    // wordpress.org plugin's total as the directory reports it and its windows from the
+    // history the stats API fills once a day (complete days, so today is not in them), none
+    // until the first fetch.
     function getDownloads(plugin) {
-        if (plugin.hosting_type === 'self_hosted') {
-            const { total, last_7_days, last_30_days } = plugin.downloads;
-            return {
-                text: total.toLocaleString(),
-                title: sprintf(
-                    /* translators: 1: downloads of the last 7 days, 2: downloads of the last 30 days */
-                    __('Total downloads · Counted by Peak Publisher · %1$s in the last 7 days · %2$s in the last 30 days', 'peak-publisher'),
-                    last_7_days.toLocaleString(),
-                    last_30_days.toLocaleString(),
-                ),
-            };
-        }
         if (plugin.installations.state === 'closed') return { text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) };
-        const downloaded = plugin.wporg_stats.downloaded;
-        return typeof downloaded === 'number'
-            ? { text: downloaded.toLocaleString(), title: __('Total downloads · Reported by wordpress.org', 'peak-publisher') }
-            : { text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') };
+        const { total, last_7_days, last_30_days } = plugin.downloads;
+        if (typeof total !== 'number') return { text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') };
+        const text = total.toLocaleString();
+        if (typeof last_7_days !== 'number') return { text, title: __('Total downloads · Reported by wordpress.org', 'peak-publisher') };
+        return {
+            text,
+            title: sprintf(
+                plugin.hosting_type === 'wporg'
+                    /* translators: 1: downloads of the last 7 days, 2: downloads of the last 30 days */
+                    ? __('Total downloads · Reported by wordpress.org · %1$s in the last 7 days · %2$s in the last 30 days', 'peak-publisher')
+                    /* translators: 1: downloads of the last 7 days, 2: downloads of the last 30 days */
+                    : __('Total downloads · Counted by Peak Publisher · %1$s in the last 7 days · %2$s in the last 30 days', 'peak-publisher'),
+                last_7_days.toLocaleString(),
+                last_30_days.toLocaleString(),
+            ),
+        };
     }
 
     // The editor's Rating figure as wordpress.org shows it: five stars in half-star steps

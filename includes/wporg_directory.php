@@ -38,7 +38,8 @@ const PBLSH_WPORG_DIRECTORY_CHECK_INTERVAL = 5 * MINUTE_IN_SECONDS;
  * had it moved, the SVN refresh completed, or SVN read directly —, `stamp` the directory's
  * state that check found, kept through closures and failures, and `check_error` the last
  * failed check since: wordpress.org unreachable, a listing without figures, an SVN refresh
- * that failed. Times are Unix timestamps, 0 = never.
+ * that failed. `downloads_fetched_at` is the day's claim of the download history's fetch
+ * (refresh_wporg_download_stats()). Times are Unix timestamps, 0 = never.
  */
 function wporg_directory_defaults(): array {
     return [
@@ -51,6 +52,7 @@ function wporg_directory_defaults(): array {
         'stamp' => null,             // { version, last_updated, assets } of the directory at the last completed check
         'checked_at' => 0,           // the last completed check
         'check_error' => null,       // { code, message, at }, null after a completed check
+        'downloads_fetched_at' => 0, // the last fetch of the download history, claimed before the request
     ];
 }
 
@@ -286,16 +288,79 @@ function wporg_directory_error(WporgSvnException $e, int $at): array {
 
 
 /**
+ * The download history of the given markers, brought up to date from the stats API: once
+ * per marker and UTC day, the API's last PBLSH_WPORG_DOWNLOAD_STATS_DAYS complete days
+ * merged into the history kept here (PBLSH_DOWNLOADS_META) — the API's day wins within its
+ * window, the days it no longer serves stay: the window moves on, the history does not.
+ * Once a day, because the API serves complete days only: a day's fetch brings yesterday at
+ * the latest with the next day's. The day's claim is written before the request, like the
+ * directory's: a failed fetch is tried again tomorrow, with nothing lost to the window.
+ * Called where the directory is refreshed — the client's look and the import; the
+ * directory check itself stays the stamps' (refresh_wporg_directory()).
+ *
+ * @param \WP_Post[] $markers
+ */
+function refresh_wporg_download_stats(array $markers, int $now): void {
+    foreach ($markers as $marker) {
+        $id = (int) $marker->ID;
+        $directory = get_wporg_directory($id);
+        if (!is_wporg_download_stats_due((int) $directory['downloads_fetched_at'], $now)) {
+            continue;
+        }
+        update_post_meta($id, PBLSH_WPORG_DIRECTORY_META, [ ...$directory, 'downloads_fetched_at' => $now ]);
+        raise_wporg_time_limit();
+        try {
+            $api_days = wporg_api_download_stats($marker->post_name);
+        } catch (WporgSvnException $e) {
+            continue;
+        }
+        update_post_meta($id, PBLSH_DOWNLOADS_META, wporg_directory_merge_downloads(get_plugin_downloads($id), $api_days));
+    }
+}
+
+
+/** Whether a marker's download history is due for its daily fetch: not yet fetched on the current UTC day. */
+function is_wporg_download_stats_due(int $fetched_at, int $now): bool {
+    return $fetched_at <= 0 || gmdate('Y-m-d', $fetched_at) !== gmdate('Y-m-d', $now);
+}
+
+
+/**
+ * A download history with the API's days merged in: the API's count replaces the stored
+ * one for every day it serves, the other days stay; days without downloads are not kept.
+ *
+ * @param array<string, int> $days     The history as stored (get_plugin_downloads()).
+ * @param array<string, int> $api_days The API's days (wporg_api_download_stats()).
+ * @return array<string, int> In day order.
+ */
+function wporg_directory_merge_downloads(array $days, array $api_days): array {
+    foreach ($api_days as $day => $count) {
+        if ($count > 0) {
+            $days[$day] = $count;
+        } else {
+            unset($days[$day]);
+        }
+    }
+    ksort($days, SORT_STRING);
+    return $days;
+}
+
+
+/**
  * The REST view of a marker's directory cache: `installations` — the list's and the
  * header's cell, one shape with the self-hosted count (serialize_self_hosted_installations())
- * —, `wporg_stats`, the editor's dashboard, and `wporg_check`, when the plugin was last
- * brought in step with wordpress.org and the last failure since. Unix times become ISO 8601
- * UTC, never → null.
+ * —, `downloads`, the figures in the shape of the self-hosted ones
+ * (summarize_plugin_downloads()): the directory's all-time total and the windows of the
+ * history fetched from the stats API, null until there is one —, `wporg_stats`, the editor's
+ * dashboard, and `wporg_check`, when the plugin was last brought in step with wordpress.org
+ * and the last failure since. Unix times become ISO 8601 UTC, never → null.
  *
- * @return array{installations: array, wporg_stats: array, wporg_check: array}
+ * @return array{installations: array, downloads: array, wporg_stats: array, wporg_check: array}
  */
 function serialize_wporg_directory(int $plugin_id): array {
     $directory = get_wporg_directory($plugin_id);
+    $days = get_plugin_downloads($plugin_id);
+    $windows = $days === [] ? [ 'last_7_days' => null, 'last_30_days' => null ] : summarize_plugin_downloads($days);
     $iso = static fn(int $timestamp): ?string => $timestamp > 0 ? gmdate('Y-m-d\TH:i:s\Z', $timestamp) : null;
     $error = static fn(?array $error): ?array => $error === null ? null : [
         'code' => $error['code'],
@@ -306,6 +371,11 @@ function serialize_wporg_directory(int $plugin_id): array {
         'installations' => [
             'state' => $directory['state'],
             'count' => $directory['active_installs'],
+        ],
+        'downloads' => [
+            'total' => $directory['downloaded'],
+            'last_7_days' => $windows['last_7_days'],
+            'last_30_days' => $windows['last_30_days'],
         ],
         'wporg_stats' => [
             'downloaded' => $directory['downloaded'],

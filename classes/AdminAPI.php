@@ -280,8 +280,9 @@ class AdminAPI {
      * or the first creation of its wordpress.org tag), null without one.
      * `installations` is the channel's figure with its state (self-hosted the exact
      * 24-hour count or 'disabled', wordpress.org the cached public figure), `downloads` the
-     * figures of the download history counted here (self-hosted only; null wordpress.org,
-     * whose all-time total is the directory's), `wporg_stats` the wordpress.org dashboard
+     * download figures of both channels in one shape — the total and the last 7 and 30 days:
+     * self-hosted counted here, wordpress.org the directory's total with the windows of the
+     * history fetched from the stats API —, `wporg_stats` the wordpress.org dashboard
      * figures, `wporg_check` and `wporg_token` the state of the copy against wordpress.org
      * (all three null self-hosted).
      *
@@ -314,7 +315,9 @@ class AdminAPI {
             'installations' => $is_self_hosted
                 ? serialize_self_hosted_installations((int) $post->ID)
                 : $wporg_directory['installations'],
-            'downloads' => $is_self_hosted ? summarize_plugin_downloads(get_plugin_downloads((int) $post->ID)) : null,
+            'downloads' => $is_self_hosted
+                ? summarize_plugin_downloads(get_plugin_downloads((int) $post->ID))
+                : $wporg_directory['downloads'],
             'wporg_stats' => $is_self_hosted ? null : $wporg_directory['wporg_stats'],
             // When the plugin was last brought in step with wordpress.org, and what its copy
             // here was made from — sent back with the next refresh (wporg_sync_token()).
@@ -650,6 +653,8 @@ class AdminAPI {
         $markers = $plugin_id === null
             ? get_posts([ 'post_type' => 'pblsh_wporg_plugin', 'post_status' => 'any', 'posts_per_page' => -1 ])
             : [ get_post($plugin_id) ];
+        // The download history rides along with the look, once a day per plugin.
+        refresh_wporg_download_stats($markers, time());
         $known = is_array($params['known'] ?? null) ? $params['known'] : [];
         $stats = [];
         $outdated = [];
@@ -1391,9 +1396,11 @@ class AdminAPI {
 
         // The directory data of the new markers — figures and stamp — in one batched request, so
         // their rows arrive complete instead of waiting for the list's next look. A failure is
-        // recorded on the marker like any other and retried by the automatic path.
+        // recorded on the marker like any other and retried by the automatic path. Their
+        // download history starts here too: the stats API's full window, once.
         if ($imported !== []) {
             refresh_wporg_directory(array_column($imported, 'id'));
+            refresh_wporg_download_stats(array_map('get_post', array_column($imported, 'id')), time());
         }
 
         return [

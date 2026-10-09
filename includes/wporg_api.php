@@ -17,6 +17,12 @@ require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
 
 const PBLSH_WPORG_API_URL = 'https://api.wordpress.org/plugins/info/1.2/';
 
+/** The plugin stats API: the daily downloads of a plugin. */
+const PBLSH_WPORG_STATS_URL = 'https://api.wordpress.org/stats/plugin/1.0/downloads.php';
+
+/** The most days the stats API serves — asked for more, it falls back to about 180. */
+const PBLSH_WPORG_DOWNLOAD_STATS_DAYS = 730;
+
 /** The API answers 422 above this many slugs per plugin_information request. */
 const PBLSH_WPORG_API_SLUGS_PER_REQUEST = 100;
 
@@ -234,14 +240,35 @@ function wporg_api_unavailable(): WporgSvnException {
 
 
 /**
- * GET against the info API, decoded. Every non-2xx status, transport error or non-JSON
- * body is wporg_api_unavailable — the slugs form and query_plugins never encode a
- * determinate outcome in the HTTP status.
+ * The daily downloads of a plugin as the stats API serves them: UTC day (Y-m-d) → downloads,
+ * the last PBLSH_WPORG_DOWNLOAD_STATS_DAYS complete days — the running day is not among them.
+ * An unknown plugin answers with no days. A body that is no map of days is unavailable.
+ *
+ * @return array<string, int>
+ * @throws WporgSvnException wporg_api_unavailable
+ */
+function wporg_api_download_stats(string $slug): array {
+    $data = wporg_api_get([ 'slug' => $slug, 'limit' => PBLSH_WPORG_DOWNLOAD_STATS_DAYS ], PBLSH_WPORG_STATS_URL);
+    $days = [];
+    foreach ($data as $day => $count) {
+        if (!is_string($day) || preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) !== 1 || !is_numeric($count)) {
+            throw wporg_api_unavailable();
+        }
+        $days[$day] = (int) $count;
+    }
+    return $days;
+}
+
+
+/**
+ * GET against a wordpress.org API (the info API by default), decoded. Every non-2xx
+ * status, transport error or non-JSON body is wporg_api_unavailable — the slugs form,
+ * query_plugins and the stats never encode a determinate outcome in the HTTP status.
  *
  * @throws WporgSvnException
  */
-function wporg_api_get(array $query): array {
-    $response = wp_remote_get(add_query_arg($query, PBLSH_WPORG_API_URL), [
+function wporg_api_get(array $query, string $url = PBLSH_WPORG_API_URL): array {
+    $response = wp_remote_get(add_query_arg($query, $url), [
         'timeout' => 20,
         'redirection' => 3,
         'user-agent' => wporg_user_agent(),

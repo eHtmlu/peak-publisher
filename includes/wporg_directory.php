@@ -351,7 +351,8 @@ function wporg_directory_merge_downloads(array $days, array $api_days): array {
  * header's cell, one shape with the self-hosted count (serialize_self_hosted_installations())
  * —, `downloads`, the figures in the shape of the self-hosted ones
  * (summarize_plugin_downloads()): the directory's all-time total and the windows of the
- * history fetched from the stats API, null until there is one —, `wporg_stats`, the editor's
+ * history fetched from the stats API, null until there is one; the running day is never
+ * known, the API serves complete days only —, `wporg_stats`, the editor's
  * dashboard, and `wporg_check`, when the plugin was last brought in step with wordpress.org
  * and the last failure since. Unix times become ISO 8601 UTC, never → null.
  *
@@ -374,6 +375,7 @@ function serialize_wporg_directory(int $plugin_id): array {
         ],
         'downloads' => [
             'total' => $directory['downloaded'],
+            'today' => null,
             'last_7_days' => $windows['last_7_days'],
             'last_30_days' => $windows['last_30_days'],
         ],

@@ -263,21 +263,23 @@ function get_plugin_downloads(int $plugin_post_id): array {
 }
 
 /**
- * The figures of a download history: the all-time total and the last 7 and 30 days, today
- * included (`$today` as a UTC Y-m-d; the current day by default).
+ * The figures of a download history: the all-time total, the running day's count, and the
+ * last 7 and 30 complete days — up to yesterday, today not among them, so the windows stand
+ * still through the day and mean the same on both channels (the stats API of wordpress.org
+ * serves complete days only). `$today` as a UTC Y-m-d; the current day by default.
  *
  * @param array<string, int> $days
- * @return array{total: int, last_7_days: int, last_30_days: int}
+ * @return array{total: int, today: int, last_7_days: int, last_30_days: int}
  */
 function summarize_plugin_downloads(array $days, ?string $today = null): array {
     $end = new \DateTimeImmutable($today ?? gmdate('Y-m-d'), new \DateTimeZone('UTC'));
     $today = $end->format('Y-m-d');
-    $since_7 = $end->modify('-6 days')->format('Y-m-d');
-    $since_30 = $end->modify('-29 days')->format('Y-m-d');
-    $out = [ 'total' => 0, 'last_7_days' => 0, 'last_30_days' => 0 ];
+    $since_7 = $end->modify('-7 days')->format('Y-m-d');
+    $since_30 = $end->modify('-30 days')->format('Y-m-d');
+    $out = [ 'total' => 0, 'today' => $days[$today] ?? 0, 'last_7_days' => 0, 'last_30_days' => 0 ];
     foreach ($days as $day => $count) {
         $out['total'] += $count;
-        if ($day >= $since_30 && $day <= $today) {
+        if ($day >= $since_30 && $day < $today) {
             $out['last_30_days'] += $count;
             if ($day >= $since_7) {
                 $out['last_7_days'] += $count;

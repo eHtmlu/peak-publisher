@@ -65,24 +65,33 @@ lodash.set(window, 'Pblsh.InstallationsUtils', (() => {
     }
 
     // The editor's Downloads figure: the all-time total, or what stands in for it, with the
-    // last 7 and 30 days in the tooltip — a self-hosted plugin's counted here, a
-    // wordpress.org plugin's total as the directory reports it and its windows from the
-    // history the stats API fills once a day (complete days, so today is not in them), none
-    // until the first fetch.
+    // last 7 and 30 complete days in the tooltip, today apart — a self-hosted plugin's
+    // counted here, today's running count with them; a wordpress.org plugin's total as the
+    // directory reports it and its windows from the history the stats API fills once a day,
+    // none until the first fetch, and never today: the API serves complete days only.
     function getDownloads(plugin) {
         if (plugin.installations.state === 'closed') return { text: '—', title: getWporgClosedFact(plugin.wporg_stats.closed) };
-        const { total, last_7_days, last_30_days } = plugin.downloads;
+        const { total, today, last_7_days, last_30_days } = plugin.downloads;
         if (typeof total !== 'number') return { text: '—', title: __('Not fetched from wordpress.org yet', 'peak-publisher') };
         const text = total.toLocaleString();
         if (typeof last_7_days !== 'number') return { text, title: __('Total downloads · Reported by wordpress.org', 'peak-publisher') };
+        if (typeof today !== 'number') {
+            return {
+                text,
+                title: sprintf(
+                    /* translators: 1: downloads of the last 7 complete days, 2: downloads of the last 30 complete days */
+                    __('Total downloads · Reported by wordpress.org · %1$s in the last 7 days · %2$s in the last 30 days', 'peak-publisher'),
+                    last_7_days.toLocaleString(),
+                    last_30_days.toLocaleString(),
+                ),
+            };
+        }
         return {
             text,
             title: sprintf(
-                plugin.hosting_type === 'wporg'
-                    /* translators: 1: downloads of the last 7 days, 2: downloads of the last 30 days */
-                    ? __('Total downloads · Reported by wordpress.org · %1$s in the last 7 days · %2$s in the last 30 days', 'peak-publisher')
-                    /* translators: 1: downloads of the last 7 days, 2: downloads of the last 30 days */
-                    : __('Total downloads · Counted by Peak Publisher · %1$s in the last 7 days · %2$s in the last 30 days', 'peak-publisher'),
+                /* translators: 1: downloads today so far, 2: downloads of the last 7 complete days, 3: downloads of the last 30 complete days */
+                __('Total downloads · Counted by Peak Publisher · %1$s today · %2$s in the last 7 days · %3$s in the last 30 days', 'peak-publisher'),
+                today.toLocaleString(),
                 last_7_days.toLocaleString(),
                 last_30_days.toLocaleString(),
             ),

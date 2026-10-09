@@ -476,7 +476,7 @@ final class WporgDirectoryTest extends TestCase {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         self::assertSame([
             'installations' => [ 'state' => 'never', 'count' => null ],
-            'downloads' => [ 'total' => null, 'last_7_days' => null, 'last_30_days' => null ],
+            'downloads' => [ 'total' => null, 'today' => null, 'last_7_days' => null, 'last_30_days' => null ],
             'wporg_stats' => [ 'downloaded' => null, 'rating' => null, 'num_ratings' => null, 'closed' => null ],
             'wporg_check' => [ 'checked_at' => null, 'error' => null ],
         ], serialize_wporg_directory($marker->ID), 'installations and downloads in the shape of the self-hosted ones');
@@ -488,7 +488,7 @@ final class WporgDirectoryTest extends TestCase {
         $out = serialize_wporg_directory($marker->ID);
         self::assertSame([ 'state' => 'ok', 'count' => 1000 ], $out['installations']);
         self::assertSame([ 'downloaded' => 977, 'rating' => 100, 'num_ratings' => 4, 'closed' => null ], $out['wporg_stats']);
-        self::assertSame([ 'total' => 977, 'last_7_days' => null, 'last_30_days' => null ], $out['downloads'], 'the windows wait for the history');
+        self::assertSame([ 'total' => 977, 'today' => null, 'last_7_days' => null, 'last_30_days' => null ], $out['downloads'], 'the windows wait for the history');
         self::assertSame([ 'checked_at' => '2027-01-15T08:00:00Z', 'error' => [ 'code' => 'svn_unreachable', 'message' => 'down', 'at' => '2027-01-15T09:00:00Z' ] ], $out['wporg_check']);
     }
 

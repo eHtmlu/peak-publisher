@@ -280,9 +280,10 @@ class AdminAPI {
      * or the first creation of its wordpress.org tag), null without one.
      * `installations` is the channel's figure with its state (self-hosted the exact
      * 24-hour count or 'disabled', wordpress.org the cached public figure), `downloads` the
-     * download figures of both channels in one shape — the total and the last 7 and 30 days:
-     * self-hosted counted here, wordpress.org the directory's total with the windows of the
-     * history fetched from the stats API —, `wporg_stats` the wordpress.org dashboard
+     * download figures of both channels in one shape — the total, today and the last 7 and
+     * 30 complete days: self-hosted counted here, wordpress.org the directory's total with
+     * the windows of the history fetched from the stats API and no today —, `wporg_stats`
+     * the wordpress.org dashboard
      * figures, `wporg_check` and `wporg_token` the state of the copy against wordpress.org
      * (all three null self-hosted).
      *

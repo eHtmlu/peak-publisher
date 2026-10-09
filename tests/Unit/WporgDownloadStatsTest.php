@@ -114,11 +114,14 @@ final class WporgDownloadStatsTest extends TestCase {
     public function test_the_directory_view_serves_the_total_with_the_windows_of_the_history(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
         update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, array_merge(get_wporg_directory(0), [ 'state' => 'ok', 'active_installs' => 10, 'downloaded' => 977 ]));
-        $today = gmdate('Y-m-d');
         $yesterday = gmdate('Y-m-d', time() - DAY_IN_SECONDS);
         $forty_days_ago = gmdate('Y-m-d', time() - 40 * DAY_IN_SECONDS);
         update_post_meta($marker->ID, PBLSH_DOWNLOADS_META, [ $forty_days_ago => 100, $yesterday => 3 ]);
 
-        self::assertSame([ 'total' => 977, 'last_7_days' => 3, 'last_30_days' => 3 ], serialize_wporg_directory($marker->ID)['downloads'], "the total is the directory's, the windows the history's, today ($today) not in it");
+        self::assertSame(
+            [ 'total' => 977, 'today' => null, 'last_7_days' => 3, 'last_30_days' => 3 ],
+            serialize_wporg_directory($marker->ID)['downloads'],
+            "the total is the directory's, the windows the history's, today never known"
+        );
     }
 }

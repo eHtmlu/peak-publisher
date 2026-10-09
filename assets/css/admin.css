@@ -2539,19 +2539,88 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin: 0;
 }
 
-/* The page footer: white across the content area, held at the window's bottom while the
-   content passes above, with the inset above itself — the footer owns that distance, so
-   nothing at the bottom of the content brings a bottom margin of its own. */
+/* The page footer (AdminUI::render_peak_publisher()): white across the content area, held at
+   the window's bottom while the content passes above, with the inset above itself — the footer
+   owns that distance, so nothing at the bottom of the content brings a bottom margin of its own.
+   One quiet row in the admin footer's size and gray: the identity at its start, the links at
+   its end — gray like the text, dark on hover, so the row stays calm beside the content. */
 .pblsh--footer {
     position: sticky;
     bottom: 0;
     z-index: 100;
     box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
     height: var(--pblsh-footer-height);
     margin: var(--pblsh-page-inset) 0 0 calc(-1 * var(--pblsh-page-inset));
     padding: 0 var(--pblsh-page-inset);
     background: #fff;
     border-top: 1px solid var(--border-color-medium);
+    font-size: 0.875rem; /* 14px */
+    color: #646970;
+    white-space: nowrap;
+}
+
+.pblsh--footer__identity {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-width: 0;
+}
+
+/* The brand: the mark and the name, one link. */
+.pblsh--footer__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: inherit;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.pblsh--footer__brand svg {
+    height: 1rem; /* 16px */
+    width: auto;
+}
+
+.pblsh--footer__links {
+    display: flex;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* A dot between the links, on the list item: outside the link, so it neither clicks nor
+   underlines. */
+.pblsh--footer__links > li + li::before {
+    content: "·" / "";
+    margin: 0 0.75rem;
+    color: #a7aaad;
+}
+
+.pblsh--footer__link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.pblsh--footer__brand:hover,
+.pblsh--footer__brand:focus,
+.pblsh--footer__link:hover,
+.pblsh--footer__link:focus {
+    color: #1d2327;
+}
+
+.pblsh--footer__link:hover,
+.pblsh--footer__link:focus {
+    text-decoration: underline;
+}
+
+@media (max-width: 48.875rem) { /* 782px — the row keeps the identity only, as WordPress drops its footer */
+    .pblsh--footer__links {
+        display: none;
+    }
 }
 
 /* Table Styles */

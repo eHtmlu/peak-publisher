@@ -135,8 +135,26 @@ lodash.set(window, 'Pblsh.API', {
             body: settings,
         });
     },
-    testSvnCredentials: async (username, password) => {
-        return await window.Pblsh.API.request('admin/svn/test-credentials', {
+    getWporgAccounts: async () => {
+        return await window.Pblsh.API.request('admin/wporg/accounts');
+    },
+    // id null connects a new account; an id changes that account (password '' keeps the stored one)
+    saveWporgAccount: async (id, body) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts' + (id ? '/' + id : ''), {
+            method: id ? 'PUT' : 'POST',
+            body,
+        });
+    },
+    deleteWporgAccount: async (id) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts/' + id, { method: 'DELETE' });
+    },
+    // Tests the stored credentials of an account — records the verdict, refreshes the avatar
+    testWporgAccount: async (id) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts/' + id + '/test', { method: 'POST' });
+    },
+    // Tests credentials that are not saved — nothing is stored or recorded
+    testWporgCredentials: async (username, password) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts/test', {
             method: 'POST',
             body: { username, password },
         });

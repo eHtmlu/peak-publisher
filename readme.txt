@@ -147,6 +147,8 @@ Your wordpress.org SVN password is encrypted with AES-256-GCM before it is saved
 
 You can optionally harden this: define a `PBLSH_ENCRYPTION_KEY` constant in your `wp-config.php` and its key material is used in addition to the key file — an attacker then needs both locations. Generate a value with `php -r "echo 'base64:' . base64_encode(random_bytes(32));"` and add it as `define('PBLSH_ENCRYPTION_KEY', 'base64:...');`. Since this changes the key material, you will be asked to re-enter your password once afterwards. The same applies when you remove the constant again.
 
+Deleting Peak Publisher from the Plugins screen in WordPress removes the stored credentials and the key file; your plugins and releases stay. Removing the plugin folder by hand leaves everything in place.
+
 = Why is an import needed to manage a wordpress.org plugin? =
 Peak Publisher caches information about plugins, releases, and assets to ensure fast and smooth operation. To minimize the load on the wordpress.org SVN server, the data is permanently cached and only updated selectively when changes are made to the SVN repository. Therefore, the cache needs to be built once for each new plugin.
 

@@ -22,13 +22,22 @@ namespace Pblsh\Tests {
         public static array $actions = [];
         /** @var array<string, callable[]> The filter callbacks per hook, in the order they were added. */
         public static array $filters = [];
-        /** @var array<int, array{code:int, body:string}|\WP_Error> Scripted answers of wp_remote_get(), consumed in order. */
+        /** @var array<int, array{code:int, body:string, headers?:array<string, string>}|\WP_Error> Scripted answers of wp_remote_get(), consumed in order; header names lowercase. */
         public static array $http_responses = [];
         /** @var array<int, array{url:string, args:array}> Every wp_remote_get() call, in order. */
         public static array $http_requests = [];
         public static int $next_post_id = 1;
+        /** The failure of the next wp_insert_post() or wp_update_post() (consumed by it); null = writes succeed. */
+        public static ?\WP_Error $post_write_error = null;
         /** The uploads base directory of this test — a fresh temp directory per test. */
         public static string $upload_dir = '';
+
+        /** The scripted failure of this post write, consumed; null = it succeeds. */
+        public static function take_post_write_error(): ?\WP_Error {
+            $error = self::$post_write_error;
+            self::$post_write_error = null;
+            return $error;
+        }
 
         public static function reset(): void {
             self::$posts = [];
@@ -39,6 +48,7 @@ namespace Pblsh\Tests {
             self::$http_responses = [];
             self::$http_requests = [];
             self::$next_post_id = 1;
+            self::$post_write_error = null;
             if (self::$upload_dir !== '' && is_dir(self::$upload_dir)) {
                 self::remove_directory(self::$upload_dir);
             }
@@ -130,7 +140,12 @@ namespace {
             if (isset($args['title']) && $post->post_title !== (string) $args['title']) continue;
             $matches[] = clone $post;
         }
-        usort($matches, static fn(WP_Post $a, WP_Post $b): int => [$b->post_date, $b->ID] <=> [$a->post_date, $a->ID]);
+        // Like WP_Query: by date, newest first, unless asked for the ID order.
+        $key = ($args['orderby'] ?? 'date') === 'ID'
+            ? static fn(WP_Post $post): array => [$post->ID]
+            : static fn(WP_Post $post): array => [$post->post_date, $post->ID];
+        $ascending = strtoupper((string) ($args['order'] ?? 'DESC')) === 'ASC';
+        usort($matches, static fn(WP_Post $a, WP_Post $b): int => $ascending ? $key($a) <=> $key($b) : $key($b) <=> $key($a));
         if ($limit > 0) {
             $matches = array_slice($matches, 0, $limit);
         }
@@ -140,7 +155,12 @@ namespace {
         return $matches;
     }
 
-    function wp_insert_post(array $postarr, bool $wp_error = false): int {
+    /** Like WordPress: a failed write is 0, or the WP_Error when asked for it. */
+    function wp_insert_post(array $postarr, bool $wp_error = false) {
+        $error = FakeWordPress::take_post_write_error();
+        if ($error !== null) {
+            return $wp_error ? $error : 0;
+        }
         $post = new WP_Post($postarr);
         $post->ID = FakeWordPress::$next_post_id++;
         FakeWordPress::$posts[$post->ID] = $post;
@@ -150,7 +170,11 @@ namespace {
         return $post->ID;
     }
 
-    function wp_update_post(array $postarr, bool $wp_error = false): int {
+    function wp_update_post(array $postarr, bool $wp_error = false) {
+        $error = FakeWordPress::take_post_write_error();
+        if ($error !== null) {
+            return $wp_error ? $error : 0;
+        }
         $id = (int) ($postarr['ID'] ?? 0);
         $post = FakeWordPress::$posts[$id] ?? null;
         if ($post === null) {
@@ -250,6 +274,15 @@ namespace {
         return preg_replace('/[^A-Za-z0-9._-]/', '-', basename($filename));
     }
 
+    /** WordPress's sanitize_user(): tags and entities gone; strict keeps only A-Za-z0-9 space _ . - @; whitespace collapsed. */
+    function sanitize_user(string $username, bool $strict = false): string {
+        $username = preg_replace('/&.+?;/', '', strip_tags($username)) ?? '';
+        if ($strict) {
+            $username = preg_replace('|[^a-z0-9 _.\-@]|i', '', $username) ?? '';
+        }
+        return preg_replace('|\s+|', ' ', trim($username)) ?? '';
+    }
+
     function trailingslashit(string $value): string {
         return rtrim($value, '/\\') . '/';
     }
@@ -303,6 +336,10 @@ namespace {
 
     function wp_remote_retrieve_body($response): string {
         return is_array($response) ? $response['body'] : '';
+    }
+
+    function wp_remote_retrieve_header($response, string $header) {
+        return is_array($response) ? ($response['headers'][strtolower($header)] ?? '') : '';
     }
 
     function add_query_arg(array $args, string $url): string {

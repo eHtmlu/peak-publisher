@@ -5,12 +5,16 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, ToggleControl, TextControl, TextareaControl } = wp.components;
     const { showAlert, getSvgIcon, getChannelLabel, getChannelIcon } = Pblsh.Utils;
-    const { WporgAccountForm, NoticeBox, ScrollFrame, RelativeTime } = Pblsh.Components;
+    const { WporgAccountForm, WporgAccountSpellingNotice, NoticeBox, ScrollFrame, RelativeTime } = Pblsh.Components;
     const settingsController = window.Pblsh.Controllers.Settings;
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const loading = useSelect((select) => select('pblsh/settings').isLoading(), []);
     const saving = useSelect((select) => select('pblsh/settings').isSaving(), []);
+    const accounts = useSelect((select) => select('pblsh/wporg-accounts').getAccounts(), []);
+    const accountsLoaded = useSelect((select) => select('pblsh/wporg-accounts').isLoaded(), []);
+    const accountsBusy = useSelect((select) => select('pblsh/wporg-accounts').isSaving(), []);
+    const accountsLoadError = useSelect((select) => select('pblsh/wporg-accounts').getLoadError(), []);
     const hasWporgPlugins = useSelect((select) => select('pblsh/plugins').getPlugins().some((plugin) => plugin.hosting_type === 'wporg'), []);
     const [settings, setSettings] = useState({
         standalone_mode: false,
@@ -22,15 +26,18 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     });
     const [currentPage, setCurrentPage] = useState('general');
     const [wporgAccountEditing, setWporgAccountEditing] = useState(false);
+    // What the last save in this dialog found out about the username's spelling — on the
+    // card until the next account action here.
+    const [accountSpelling, setAccountSpelling] = useState(null);
     // Avatar loading can fail (Gravatar blocked, offline admin) — an empty-avatar
     // placeholder (person icon in the avatar's round footprint) steps in then.
     const [wporgAvatarFailed, setWporgAvatarFailed] = useState(false);
 
-    const storedAccount = (Array.isArray(serverSettings?.wporg_accounts) ? serverSettings.wporg_accounts : [])[0] || null;
-    // A different stored account gets a fresh avatar attempt.
+    const storedAccount = accounts[0] || null;
+    // A different avatar URL gets a fresh attempt.
     useEffect(() => {
         setWporgAvatarFailed(false);
-    }, [storedAccount?.username || '']);
+    }, [storedAccount?.avatar_url || '']);
 
     // The settings as the server holds them. Without them there is nothing to edit and
     // nothing safe to save — a save sends the server's settings with this form's fields put
@@ -75,10 +82,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     const cloneServerSettings = () => JSON.parse(JSON.stringify(serverSettings));
 
     const buildSavePayload = () => {
-        // The account card saves itself through the shared form — this payload only
-        // carries the plain settings and passes the stored (masked) accounts through.
+        // The account card saves itself through the accounts store — this payload
+        // carries the plain settings alone.
         const payload = cloneServerSettings();
-        delete payload.wporg_credentials;
 
         payload.standalone_mode = !!settings.standalone_mode;
         payload.auto_remove_workspace_artifacts = !!settings.auto_remove_workspace_artifacts;
@@ -109,11 +115,9 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         if (!confirm(message)) {
             return;
         }
+        setAccountSpelling(null);
         try {
-            const payload = cloneServerSettings();
-            delete payload.wporg_credentials;
-            payload.wporg_accounts = [];
-            await settingsController.save(payload);
+            await window.Pblsh.Controllers.WporgAccounts.remove(storedAccount.id);
         } catch (e) {
             showAlert(e.message, 'error');
         }
@@ -138,20 +142,15 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             ),
         );
     }
-    // Tests the stored (masked) credentials against wordpress.org — the endpoint
-    // records the verdict on the account. Success feedback is the badge jumping
-    // to a fresh "Verified" time after the reload; failures alert their message.
-    const handleTestStoredCredentials = async (accountUsername) => {
+    // Tests the stored credentials against wordpress.org — the endpoint records the
+    // verdict on the account and refreshes its avatar. Success feedback is the badge
+    // jumping to a fresh "Verified" time; failures alert their message.
+    const handleTestStoredCredentials = async () => {
+        setAccountSpelling(null);
         try {
-            const result = await window.Pblsh.API.testSvnCredentials(accountUsername, Pblsh.Utils.WPORG_PASSWORD_MASKED);
-            if (!result || result.status !== 'ok') {
-                showAlert(__('Connection test failed.', 'peak-publisher'), 'error');
-            }
+            await window.Pblsh.Controllers.WporgAccounts.test(storedAccount.id);
         } catch (e) {
             showAlert(e && e.message ? e.message : __('Connection test failed.', 'peak-publisher'), 'error');
-        } finally {
-            // Reload the masked accounts so verified_at / rejection state update.
-            await settingsController.fetch().catch((e) => showAlert(e.message, 'error'));
         }
     };
 
@@ -184,6 +183,12 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     };
 
     const renderWporgAccountCard = () => {
+        // Until the list is there; a failed load falls through to the form, which tells it.
+        if (!accountsLoaded && !accountsLoadError) {
+            return createElement('div', { className: 'pblsh--loading' },
+                createElement('div', { className: 'pblsh--loading__spinner' }),
+            );
+        }
         const hasStoredAccount = !!(storedAccount && storedAccount.username);
         const passwordUsable = !!storedAccount?.password_usable;
 
@@ -191,7 +196,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             // The form carries its own prominent frame — it replaces the card
             // instead of nesting inside it (one frame at a time).
             return createElement(WporgAccountForm, {
-                onSaved: () => setWporgAccountEditing(false),
+                onSaved: (spelling) => { setAccountSpelling(spelling); setWporgAccountEditing(false); },
                 onCancel: hasStoredAccount ? () => setWporgAccountEditing(false) : null,
             });
         }
@@ -202,14 +207,13 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         return createElement('div', { className: 'pblsh--wporg-account-card' },
             createElement('div', { className: 'pblsh--wporg-account-card__identity' },
                 createElement('span', { className: 'pblsh--wporg-account-card__avatar' },
-                    wporgAvatarFailed
+                    wporgAvatarFailed || !storedAccount.avatar_url
                         ? createElement('span', { className: 'pblsh--wporg-account-card__avatar-fallback' },
                             getSvgIcon('account', { size: 40 }))
                         : createElement('img', {
                             className: 'pblsh--wporg-account-card__avatar-image',
-                            // Official wordpress.org avatar redirect — resolves the
-                            // account's Gravatar by username alone (s=128 for retina).
-                            src: 'https://wordpress.org/grav-redirect.php?user=' + encodeURIComponent(storedAccount.username) + '&s=128',
+                            // Resolved on the server when the account was saved or tested (128 px for retina).
+                            src: storedAccount.avatar_url,
                             alt: '',
                             onError: () => setWporgAvatarFailed(true),
                         }),
@@ -225,7 +229,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             createElement('div', { className: 'pblsh--wporg-account-card__manage' },
                 createElement(Button, {
                     isTertiary: true,
-                    onClick: () => setWporgAccountEditing(true),
+                    onClick: () => { setAccountSpelling(null); setWporgAccountEditing(true); },
                     label: __('Edit account', 'peak-publisher'),
                     icon: getSvgIcon('pencil', { size: 24 }),
                 }),
@@ -238,8 +242,8 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
                     children: ({ onClose }) => [
                         createElement(MenuItem, {
                             key: 'test',
-                            disabled: !passwordUsable,
-                            onClick: () => { handleTestStoredCredentials(storedAccount.username); onClose(); },
+                            disabled: !passwordUsable || accountsBusy,
+                            onClick: () => { handleTestStoredCredentials(); onClose(); },
                         },
                             getSvgIcon('check_circle', { size: 24 }),
                             __('Test connection', 'peak-publisher'),
@@ -247,7 +251,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
                         createElement(MenuItem, {
                             key: 'remove',
                             isDestructive: true,
-                            disabled: saving,
+                            disabled: accountsBusy,
                             onClick: () => { handleDisconnectWporgAccount(); onClose(); },
                         },
                             getSvgIcon('delete_forever', { size: 24 }),
@@ -261,6 +265,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             ) : (storedAccount.credentials_rejected ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-card__reentry' },
                 __('wordpress.org rejected the stored password. Edit the account and re-enter it.', 'peak-publisher'),
             ) : null),
+            createElement(WporgAccountSpellingNotice, { spelling: accountSpelling, className: 'pblsh--wporg-account-card__spelling' }),
             createElement(Button, {
                 className: 'pblsh--wporg-account-card__import',
                 isSecondary: true,

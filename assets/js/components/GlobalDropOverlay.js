@@ -8,7 +8,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const { getSvgIcon, getChannelLabel, getChannelDescription, getChannelIcon } = Pblsh.Utils;
     const { getReleaseContext, getReleasePresentation } = Pblsh.UploadResultUtils;
     const { useUploadChecks } = Pblsh.Hooks;
-    const { WporgImportFacts, WporgAccountForm, ChannelChoiceCards, Checklist, CurrentReleaseSwitch, NoticeBox, ScrollFrame } = Pblsh.Components;
+    const { WporgImportFacts, WporgAccountForm, WporgAccountSpellingNotice, ChannelChoiceCards, Checklist, CurrentReleaseSwitch, NoticeBox, ScrollFrame } = Pblsh.Components;
 
     const fileInputRef = useRef(null);
     const dialogRef = useRef(null);
@@ -44,6 +44,18 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const uploadChecks = useUploadChecks();
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
+    // What connecting the account in this dialog found out about the username's spelling,
+    // carried into the step that follows the account form; gone with the dialog.
+    const [accountSpelling, setAccountSpelling] = useState(null);
+
+    // The analysis records wordpress.org's verdict about the stored password on the account
+    // (credentials_rejected); the account form reads it from the accounts store.
+    const wporgAccessStatus = validationResult?.data?.hosting_type_targets?.wporg?.wporg_access_status || '';
+    useEffect(() => {
+        if (wporgAccessStatus === 'credentials_rejected') {
+            window.Pblsh.Controllers.WporgAccounts.fetch().catch(() => {});
+        }
+    }, [wporgAccessStatus, validationResult?.upload_id]);
 
     function getActiveUploadContext() {
         // Snapshot the central upload context for this upload run
@@ -77,6 +89,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         setIsProcessing(false);
         setProcessPhase('');
         setFilename('');
+        setAccountSpelling(null);
         resetResultDecisions();
     }
 
@@ -1106,11 +1119,8 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         let actions = null;
         if (screen === 'account') {
             body = createElement(WporgAccountForm, {
-                errorMessage: accessStatus === 'credentials_rejected'
-                    ? __('wordpress.org rejected the currently saved SVN password.', 'peak-publisher')
-                    : '',
                 // The saved credentials re-resolve the target context.
-                onSaved: () => refreshTargetContext(uploadId, meta),
+                onSaved: (spelling) => { setAccountSpelling(spelling); return refreshTargetContext(uploadId, meta); },
             });
             actions = [renderDiscardButton(uploadId)];
         } else if (screen === 'import') {
@@ -1166,6 +1176,14 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             // checklist's current-release row answers it.
             const currentReleaseSwitch = renderCurrentReleaseSwitch(context);
             body = currentReleaseSwitch && createElement('div', { className: 'pblsh--upload-result__current-release' }, currentReleaseSwitch);
+        }
+        if (isWporg && screen !== 'account' && screen !== 'not_found' && accountSpelling) {
+            // What connecting the account just found out about the username's spelling,
+            // carried into the step that follows the account form.
+            body = createElement(wp.element.Fragment, null,
+                createElement(WporgAccountSpellingNotice, { spelling: accountSpelling, className: 'pblsh--upload-result__spelling' }),
+                body,
+            );
         }
 
         return {

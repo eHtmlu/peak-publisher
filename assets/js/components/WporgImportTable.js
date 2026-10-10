@@ -31,7 +31,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
     // the state twin exists only to re-render the stop button.
     const stopRequestedRef = useRef(false);
 
-    const wporgAccount = useSelect((select) => select('pblsh/settings').getUsableWporgAccount(), []);
+    const wporgAccount = useSelect((select) => select('pblsh/wporg-accounts').getUsableAccount(), []);
     const wporgUsername = wporgAccount ? String(wporgAccount.username || '') : '';
     const accountReady = !!wporgUsername;
     const selectedRows = importRows.filter((row) => row && row.selected);

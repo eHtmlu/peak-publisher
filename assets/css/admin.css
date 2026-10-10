@@ -1525,6 +1525,10 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin-bottom: 1.5rem;
 }
 
+.pblsh--upload-result__spelling {
+    margin: 0 0 1.5rem;
+}
+
 .pblsh--current-release-switch {
     display: inline-flex;
     align-items: center;
@@ -3664,7 +3668,8 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 }
 
 /* A NoticeBox as a full-width card row; the card grid's gap owns the spacing. */
-.pblsh--wporg-account-card__reentry {
+.pblsh--wporg-account-card__reentry,
+.pblsh--wporg-account-card__spelling {
     grid-column: 1 / -1;
     margin: 0;
 }

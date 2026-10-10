@@ -1,10 +1,6 @@
 
 lodash.set(window, 'Pblsh.Utils', {
 
-    // Placeholder for a stored wordpress.org password in REST payloads — must
-    // match the server's WPORG_PASSWORD_MASKED constant.
-    WPORG_PASSWORD_MASKED: '__MASKED__',
-
     // Answers that arrive out of order must not put an older state over a newer
     // one. An order hands out numbers — whoever takes one later is the newer — and
     // lets an answer claim its key's place (a plugin's) only when no newer one holds

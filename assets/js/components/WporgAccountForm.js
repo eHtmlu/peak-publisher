@@ -1,9 +1,10 @@
 // WporgAccountForm Component - shared wordpress.org account form.
 // One form for every host: the Settings account card (edit state), the upload
-// overlay's access gate, and the import area's empty state. Saves immediately
-// through the settings store (single data source) and reports back via onSaved.
+// overlay's access gate, and the import area's empty state. Saves through the
+// accounts store (single data source) and reports back via onSaved(spelling): what
+// the save found out about the username's spelling (null when nothing), for the
+// host to show through WporgAccountSpellingNotice in the step that follows.
 const WporgAccountForm = ({
-    errorMessage = '',
     onSaved = null,
     onCancel = null,
 } = {}) => {
@@ -13,7 +14,6 @@ const WporgAccountForm = ({
     const { Button, TextControl } = wp.components;
     const { showAlert, getSvgIcon } = Pblsh.Utils;
     const { FaqLink, NoticeBox } = Pblsh.Components;
-    const PASSWORD_MASKED = Pblsh.Utils.WPORG_PASSWORD_MASKED;
     const PASSWORD_MANAGER_IGNORE_PROPS = {
         autoComplete: 'off',
         'data-lpignore': 'true',
@@ -23,16 +23,23 @@ const WporgAccountForm = ({
         'data-form-type': 'other',
     };
 
-    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
-    const saving = useSelect((select) => select('pblsh/settings').isSaving(), []);
+    const accounts = useSelect((select) => select('pblsh/wporg-accounts').getAccounts(), []);
+    const loaded = useSelect((select) => select('pblsh/wporg-accounts').isLoaded(), []);
+    const loading = useSelect((select) => select('pblsh/wporg-accounts').isLoading(), []);
+    const loadError = useSelect((select) => select('pblsh/wporg-accounts').getLoadError(), []);
+    const saving = useSelect((select) => select('pblsh/wporg-accounts').isSaving(), []);
+    const storage = useSelect((select) => select('pblsh/wporg-accounts').getStorage(), []);
 
-    const storedAccount = (Array.isArray(serverSettings?.wporg_accounts) ? serverSettings.wporg_accounts : [])[0] || null;
+    const storedAccount = accounts[0] || null;
     const storedUsername = storedAccount ? String(storedAccount.username || '') : '';
-    const storedPasswordUsable = !!storedAccount?.password_usable;
-    // A stored password that no longer decrypts (key material changed) must be re-entered.
-    const reentryRequired = !!storedAccount?.has_password && !storedPasswordUsable;
-    const storageStatus = serverSettings?.wporg_credentials?.storage_status || 'ok';
-    const storageMessage = serverSettings?.wporg_credentials?.storage_message || '';
+    // A stored password that no longer decrypts (key material changed) or that
+    // wordpress.org rejected must be re-entered.
+    const reentryRequired = !!storedAccount && !storedAccount.password_usable;
+    const rejected = !!storedAccount && storedAccount.password_usable && !!storedAccount.credentials_rejected;
+    // Editing keeps the stored password when the field stays empty; connecting needs one.
+    const passwordRequired = !storedAccount || reentryRequired || rejected;
+    const storageStatus = storage?.status || 'ok';
+    const storageMessage = storage?.message || '';
 
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -42,16 +49,12 @@ const WporgAccountForm = ({
     useEffect(() => {
         // Seed (and re-seed after saves) from the authoritative server state.
         setUsername(storedUsername);
-        setPassword(storedAccount?.has_password && storedPasswordUsable ? PASSWORD_MASKED : '');
+        setPassword('');
         setCredentialTestStatus(null);
-    }, [serverSettings && JSON.stringify(serverSettings.wporg_accounts)]);
+    }, [storedAccount && JSON.stringify(storedAccount)]);
 
     const setUsernameField = (value) => {
         setUsername(value);
-        // A masked password belongs to the stored username — a different name needs a fresh password.
-        if (password === PASSWORD_MASKED && value !== storedUsername) {
-            setPassword('');
-        }
         setCredentialTestStatus(null);
     };
 
@@ -60,11 +63,13 @@ const WporgAccountForm = ({
         setCredentialTestStatus(null);
     };
 
+    // Tests what is typed — only a typed password can be tested here; the stored one
+    // is tested from the account card.
     const handleTestCredentials = async () => {
         try {
             setTestingCredentials(true);
             setCredentialTestStatus(null);
-            const result = await window.Pblsh.API.testSvnCredentials(username || '', password || '');
+            const result = await window.Pblsh.API.testWporgCredentials(username || '', password || '');
             if (result && result.status === 'ok') {
                 setCredentialTestStatus({ type: 'success', message: __('Connection successful.', 'peak-publisher') });
             } else {
@@ -78,35 +83,27 @@ const WporgAccountForm = ({
     };
 
     const handleSave = async () => {
-        // The save endpoint itself verifies new passwords against wordpress.org
-        // and records the verdict — a rejected password surfaces as save error.
+        // The save endpoint verifies the credentials against wordpress.org, settles the
+        // username's spelling and records the verdict — a rejected password surfaces as
+        // save error.
         try {
-            // Clone the full server payload: the settings endpoint expects the complete
-            // settings object, and only the account row changes here.
-            const payload = JSON.parse(JSON.stringify(serverSettings || {}));
-            delete payload.wporg_credentials;
-            const accounts = Array.isArray(payload.wporg_accounts) ? payload.wporg_accounts : [];
-            accounts[0] = {
-                ...(accounts[0] && typeof accounts[0] === 'object' ? accounts[0] : {}),
+            const res = await window.Pblsh.Controllers.WporgAccounts.save(storedAccount ? storedAccount.id : null, {
                 username: username || '',
                 password: password || '',
-            };
-            payload.wporg_accounts = accounts;
-
-            await window.Pblsh.Controllers.Settings.save(payload);
+            });
             // Success feedback is the host's visible transition: the gate refreshes the
             // target, the settings card returns to its view state, the import area loads.
             if (typeof onSaved === 'function') {
-                await onSaved(username || '');
+                await onSaved(res && res.spelling ? res.spelling : null);
             }
         } catch (e) {
             showAlert(e && e.message ? e.message : __('Saving the account failed.', 'peak-publisher'), 'error');
         }
     };
 
-    // Saving clones the full server payload — without loaded server settings a save
-    // would reset every other setting to its default, so the form waits for them.
-    const canSubmit = !!serverSettings && storageStatus === 'ok' && username.trim() !== '' && password !== '' && !saving;
+    // Without the loaded accounts the form would not know whether it connects or edits.
+    const canSubmit = loaded && storageStatus === 'ok' && username.trim() !== '' && (password !== '' || !passwordRequired) && !saving;
+    const canTest = canSubmit && password !== '';
 
     return createElement('div', { className: 'pblsh--wporg-account-form' },
         createElement('div', { className: 'pblsh--wporg-account-form__main' },
@@ -120,9 +117,6 @@ const WporgAccountForm = ({
                         __('To manage your plugins in the wordpress.org SVN repository.', 'peak-publisher')),
                 ),
             ),
-            errorMessage ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-form__notice' },
-                errorMessage,
-            ) : null,
             storageStatus !== 'ok' ? createElement(NoticeBox, {
                 variant: 'error',
                 className: 'pblsh--wporg-account-form__notice',
@@ -130,8 +124,26 @@ const WporgAccountForm = ({
             },
                 storageMessage,
             ) : null,
+            // Without the list the form cannot know whether it connects or edits: the
+            // failed load is told here, with the way to try again.
+            !loaded && loadError ? createElement(NoticeBox, {
+                variant: 'error',
+                className: 'pblsh--wporg-account-form__notice',
+                title: __('The wordpress.org accounts could not be loaded', 'peak-publisher'),
+                error: loadError,
+            },
+                createElement('p', null, createElement(Button, {
+                    isLink: true,
+                    disabled: loading,
+                    // The store keeps the failure for this notice; nothing else to report.
+                    onClick: () => window.Pblsh.Controllers.WporgAccounts.fetch().catch(() => {}),
+                }, __('Try again', 'peak-publisher'))),
+            ) : null,
             reentryRequired ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-form__notice' },
                 __('The stored password can no longer be decrypted because the encryption key material changed. Please re-enter it.', 'peak-publisher'),
+            ) : null,
+            rejected ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-form__notice' },
+                __('wordpress.org rejected the stored password. Please re-enter it.', 'peak-publisher'),
             ) : null,
             createElement('div', { className: 'pblsh--wporg-account-form__fields' },
                 createElement('p', null,
@@ -159,7 +171,11 @@ const WporgAccountForm = ({
                     type: 'password',
                     label: __('SVN password', 'peak-publisher'),
                     value: password,
+                    // While editing, the field is empty and stays so unless a new password
+                    // replaces the stored one — the help line says so, a placeholder would
+                    // make the field look filled.
                     placeholder: 'svn_…',
+                    help: passwordRequired ? null : __('Leave empty to keep the stored password.', 'peak-publisher'),
                     onChange: setPasswordField,
                     disabled: storageStatus !== 'ok',
                     ...PASSWORD_MANAGER_IGNORE_PROPS,
@@ -179,7 +195,7 @@ const WporgAccountForm = ({
                     isSecondary: true,
                     onClick: handleTestCredentials,
                     isBusy: testingCredentials,
-                    disabled: !canSubmit || testingCredentials,
+                    disabled: !canTest || testingCredentials,
                     __next40pxDefaultSize: true,
                 }, __('Test connection', 'peak-publisher')),
                 typeof onCancel === 'function' ? createElement(Button, {

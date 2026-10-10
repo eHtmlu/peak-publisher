@@ -183,13 +183,18 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) {}
         };
 
-        // What the app starts with: the settings, the plugins, then the view the URL names. A
-        // list that cannot be loaded is told in its place, with the way to try again — nothing
-        // else can start without it.
+        // What the app starts with: the settings, the wordpress.org accounts, the plugins, then
+        // the view the URL names. A list that cannot be loaded is told in its place, with the
+        // way to try again — nothing else can start without it.
         const [listError, setListError] = useState(null);
         const loadApp = async () => {
             setListError(null);
-            try { await window.Pblsh.Controllers.Settings.fetch(); } catch (e) {}
+            // Independent of each other, so in one go; a failure is told where it matters
+            // (the settings dialog, the account form), not here.
+            await Promise.all([
+                window.Pblsh.Controllers.Settings.fetch().catch(() => {}),
+                window.Pblsh.Controllers.WporgAccounts.fetch().catch(() => {}),
+            ]);
             try {
                 await window.Pblsh.Controllers.Plugins.fetchList();
             } catch (error) {

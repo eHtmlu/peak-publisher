@@ -71,6 +71,9 @@ class WporgOperations {
         if ($credentials === null || empty($credentials['password'])) {
             throw self::exception('account_not_configured');
         }
+        // The stored spelling — the one wordpress.org's commit authorization knows; the
+        // caller's may be a marker's older spelling of the same account.
+        $username = $credentials['username'];
 
         $lock = self::acquire_wporg_deploy_lock($wporg_slug, $username, $operation, (int) $marker->ID);
         $client = null;
@@ -810,7 +813,7 @@ class WporgOperations {
         }
 
         try {
-            $access = self::svn_client($username, $credentials['password'])->check_repo_access($wporg_slug);
+            $access = self::svn_client($credentials['username'], $credentials['password'])->check_repo_access($wporg_slug);
         } catch (\Throwable $e) {
             return [
                 'status' => 'error',
@@ -969,6 +972,34 @@ class WporgOperations {
             $hint['relation'] = self::username_in_list($normalized, [ $creation['owner'] ]) ? 'owner' : 'not_listed';
         }
         return $hint;
+    }
+
+    /** How many of the account's plugins the spelling proof reads the history of. */
+    private const SPELLING_PROOF_PLUGINS = 3;
+
+    /**
+     * The spelling of a username as wordpress.org's commit history records it: the
+     * spelling that passed the commit authorization, which checks the login exactly
+     * (the password check ignores case, so a probe cannot tell). Read from the recent
+     * commits of the account's first plugins; null when the history shows no commit by
+     * the account — no plugins listed under it, other committers, API or SVN unavailable.
+     */
+    public static function proven_username_spelling(string $username): ?string {
+        try {
+            $plugins = wporg_api_query_plugins_by_author($username);
+        } catch (\Throwable $e) {
+            return null;
+        }
+        foreach (array_slice($plugins, 0, self::SPELLING_PROOF_PLUGINS) as $plugin) {
+            // SVN reads are anonymous on wordpress.org — no credentials needed.
+            $authors = self::svn_client()->get_recent_log_authors((string) $plugin['slug']);
+            foreach ($authors ?? [] as $author) {
+                if (strcasecmp((string) $author, $username) === 0) {
+                    return (string) $author;
+                }
+            }
+        }
+        return null;
     }
 
     /**

@@ -212,5 +212,24 @@ function init_custom_post_types(): void {
         'has_archive' => false,
         'rewrite' => false,
     ]);
+
+    // pblsh_wporg_account — a connected wordpress.org account (includes/wporg_accounts.php).
+    // Never public, no admin UI, no REST, no export, no revisions: its meta holds the
+    // encrypted SVN password.
+    register_post_type('pblsh_wporg_account', [
+        'labels' => [
+            'name' => 'wordpress.org Accounts',
+            'singular_name' => 'wordpress.org Account',
+        ],
+        'public' => false,
+        'show_ui' => false,
+        'show_in_menu' => false,
+        'show_in_rest' => false,
+        'can_export' => false,
+        'supports' => ['title'],
+        'capability_type' => 'post',
+        'has_archive' => false,
+        'rewrite' => false,
+    ]);
 }
 add_action('init', __NAMESPACE__ . '\\init_custom_post_types');

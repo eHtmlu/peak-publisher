@@ -10,8 +10,8 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onFin
     const { useState, useEffect, useRef, createElement, createInterpolateElement, Fragment } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
-    const { copyText, getSvgIcon, showAlert } = Pblsh.Utils;
-    const { ChannelChoiceCards, NoticeBox, TipLink, WporgAccountForm, WporgImportTable } = Pblsh.Components;
+    const { copyText, getSvgIcon } = Pblsh.Utils;
+    const { ChannelChoiceCards, NoticeBox, TipLink, WporgAccountForm, WporgAccountSpellingNotice, WporgImportTable } = Pblsh.Components;
     const hljs = window.hljs;
 
     const [bootstrapCode, setBootstrapCode] = useState('');
@@ -29,10 +29,11 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onFin
     // outcome — success and failure both, no silent copy either way.
     const [copyFeedback, setCopyFeedback] = useState(null); // { key, ok }
     const copyFeedbackTimerRef = useRef(null);
-    const settingsFetchRequestedRef = useRef(false);
 
-    const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
-    const wporgAccount = useSelect((select) => select('pblsh/settings').getUsableWporgAccount(), []);
+    const wporgAccount = useSelect((select) => select('pblsh/wporg-accounts').getUsableAccount(), []);
+    // What connecting the account here found out about the username's spelling, shown
+    // above the import table that follows; gone with this flow.
+    const [accountSpelling, setAccountSpelling] = useState(null);
     const wporgUsername = wporgAccount ? String(wporgAccount.username || '') : '';
 
     // Labels only — the active step's card title right below says the rest.
@@ -128,13 +129,6 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onFin
             highlightCode();
         }
     }, [hostingType, selfHostedStep, bootstrapCode]);
-
-    useEffect(() => {
-        if (hostingType === 'wporg' && !serverSettings && !settingsFetchRequestedRef.current) {
-            settingsFetchRequestedRef.current = true;
-            window.Pblsh.Controllers.Settings.fetch().catch((e) => showAlert(e.message, 'error'));
-        }
-    }, [hostingType, serverSettings]);
 
     // The URL mirrors the wizard's route (channel + import screen): reloads and
     // copied links land where the user actually is, and a consumed seed never
@@ -394,15 +388,19 @@ lodash.set(window, 'Pblsh.Components.PluginAdditionProcess', ({ onCreated, onFin
             createElement('div', { className: 'pblsh--card' },
                 createElement('h3', { className: 'pblsh--card__title' }, __('Import your plugins from wordpress.org', 'peak-publisher')),
                 wporgUsername
-                    ? createElement(WporgImportTable, {
-                        onOpenPlugin: (pluginId) => {
-                            if (typeof onCreated === 'function') {
-                                onCreated(pluginId);
-                            }
-                        },
-                        onImported: () => setHasImported(true),
-                    })
-                    : createElement(WporgAccountForm),
+                    ? createElement(wp.element.Fragment, null,
+                        // What connecting the account just found out about the username's spelling.
+                        createElement(WporgAccountSpellingNotice, { spelling: accountSpelling }),
+                        createElement(WporgImportTable, {
+                            onOpenPlugin: (pluginId) => {
+                                if (typeof onCreated === 'function') {
+                                    onCreated(pluginId);
+                                }
+                            },
+                            onImported: () => setHasImported(true),
+                        }),
+                    )
+                    : createElement(WporgAccountForm, { onSaved: setAccountSpelling }),
             ),
         );
     };

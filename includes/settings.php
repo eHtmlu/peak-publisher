@@ -84,69 +84,28 @@ function get_peak_publisher_settings_defaults(): array {
 }
 
 /**
- * Gets the operational plugin settings (defaults + sanitized option).
- *
- * Runs on every public request (IP whitelist, install counting), so it stays
- * free of credential metadata — that lives in get_peak_publisher_settings_for_api().
+ * Gets the plugin settings (defaults + sanitized option). Runs on every public request
+ * (IP whitelist, install counting). The wordpress.org accounts are no setting — they
+ * live in includes/wporg_accounts.php.
  */
 function get_peak_publisher_settings(): array {
     $defaults = get_peak_publisher_settings_defaults();
     $raw = get_option('pblsh_settings');
     $data = is_array($raw) ? $raw : [];
-    $merged = array_merge($defaults, $data);
-    return sanitize_peak_publisher_non_secret_settings($merged);
-}
-
-/**
- * The settings shape served to the admin UI: the operational settings plus the
- * credential metadata (masked accounts with usability probes, storage status) —
- * per-account decrypt probes make this too expensive for the public path.
- */
-function get_peak_publisher_settings_for_api(): array {
-    $out = get_peak_publisher_settings();
-
-    $raw = get_option('pblsh_settings');
-    $stored_accounts = is_array($raw['wporg_accounts'] ?? null) ? $raw['wporg_accounts'] : [];
-    $out['wporg_accounts'] = get_wporg_accounts_for_api($stored_accounts);
-
-    $storage_status = get_credential_storage_status();
-    $out['wporg_credentials'] = [
-        'storage_status' => $storage_status['status'],
-        'storage_message' => $storage_status['message'],
-    ];
-
-    return $out;
+    return sanitize_peak_publisher_settings(array_merge($defaults, $data));
 }
 
 /**
  * Updates the plugin settings.
- *
- * @return true|\WP_Error
  */
-function update_peak_publisher_settings(array $settings) {
-    unset($settings['wporg_credentials']);
-
-    $current = get_option('pblsh_settings');
-    $current = is_array($current) ? $current : [];
-
-    $resolved = resolve_masked_wporg_passwords($settings, $current);
-    if (is_wp_error($resolved)) {
-        return $resolved;
-    }
-
-    $sanitized = sanitize_peak_publisher_settings($resolved, $current);
-    if (is_wp_error($sanitized)) {
-        return $sanitized;
-    }
-
-    update_option('pblsh_settings', $sanitized, false);
-    return true;
+function update_peak_publisher_settings(array $settings): void {
+    update_option('pblsh_settings', sanitize_peak_publisher_settings($settings), false);
 }
 
 /**
- * Sanitizes non-secret settings without touching stored credentials.
+ * Sanitizes the plugin settings — the same shape on the read and the save path.
  */
-function sanitize_peak_publisher_non_secret_settings(array $settings): array {
+function sanitize_peak_publisher_settings(array $settings): array {
     $out = [];
     $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
     $out['auto_remove_workspace_artifacts'] = (bool) ($settings['auto_remove_workspace_artifacts'] ?? true);
@@ -169,25 +128,5 @@ function sanitize_peak_publisher_non_secret_settings(array $settings): array {
     }, $ips)));
     $redirect_url = trim((string) ($settings['standalone_redirect_url'] ?? ''));
     $out['standalone_redirect_url'] = $redirect_url !== '' ? esc_url_raw($redirect_url) : '';
-    return $out;
-}
-
-/**
- * Sanitizes the plugin settings for the save path. $current (the stored option)
- * carries the accounts' credential-verdict stamps through the save.
- *
- * @return array|\WP_Error
- */
-function sanitize_peak_publisher_settings(array $settings, array $current = []) {
-    $out = sanitize_peak_publisher_non_secret_settings($settings);
-
-    $accounts = is_array($settings['wporg_accounts'] ?? null) ? $settings['wporg_accounts'] : [];
-    $current_accounts = is_array($current['wporg_accounts'] ?? null) ? $current['wporg_accounts'] : [];
-    $sanitized_accounts = sanitize_wporg_accounts($accounts, $current_accounts);
-    if (is_wp_error($sanitized_accounts)) {
-        return $sanitized_accounts;
-    }
-    $out['wporg_accounts'] = $sanitized_accounts;
-
     return $out;
 }

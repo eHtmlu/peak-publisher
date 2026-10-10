@@ -19,6 +19,7 @@ require_once __DIR__ . '/stubs/wordpress.php';
 
 require_once PBLSH_PLUGIN_DIR . 'includes/settings.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/encryption.php';
+require_once PBLSH_PLUGIN_DIR . 'includes/wporg_accounts.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/hosting.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_cache.php';
 require_once PBLSH_PLUGIN_DIR . 'includes/wporg_api.php';

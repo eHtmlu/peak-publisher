@@ -20,6 +20,9 @@ const PBLSH_WPORG_API_URL = 'https://api.wordpress.org/plugins/info/1.2/';
 /** The plugin stats API: the daily downloads of a plugin. */
 const PBLSH_WPORG_STATS_URL = 'https://api.wordpress.org/stats/plugin/1.0/downloads.php';
 
+/** wordpress.org's avatar redirect: resolves an account's Gravatar by username alone. */
+const PBLSH_WPORG_GRAVATAR_REDIRECT_URL = 'https://wordpress.org/grav-redirect.php';
+
 /** The most days the stats API serves — asked for more, it falls back to about 180. */
 const PBLSH_WPORG_DOWNLOAD_STATS_DAYS = 730;
 
@@ -257,6 +260,26 @@ function wporg_api_download_stats(string $slug): array {
         $days[$day] = (int) $count;
     }
     return $days;
+}
+
+
+/**
+ * The Gravatar URL of a wordpress.org account (128 px), read from wordpress.org's avatar
+ * redirect without following it — resolved once on the server, where the browser would
+ * pay the redirect's round trip on every admin page load. Null when wordpress.org does
+ * not answer with the redirect (unavailable, unexpected status).
+ */
+function wporg_profile_avatar_url(string $username): ?string {
+    $response = wp_remote_get(add_query_arg([ 'user' => $username, 's' => 128 ], PBLSH_WPORG_GRAVATAR_REDIRECT_URL), [
+        'timeout' => 10,
+        'redirection' => 0,
+        'user-agent' => wporg_user_agent(),
+    ]);
+    if (is_wp_error($response) || (int) wp_remote_retrieve_response_code($response) !== 302) {
+        return null;
+    }
+    $location = trim((string) wp_remote_retrieve_header($response, 'location'));
+    return str_starts_with($location, 'https://') ? $location : null;
 }
 
 

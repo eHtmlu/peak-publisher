@@ -16,7 +16,10 @@ code in this repository creates today:
   `{tag_revision, plugin_data, plugin_info, plugin_readme_txt}`; `post_date` = when the version
   was first published: self-hosted the upload, kept by a Replace; wporg the first creation of
   its tag in SVN (`wporg_tag_publication_times()`), kept on every later change of the tag;
-  status always `publish`).
+  status always `publish`), `pblsh_wporg_account` (a connected wordpress.org account:
+  `post_title` = the username in the spelling the commit history proves or the user entered,
+  unique without regard to case; `post_author` = who connected it; `post_date` = when; status
+  always `publish`; `includes/wporg_accounts.php`).
 - **Post meta:** plugin `_pblsh_current_release` (version string of the current release, `''` =
   none; written only by finalize, the flip and the migration), the assets manifest
   `assets_icons` / `assets_banners` / `assets_screenshots` (keyed by filename, one entry per
@@ -42,9 +45,11 @@ code in this repository creates today:
   check's record — the stamp `{version, last_updated, assets: filename → revision}` of the last completed check, when that
   was and the last failure since — and the day's claim of the download history's fetch, regenerable, not declared), `_pblsh_wporg_import` (the import forecast
   `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
-  wporg `_pblsh_upload_state` (the deploy's upload state).
-- **Options:** `pblsh_settings` (settings incl. `wporg_accounts` with AES-256-GCM encrypted
-  passwords and verdict stamps), `pblsh_secret_salt`, `pblsh_encryption_context_id`,
+  wporg `_pblsh_upload_state` (the deploy's upload state); account `_pblsh_password` (the
+  AES-256-GCM ciphertext of the SVN password, `includes/encryption.php`), `_pblsh_verdict`
+  (`{verified_at, rejected_at}` — wordpress.org's latest verdict about the credentials, null =
+  never / not since), `_pblsh_avatar_url` (the resolved Gravatar URL, `''` = unresolved).
+- **Options:** `pblsh_settings` (settings), `pblsh_secret_salt`, `pblsh_encryption_context_id`,
   `pblsh_schema_version` (autoloaded), `pblsh_upgrade_notice` (facts of the migration until
   dismissed), `pblsh_schema_migration_lock` (only while the migration runs).
 - **Files** under `wp-content/uploads/pblsh-peak-publisher/`:
@@ -52,6 +57,9 @@ code in this repository creates today:
   `wporg-plugins/{slug}/mirror/assets/` (the slot files of a wporg plugin's SVN `assets/`,
   regenerable), `wporg-plugins/{slug}/pending/assets/` (the files of the working copy's puts
   under their canonical names, user work), `encryption-key.php`, `tmp/` (upload working directories, transient).
+
+`uninstall.php` removes the secrets when WordPress deletes the plugin (Plugins screen, WP-CLI): the account posts,
+`pblsh_encryption_context_id` and `encryption-key.php`; everything else stays for a reinstall.
 
 Everything between live and current is development state and disposable: development and test
 data are regenerated, never migrated. Migration code moves data from the live schema to the

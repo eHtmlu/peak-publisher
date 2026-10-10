@@ -148,9 +148,34 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
-        register_rest_route(self::NAMESPACE, '/admin/svn/test-credentials', [
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts', [
+            'methods' => 'GET',
+            'callback' => [$this, 'get_wporg_accounts_rest'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts', [
             'methods' => 'POST',
-            'callback' => [$this, 'test_svn_credentials'],
+            'callback' => [$this, 'connect_wporg_account'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/test', [
+            'methods' => 'POST',
+            'callback' => [$this, 'test_wporg_credentials'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/(?P<id>\d+)', [
+            'methods' => 'PUT',
+            'callback' => [$this, 'update_wporg_account'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/(?P<id>\d+)', [
+            'methods' => 'DELETE',
+            'callback' => [$this, 'disconnect_wporg_account'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/(?P<id>\d+)/test', [
+            'methods' => 'POST',
+            'callback' => [$this, 'test_wporg_account'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
@@ -1027,106 +1052,115 @@ class AdminAPI {
     }
 
     public function get_peak_publisher_settings_rest(): array {
-        return get_peak_publisher_settings_for_api();
+        return get_peak_publisher_settings();
     }
 
-    public function save_peak_publisher_settings_rest(\WP_REST_Request $request) {
+    public function save_peak_publisher_settings_rest(\WP_REST_Request $request): array {
         $params = $request->get_json_params();
         if (!is_array($params)) { $params = []; }
-        $result = update_peak_publisher_settings($params);
-        if (is_wp_error($result)) {
-            return $this->rest_error_response($result);
-        }
-        if ($result !== true) {
-            return $this->rest_error_response(new \WP_Error(
-                'settings_save_failed',
-                __('Settings could not be saved.', 'peak-publisher'),
-                [ 'status' => 500 ]
-            ));
-        }
-        return get_peak_publisher_settings_for_api();
+        update_peak_publisher_settings($params);
+        return get_peak_publisher_settings();
     }
 
-    public function test_svn_credentials(\WP_REST_Request $request) {
-        // Accept only JSON object bodies; malformed requests fall back to empty input.
+    public function get_wporg_accounts_rest(): array {
+        return wporg_accounts_payload();
+    }
+
+    public function connect_wporg_account(\WP_REST_Request $request) {
+        return $this->save_wporg_account_rest(null, $request);
+    }
+
+    public function update_wporg_account(\WP_REST_Request $request) {
+        $account = get_wporg_account((int) $request['id']);
+        if ($account === null) {
+            return $this->wporg_account_not_found();
+        }
+        return $this->save_wporg_account_rest($account, $request);
+    }
+
+    /**
+     * Connect and change share the one write path of the accounts module; the answer is
+     * the accounts as they are now, which account this was, and what the save found out
+     * about the username's spelling (save_wporg_account()).
+     */
+    private function save_wporg_account_rest(?\WP_Post $account, \WP_REST_Request $request) {
         $params = $request->get_json_params();
         if (!is_array($params)) {
             $params = [];
         }
+        $saved = save_wporg_account($account, $params['username'] ?? null, wporg_string_from_value($params['password'] ?? ''));
+        if (is_wp_error($saved)) {
+            return $this->rest_error_response($saved);
+        }
+        return wporg_accounts_payload() + [
+            'account_id' => (int) $saved['account']->ID,
+            'spelling' => $saved['spelling'],
+        ];
+    }
 
-        // Normalize the username exactly like the settings save pipeline does.
-        $username = normalize_wporg_username($params['username'] ?? null);
+    public function disconnect_wporg_account(\WP_REST_Request $request) {
+        $account = get_wporg_account((int) $request['id']);
+        if ($account === null) {
+            return $this->wporg_account_not_found();
+        }
+        delete_wporg_account($account);
+        return wporg_accounts_payload();
+    }
+
+    /**
+     * Tests the stored credentials of an account — the explicit probe: the verdict is
+     * recorded with $force (the badge jump is the feedback), the avatar resolved anew.
+     */
+    public function test_wporg_account(\WP_REST_Request $request) {
+        $account = get_wporg_account((int) $request['id']);
+        if ($account === null) {
+            return $this->wporg_account_not_found();
+        }
+        $password = wporg_account_password($account);
+        if (is_wp_error($password)) {
+            return $this->rest_error_response($password);
+        }
+        $probe_error = probe_wporg_credentials((string) $account->post_title, $password);
+        if ($probe_error !== null) {
+            if ($probe_error->get_error_code() === 'invalid_credentials') {
+                record_wporg_account_verdict($account, false);
+            }
+            return $this->rest_error_response($probe_error);
+        }
+        record_wporg_account_verdict($account, true, true);
+        refresh_wporg_account_avatar($account);
+        return wporg_accounts_payload() + [ 'account_id' => (int) $account->ID ];
+    }
+
+    /** Tests credentials the user typed but has not saved — nothing is stored or recorded. */
+    public function test_wporg_credentials(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
         if (is_wp_error($username)) {
             return $this->rest_error_response($username);
         }
-
-        // Preserve password bytes except for requiring an actual string value.
         $password = wporg_string_from_value($params['password'] ?? '');
         if ($password === '') {
-            return $this->rest_error_response($this->make_rest_error(
-                'invalid_credentials',
-                __('Invalid wordpress.org username or password.', 'peak-publisher'),
-                401
-            ));
+            return $this->rest_error_response($this->make_rest_error('invalid_credentials', __('Invalid wordpress.org username or password.', 'peak-publisher'), 401, 'password'));
         }
+        // Keep testing aligned with saving: credentials are only accepted when they can be
+        // stored securely. A test must not create the key file, though — that is the first save's job.
+        $storage_error = get_credential_storage_error();
+        if ($storage_error !== null) {
+            return $this->rest_error_response($storage_error);
+        }
+        $probe_error = probe_wporg_credentials($username, $password);
+        if ($probe_error !== null) {
+            return $this->rest_error_response($probe_error);
+        }
+        return [ 'status' => 'ok' ];
+    }
 
-        // A masked password means the user is testing the stored credential — the
-        // probe's verdict is then recorded on the stored account.
-        $using_stored_credentials = false;
-        if ($password === WPORG_PASSWORD_MASKED) {
-            $using_stored_credentials = true;
-            $credentials = get_wporg_credentials($username);
-            if (is_wp_error($credentials)) {
-                return $this->rest_error_response($credentials);
-            }
-            // Missing stored credentials should behave like an authentication failure.
-            if ($credentials === null) {
-                return $this->rest_error_response($this->make_rest_error(
-                    'invalid_credentials',
-                    __('Invalid wordpress.org username or password.', 'peak-publisher'),
-                    401
-                ));
-            }
-            $password = $credentials['password'];
-        } else {
-            // Keep testing aligned with saving: credentials are only accepted when they
-            // can be stored securely. A test must not create the key file, though — that
-            // is the first save's job.
-            $storage_error = get_credential_storage_error();
-            if ($storage_error !== null) {
-                return $this->rest_error_response($storage_error);
-            }
-        }
-
-        // Load the wordpress.org plugin SVN client only for the endpoint that needs it.
-        require_once __DIR__ . '/WporgPluginSvnClient.php';
-        try {
-            // An MKACTIVITY probe verifies Basic Auth without checking plugin permissions.
-            $client = new WporgPluginSvnClient($username, $password);
-            $client->test_credentials();
-            if ($using_stored_credentials) {
-                // Explicit probe: always refresh the stamp — the badge jump is the feedback.
-                record_wporg_credentials_verdict($username, true, true);
-            }
-            return [ 'status' => 'ok' ];
-        } catch (WporgSvnException $e) {
-            if ($using_stored_credentials && $e->get_error_code() === 'invalid_credentials') {
-                record_wporg_credentials_verdict($username, false);
-            }
-            // Known SVN failures keep their normalized error code and HTTP status.
-            return $this->rest_error_response($this->make_rest_error(
-                $e->get_error_code(),
-                $e->getMessage(),
-                $e->get_http_status()
-            ));
-        } catch (\RuntimeException $e) {
-            // Unexpected runtime failures are hidden behind a generic SVN auth error.
-            return $this->rest_error_response($this->make_rest_error(
-                'svn_auth_check_failed',
-                __('wordpress.org SVN returned an unexpected authentication response.', 'peak-publisher'),
-                502
-            ));
-        }
+    private function wporg_account_not_found(): \WP_REST_Response {
+        return $this->rest_error_response($this->make_rest_error('account_not_found', __('Account not found.', 'peak-publisher'), 404));
     }
 
     public function discover_wporg_plugins(\WP_REST_Request $request) {
@@ -1140,7 +1174,11 @@ class AdminAPI {
             return $this->rest_error_response($username);
         }
 
-        if (!in_array($username, get_usable_wporg_account_usernames(), true)) {
+        $credentials = get_wporg_credentials($username);
+        if (is_wp_error($credentials)) {
+            return $this->rest_error_response($credentials);
+        }
+        if ($credentials === null) {
             return $this->rest_error_response($this->make_rest_error(
                 'account_not_configured',
                 __('Account not configured.', 'peak-publisher'),
@@ -1148,6 +1186,8 @@ class AdminAPI {
                 'username'
             ));
         }
+        // The stored spelling from here on (get_wporg_credentials()).
+        $username = $credentials['username'];
 
         try {
             $plugins = wporg_api_query_plugins_by_author($username);
@@ -1250,6 +1290,8 @@ class AdminAPI {
                 'username'
             ));
         }
+        // The stored spelling from here on (get_wporg_credentials()).
+        $username = $credentials['username'];
 
         $existing = get_posts([
             'post_type' => 'pblsh_wporg_plugin',
@@ -1322,6 +1364,8 @@ class AdminAPI {
                 'username'
             ));
         }
+        // The stored spelling from here on (get_wporg_credentials()): the markers record it.
+        $username = $credentials['username'];
 
         $slugs = $this->validate_wporg_import_slugs($params);
         if (is_wp_error($slugs)) {

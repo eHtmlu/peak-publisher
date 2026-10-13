@@ -70,7 +70,7 @@ class AdminUI {
         $links = [
             'https://wordpress.org/support/plugin/peak-publisher/' => __('Support', 'peak-publisher'),
             'https://www.wppeak.com/plugins/peak-publisher/' => __('What\'s next', 'peak-publisher'),
-            'https://ehtmlu.com/donate' => __('Buy me a coffee', 'peak-publisher') . ' ☕',
+            'https://www.wppeak.com/donate/' => __('Buy me a coffee', 'peak-publisher') . ' ☕',
         ];
         $links_html = '';
         foreach ($links as $url => $label) {

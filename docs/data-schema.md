@@ -4,16 +4,20 @@ Live: schema version 0 (Peak Publisher 1.3.1, released 2026-04-04 on wordpress.o
 
 Two schemas exist, never more. The **live schema** is the one publicly rolled out — the data on
 users' sites: Peak Publisher 1.3.1 knows no schema version option (`pblsh_schema_version` absent
-= live), keeps release posts with status `publish`/`draft` and assets manifest entries
-`{filename, revision, resolution, local}`. The **current schema** is what the
+= live), keeps release posts with status `publish`/`draft` whose content is the upload state
+of finalize, md5 or sha256 content hashes over the workspace directory, and assets manifest
+entries `{filename, revision, resolution, local}`. The **current schema** is what the
 code in this repository creates today:
 
 - **Posts:** `pblsh_plugin` (self-hosted plugin, `post_name` = slug, status Public/Draft = the
   distribution switch), `pblsh_wporg_plugin` (wporg marker; `post_content` = the regenerable SVN
-  cache `{revision, release_count, fetched_at, trunk_readme}`), `pblsh_release` (child of the
-  plugin, `post_title` = version, `post_name` from `get_release_slug()`; `post_content` = for
-  self-hosted the upload state `$data` of finalize, for wporg the tag snapshot
-  `{tag_revision, plugin_data, plugin_info, plugin_readme_txt}`; `post_date` = when the version
+  cache `{revision, release_count, fetched_at, trunk_readme}`, `trunk_readme` = `{stable_tag,
+  file_name, screenshots, tested}` of trunk's readme), `pblsh_release` (child of the
+  plugin, `post_title` = version, `post_name` from `get_release_slug()`; `post_content` = the
+  snapshot `{plugin_data, plugin_info, plugin_readme_txt}` on both channels — self-hosted
+  derived from the release ZIP (`release_snapshot_from_zip()`, `includes/releases.php`), wporg
+  from the tag, with `tag_revision` there; `plugin_data` carries `TestedUpTo` beside WordPress's
+  headers (`read_plugin_headers()`); `post_date` = when the version
   was first published: self-hosted the upload, kept by a Replace; wporg the first creation of
   its tag in SVN (`wporg_tag_publication_times()`), kept on every later change of the tag;
   status always `publish`), `pblsh_wporg_account` (a connected wordpress.org account:
@@ -28,7 +32,12 @@ code in this repository creates today:
   first banner file, for the generated icon),
   `_pblsh_installations` (24-hour counting cache, regenerable, not declared), `_pblsh_downloads`
   (the download history: UTC day `Y-m-d` → delivered release ZIPs, unbounded, absent = none
-  yet; its total is the sum of its days; `includes/functions.php`); marker: the same
+  yet; its total is the sum of its days; `includes/functions.php`); both plugin types
+  `_pblsh_operations` (the operations log: every write Peak Publisher made to the published
+  state, newest first, unbounded — `{operation, at, user {id, login}, username, revision,
+  details}`; wporg the SVN commits with account and revision, self-hosted the edits of a
+  release after its upload with username and revision null; `includes/operations_log.php`);
+  marker: the same
   manifest metas and `assets_banners_color` describing the assets mirror (revision = the SVN
   revision the file was last changed in; regenerable from SVN), `_pblsh_wporg_assets`
   (`{revision, other_files, color_source, pending}` — the revision of `assets/` the
@@ -39,13 +48,15 @@ code in this repository creates today:
   `_pblsh_downloads` (the download history from the stats API, merged day by day: UTC day
   `Y-m-d` → downloads; the API's window of 730 days moves on, what it leaves behind stays
   here and is not regenerable; `includes/wporg_directory.php`),
-  `_pblsh_wporg_account_username`, `_pblsh_wporg_operations` (the operations log: every SVN
-  write Peak Publisher committed, newest first, unbounded — `{operation, at, user {id, login},
-  username, revision, details}`), `_pblsh_wporg_directory` (the directory cache: the daily info API figures and the
+  `_pblsh_wporg_account_username`, `_pblsh_wporg_directory` (the directory cache: the daily info API figures and the
   check's record — the stamp `{version, last_updated, assets: filename → revision}` of the last completed check, when that
   was and the last failure since — and the day's claim of the download history's fetch, regenerable, not declared), `_pblsh_wporg_import` (the import forecast
-  `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`, `_pblsh_directory_content_hash`,
-  wporg `_pblsh_upload_state` (the deploy's upload state); account `_pblsh_password` (the
+  `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`,
+  `_pblsh_directory_content_hash` (sha256 over the paths and file contents of the shipped
+  tree, `content_hash_from_entries()` in `includes/releases.php`; `''` when the ZIP is
+  missing), `_pblsh_upload_state` (both channels: the upload state `$data` of finalize,
+  verbatim — the forensic record of the upload; before schema 1 the self-hosted release
+  post's content); account `_pblsh_password` (the
   AES-256-GCM ciphertext of the SVN password, `includes/encryption.php`), `_pblsh_verdict`
   (`{verified_at, rejected_at}` — wordpress.org's latest verdict about the credentials, null =
   never / not since), `_pblsh_avatar_url` (the resolved Gravatar URL, `''` = unresolved).
@@ -53,7 +64,8 @@ code in this repository creates today:
   `pblsh_schema_version` (autoloaded), `pblsh_upgrade_notice` (facts of the migration until
   dismissed), `pblsh_schema_migration_lock` (only while the migration runs).
 - **Files** under `wp-content/uploads/pblsh-peak-publisher/`:
-  `plugins/{slug}/releases/{slug}.{version}.zip`, `plugins/{slug}/assets/`,
+  `plugins/{slug}/releases/{slug}.{version}.zip` (an entry for every directory, empty ones
+  included), `plugins/{slug}/assets/`,
   `wporg-plugins/{slug}/mirror/assets/` (the slot files of a wporg plugin's SVN `assets/`,
   regenerable), `wporg-plugins/{slug}/pending/assets/` (the files of the working copy's puts
   under their canonical names, user work), `encryption-key.php`, `tmp/` (upload working directories, transient).

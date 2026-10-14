@@ -104,6 +104,8 @@ class AdminUI {
             'utils-upload.js',
             'utils-upload-result.js',
             'utils-current-release.js',
+            'utils-tested-up-to.js',
+            'utils-plugin-status.js',
             'utils-installations.js',
             'utils-wporg-check.js',
             'utils-assets.js',
@@ -213,6 +215,9 @@ class AdminUI {
                 // Icon fallback for plugins without directory assets — the endpoint
                 // generates the pattern purely from the slug in the URL.
                 'geopatternIconBase' => geopattern_icon_base_url(),
+                // The WordPress stable branch (x.y) from core's own version check — what a
+                // Tested up to is judged against (utils-tested-up-to.js).
+                'wordpressStableBranch' => wordpress_stable_branch(),
                 'assetSlots' => get_asset_slots(),
                 'channelTexts' => get_channel_texts(),
                 // Facts of the one-time schema upgrade (includes/upgrade.php), null once dismissed.

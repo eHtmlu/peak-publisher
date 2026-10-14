@@ -57,6 +57,14 @@ lodash.set(window, 'Pblsh.API', {
             body: { version, expected_pointer: expectedPointer },
         });
     },
+    // Set Tested up to of a release; expected is the value the editor showed, so a change by
+    // someone else in the meantime is refused, not overwritten
+    setReleaseTestedUpTo: async (releaseId, value, expected) => {
+        return await window.Pblsh.API.request('releases/' + releaseId + '/tested-up-to', {
+            method: 'POST',
+            body: { value, expected },
+        });
+    },
     // Bring the wordpress.org plugins up to date: every marker with whatever is due, or one —
     // the editor's Refresh, straight against SVN. `known` are the tokens of the rows the client
     // holds ({ [id]: wporg_token }). Answers { stats, plugins, changes, next_check_in,

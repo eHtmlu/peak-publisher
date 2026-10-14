@@ -394,4 +394,53 @@ namespace {
         }
         return $out;
     }
+
+    /** Site transients in the options store under a prefix; the fake knows no expiry. */
+    function get_site_transient(string $transient) {
+        return FakeWordPress::$options['_site_transient_' . $transient] ?? false;
+    }
+
+    function set_site_transient(string $transient, $value, int $expiration = 0): bool {
+        FakeWordPress::$options['_site_transient_' . $transient] = $value;
+        return true;
+    }
+
+    /** get_plugin_data() as the modules use it: WordPress's header list over get_file_data(). */
+    function get_plugin_data(string $plugin_file, bool $markup = true, bool $translate = true): array {
+        return get_file_data($plugin_file, [
+            'Name' => 'Plugin Name',
+            'PluginURI' => 'Plugin URI',
+            'Version' => 'Version',
+            'Description' => 'Description',
+            'Author' => 'Author',
+            'AuthorURI' => 'Author URI',
+            'TextDomain' => 'Text Domain',
+            'DomainPath' => 'Domain Path',
+            'Network' => 'Network',
+            'RequiresWP' => 'Requires at least',
+            'RequiresPHP' => 'Requires PHP',
+            'UpdateURI' => 'Update URI',
+            'RequiresPlugins' => 'Requires Plugins',
+        ]);
+    }
+
+    /** A temp file in this test's upload directory, like WordPress's in the uploads dir. */
+    function wp_tempnam(string $filename = '', string $dir = ''): string {
+        $path = tempnam(FakeWordPress::$upload_dir, 'tmp-' . preg_replace('/[^A-Za-z0-9._-]/', '', $filename));
+        return $path === false ? '' : $path;
+    }
+
+    function wp_delete_file(string $file): void {
+        if (file_exists($file)) {
+            unlink($file);
+        }
+    }
+
+    function wp_get_wp_version(): string {
+        return '7.1.3';
+    }
+
+    function get_bloginfo(string $show = ''): string {
+        return $show === 'version' ? '7.1.3' : '';
+    }
 }

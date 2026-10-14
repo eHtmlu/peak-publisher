@@ -8,6 +8,7 @@ use Pblsh\Tests\FakeWordPress;
 use Pblsh\Tests\Unit\TestCase;
 
 use function Pblsh\maybe_upgrade_schema;
+use function Pblsh\peak_publisher_upload_basedir;
 
 use const Pblsh\PBLSH_SCHEMA_VERSION;
 
@@ -165,5 +166,71 @@ final class UpgradeTest extends TestCase {
         );
         self::assertSame($migrated, get_post_meta($plugin->ID, 'assets_banners', true), 'an entry with figures is left alone');
         self::assertArrayNotHasKey('asset_manifest', get_option('pblsh_upgrade_notice')['topics'] ?? [], 'nothing for the operator to decide');
+    }
+
+    public function test_self_hosted_release_content_becomes_a_snapshot_and_the_upload_state_moves_to_meta(): void {
+        $plugin = $this->create_plugin('pblsh_plugin', 'my-plugin');
+        $zip = peak_publisher_upload_basedir() . '/plugins/my-plugin/releases/my-plugin.1.4.zip';
+        mkdir(dirname($zip), 0777, true);
+        $archive = new \ZipArchive();
+        $archive->open($zip, \ZipArchive::CREATE);
+        $archive->addFromString('my-plugin/my-plugin.php', "<?php\n/**\n * Plugin Name: My Plugin\n * Version: 1.4\n * Tested up to: 7.1\n */\n");
+        $archive->addFromString('my-plugin/readme.txt', "=== My Plugin ===\nStable tag: 1.4\n");
+        $archive->close();
+        $upload_state = [
+            'plugin_ok' => true,
+            'plugin_data' => [ 'Name' => 'My Plugin', 'Version' => '1.4' ],
+            'plugin_info' => [ 'normalized_version' => '1.4', 'main_file' => 'my-plugin.php', 'plugin_basename' => 'my-plugin/my-plugin.php', 'content_hash' => md5('x') ],
+            'plugin_readme_txt' => [ 'found' => true, 'file_name' => 'readme.txt', 'content' => [] ],
+            'cleanup_info' => [ 'size_after_cleanup' => 1 ],
+        ];
+        $release_id = wp_insert_post([ 'post_type' => 'pblsh_release', 'post_status' => 'publish', 'post_title' => '1.4', 'post_parent' => $plugin->ID, 'post_content' => json_encode($upload_state) ]);
+        update_post_meta($release_id, '_pblsh_zip_path', 'plugins/my-plugin/releases/my-plugin.1.4.zip');
+        update_post_meta($release_id, '_pblsh_directory_content_hash', md5('x'));
+
+        maybe_upgrade_schema();
+
+        $content = json_decode(get_post($release_id)->post_content, true);
+        self::assertSame([ 'plugin_data', 'plugin_info', 'plugin_readme_txt' ], array_keys($content));
+        self::assertSame('7.1', $content['plugin_data']['TestedUpTo'], 'read from the ZIP');
+        self::assertSame('1.4', $content['plugin_info']['normalized_version']);
+        self::assertSame($upload_state, json_decode(get_post_meta($release_id, '_pblsh_upload_state', true), true), 'the upload state, verbatim');
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', get_post_meta($release_id, '_pblsh_directory_content_hash', true), 'recomputed from the ZIP');
+
+        $content_before = get_post($release_id)->post_content;
+        delete_option('pblsh_schema_version');
+        maybe_upgrade_schema();
+        self::assertSame($content_before, get_post($release_id)->post_content, 'a second run finds nothing to do');
+    }
+
+    public function test_a_release_without_its_zip_keeps_the_three_keys_of_the_old_content(): void {
+        $plugin = $this->create_plugin('pblsh_plugin', 'my-plugin');
+        $release_id = wp_insert_post([ 'post_type' => 'pblsh_release', 'post_status' => 'publish', 'post_title' => '1.4', 'post_parent' => $plugin->ID, 'post_content' => json_encode([
+            'plugin_data' => [ 'Name' => 'My Plugin', 'Version' => '1.4' ],
+            'plugin_info' => [ 'normalized_version' => '1.4' ],
+            'plugin_readme_txt' => [ 'found' => false, 'file_name' => '', 'content' => [] ],
+            'cleanup_info' => [],
+        ]) ]);
+        update_post_meta($release_id, '_pblsh_zip_path', 'plugins/my-plugin/releases/gone.zip');
+
+        maybe_upgrade_schema();
+
+        $content = json_decode(get_post($release_id)->post_content, true);
+        self::assertSame([ 'plugin_data', 'plugin_info', 'plugin_readme_txt' ], array_keys($content));
+        self::assertSame('My Plugin', $content['plugin_data']['Name']);
+        self::assertSame('', get_post_meta($release_id, '_pblsh_directory_content_hash', true));
+        self::assertTrue(metadata_exists('post', $release_id, '_pblsh_upload_state'));
+    }
+
+    public function test_wporg_releases_and_migrated_self_hosted_releases_are_left_alone(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'wporg-plugin', 'publish', [ 'revision' => 1 ]);
+        $wporg_release = $this->create_release($marker, '1.0.0');
+        $plugin = $this->create_plugin('pblsh_plugin', 'my-plugin');
+        $migrated = $this->create_release($plugin, '1.0.0');
+
+        maybe_upgrade_schema();
+
+        self::assertFalse(metadata_exists('post', $wporg_release->ID, '_pblsh_upload_state'), 'a wporg tag snapshot was never an upload state');
+        self::assertFalse(metadata_exists('post', $migrated->ID, '_pblsh_upload_state'), 'a snapshot-shaped content has nothing to move');
     }
 }

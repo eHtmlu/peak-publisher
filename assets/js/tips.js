@@ -16,17 +16,18 @@
 // about getting through fastest, not about reciting the team's regulations.
 lodash.set(window, 'Pblsh.Tips', {
 
-    // The six recommended headers explained one by one, grouped by what they
-    // are for: presentation to people vs. compatibility checks by WordPress.
+    // The five recommended headers explained one by one, grouped by what they
+    // are for: presentation to people vs. compatibility checks by WordPress —
+    // and the one value that looks like a header but belongs in readme.txt.
     recommendedHeaders: () => {
         const { __ } = wp.i18n;
         const { createElement, createInterpolateElement } = wp.element;
 
         return {
-            title: __('6 highly recommended plugin headers', 'peak-publisher'),
+            title: __('5 highly recommended plugin headers', 'peak-publisher'),
             content: [
                 createElement('p', { key: 'intro' },
-                    __('Beyond the required headers, these six are highly recommended:', 'peak-publisher'),
+                    __('Beyond the required headers, these five are highly recommended:', 'peak-publisher'),
                 ),
                 createElement('h2', { key: 'people-title' }, __('What people see', 'peak-publisher')),
                 createElement('dl', { key: 'people-list', className: 'pblsh--plugin-headers' },
@@ -62,16 +63,27 @@ lodash.set(window, 'Pblsh.Tips', {
                         ),
                     ),
                     createElement('div', { className: 'pblsh--plugin-headers__group' },
-                        createElement('dt', { className: 'pblsh--plugin-headers__term' }, createElement('code', null, 'Tested up to')),
-                        createElement('dd', { className: 'pblsh--plugin-headers__desc' },
-                            createElement('p', null, __('The latest WordPress version you have verified your plugin against. Sites use it to judge whether an update is safe.', 'peak-publisher')),
-                        ),
-                    ),
-                    createElement('div', { className: 'pblsh--plugin-headers__group' },
                         createElement('dt', { className: 'pblsh--plugin-headers__term' }, createElement('code', null, 'Requires PHP')),
                         createElement('dd', { className: 'pblsh--plugin-headers__desc' },
                             createElement('p', null, __('The minimum PHP version your code needs. WordPress blocks activation on servers below it, preventing fatal errors from incompatible code.', 'peak-publisher')),
                         ),
+                    ),
+                ),
+                // The one value that looks like a plugin header but is a readme header: the
+                // directory and Plugin Check expect it in readme.txt; the plugin file is the
+                // place only for a self-hosted plugin shipped without one.
+                createElement('h2', { key: 'tested-title' }, createInterpolateElement(
+                    __('Leave <code>Tested up to</code> out of the plugin file — with one exception', 'peak-publisher'),
+                    { code: createElement('code') },
+                )),
+                createElement('p', { key: 'tested' },
+                    createInterpolateElement(
+                        __('<code>Tested up to</code> belongs in readme.txt: the <docs>WordPress documentation</docs> lists it as a readme header, and <check>Plugin Check</check> requires it there. The exception: technically, the value can also be placed in the plugin header — useful only for a self-hosted plugin that ships without any readme.txt (a wordpress.org plugin always has one). In all other cases, readme.txt is the correct location. Either way, the value is a note for users only — it never holds back an update.', 'peak-publisher'),
+                        {
+                            code: createElement('code'),
+                            docs: createElement('a', { href: 'https://developer.wordpress.org/plugins/wordpress-org/how-your-readme-txt-works/', target: '_blank', rel: 'noreferrer' }),
+                            check: createElement('a', { href: 'https://wordpress.org/plugins/plugin-check/', target: '_blank', rel: 'noreferrer' }),
+                        },
                     ),
                 ),
                 createElement('p', { key: 'docs' },

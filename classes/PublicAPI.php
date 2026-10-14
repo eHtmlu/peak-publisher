@@ -161,6 +161,15 @@ class PublicAPI {
         return false;
     }
 
+    /**
+     * The WordPress version of the asking site, from the User-Agent core sends with every
+     * request of its own ("WordPress/7.1.2; https://example.com"); '' when it names none.
+     */
+    private function client_wordpress_version(): string {
+        $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
+        return preg_match('/^WordPress\/([\d.]+(?:-[\w.]+)?)/', $user_agent, $m) ? $m[1] : '';
+    }
+
     private function get_untrusted_client_domain_from_user_agent() {
 
         // Get a sanitized user agent
@@ -280,7 +289,10 @@ class PublicAPI {
 		$result['contributors']   = array();
 
 		$result['requires']         = empty($plugin_data['RequiresWP']) ? false : $plugin_data['RequiresWP'];
-		$result['tested']           = empty($current_release_content['plugin_readme_txt']['content']['tested']) ? false : $current_release_content['plugin_readme_txt']['content']['tested'];
+		// The effective Tested up to as wordpress.org derives it (release_tested_up_to()),
+		// served as the asking site's branch needs it (served_tested_up_to()).
+		$tested                     = served_tested_up_to(release_tested_up_to($current_release)['value'], $this->client_wordpress_version());
+		$result['tested']           = $tested === '' ? false : $tested;
 		$result['requires_php']     = empty($plugin_data['RequiresPHP']) ? false : $plugin_data['RequiresPHP'];
 		$result['requires_plugins'] = empty($plugin_data['RequiresPlugins']) ? [] : array_map('trim', explode(',', $plugin_data['RequiresPlugins']));
 		$result['compatibility']    = array();
@@ -471,6 +483,10 @@ class PublicAPI {
             $release_data = $plugin_infos['release_data'];
             $current_version = $release->post_title;
             $plugin_data = $release_data['plugin_data'];
+            // `tested` like wordpress.org's update API: the sites' update screen says
+            // "Compatibility: Yes / Not tested" from it, comparing with the site's full version
+            // — served as the asking site's branch needs it (served_tested_up_to()).
+            $tested = served_tested_up_to(release_tested_up_to($release)['value'], $this->client_wordpress_version());
 
             $requires_plugins = (array) ($plugin_data['RequiresPlugins'] ? array_map('trim', explode(',', $plugin_data['RequiresPlugins'])) : []);
 
@@ -517,6 +533,7 @@ class PublicAPI {
                 empty($result['banners']) ? [] : [ 'banners' => $result['banners'] ],
                 empty($plugin_data['RequiresWP']) ? [] : [ 'requires' => $plugin_data['RequiresWP'] ],
                 empty($plugin_data['RequiresPHP']) ? [] : [ 'requires_php' => $plugin_data['RequiresPHP'] ],
+                $tested === '' ? [] : [ 'tested' => $tested ],
                 empty($requires_plugins) ? [] : [ 'requires_plugins' => $requires_plugins ]
             );
         }

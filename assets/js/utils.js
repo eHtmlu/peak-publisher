@@ -71,6 +71,10 @@ lodash.set(window, 'Pblsh.Utils', {
 
     // The plugin's public page in the wordpress.org directory.
     getWporgPluginUrl: (slug) => 'https://wordpress.org/plugins/' + encodeURIComponent(slug) + '/',
+    // The WordPress stable branch (x.y) a Tested up to is judged against — a site fact from
+    // core's own version check (AdminUI, wordpress_stable_branch()); never empty, the running
+    // version is its floor. The upload checklist judges against the branch its facts recorded.
+    getStableBranch: () => window.PblshData.wordpressStableBranch,
     // Get the deep link to one of the plugin's FAQ entries on wordpress.org (server-provided, see get_peak_publisher_faq_urls())
     getFaqUrl: (key) => (window.PblshData?.faqUrls || {})[key],
     // Generated fallback icon for plugins without directory assets (mirrors the

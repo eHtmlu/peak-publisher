@@ -102,7 +102,9 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     const getConflictBarText = (count) => sprintf(_n('%d conflict — resolve it to commit', '%d conflicts — resolve them to commit', count, 'peak-publisher'), count);
     const getCommittingText = () => __('Committing to wordpress.org…', 'peak-publisher');
     const getNoAccountCommitText = () => __('Committing assets needs your wordpress.org account — connect one under Settings › wordpress.org. Your changes are kept until then.', 'peak-publisher');
-    const getClosedAssetsNotice = () => __('The plugin is closed on wordpress.org — its page shows a generated icon and no banner until it is reopened.', 'peak-publisher');
+    // The closed box's second line in this tab, under the closed notice every tab shares
+    // (getWporgClosedNotice()): what the closure means for the assets.
+    const getClosedAssetsNotice = () => __('Its page shows a generated icon and no banner until it is reopened.', 'peak-publisher');
     // The commit's receipt; <revision /> is the WporgRevisionLink's slot (createInterpolateElement).
     const getCommittedText = () => __('Committed to wordpress.org in <revision />.', 'peak-publisher');
     const getShowWporgStateText = (showing) => showing ? __('Show my changes', 'peak-publisher') : __("Show wordpress.org's state", 'peak-publisher');

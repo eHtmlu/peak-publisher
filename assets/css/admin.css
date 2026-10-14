@@ -2826,40 +2826,49 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     min-width: 0;
 }
 
-/* The name line: the row's anchor, lifted above the table's 13px base — led, for the
-   exceptions only, by the status badge in the text flow, so a name that wraps keeps
-   the badge on its first line. */
+/* The name line: the row's anchor, lifted above the table's 13px base. */
 .pblsh--table__name-line {
     font-size: 0.9375rem; /* 15px */
 }
 
-/* Only the exceptions are marked (a public plugin is the normal case): the status word
-   in the status vocabulary's color — a mark, not a control, in the badge language of the
-   upload dialog's release type. Draft is the chosen state (dark gray, white text: seen,
-   not alarming), closed the directory's verdict (red). */
-.pblsh--table__status-badge {
-    display: inline-block;
-    vertical-align: middle;
-    margin-inline-end: 0.5rem;
+/* Status column: what needs attention, one item per line in the editor's notice vocabulary
+   (utils-plugin-status.js) — a mark, not a control. The variant colors the glyph (orange
+   warns, blue informs), the label stays text; a closed or draft plugin is a state, not a
+   problem, and shows the editor status button's dot in its color. A green check says all
+   clear, so the column is never blank. Not muted: it is the row's only carrier of that, and
+   the exceptions stand out by their label anyway. The items are a layout stack, hence the
+   gap. */
+.pblsh--table__status-header,
+.pblsh--table__status-cell {
     white-space: nowrap;
-    font-size: 0.6875rem; /* 11px */
-    line-height: 1;
-    padding: 0.25rem 0.5rem;
-    border-radius: 0.25rem; /* 4px */
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 600;
 }
 
-.pblsh--table__status-badge--draft {
-    background: var(--color-gray-dark);
-    color: #fff;
+.pblsh--table__status-cell {
+    font-size: 0.875rem; /* 14px */
 }
 
-.pblsh--table__status-badge--closed {
-    background: var(--color-red);
-    color: #fff;
+.pblsh--status-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
 }
+
+.pblsh--status-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: help;
+}
+
+.pblsh--status-item__glyph {
+    display: inline-flex;
+}
+
+.pblsh--status-item--warning .pblsh--status-item__glyph { color: var(--color-orange); }
+.pblsh--status-item--info .pblsh--status-item__glyph { color: var(--color-blue); }
+.pblsh--status-item--draft .pblsh--status-item__glyph { color: var(--color-gray-dark); }
+.pblsh--status-item--closed .pblsh--status-item__glyph { color: var(--color-red); }
+.pblsh--status-item--ok .pblsh--status-item__glyph { color: var(--color-green); }
 
 /* ChannelPath — the publish path in short (channel icon + slug), shared by
    the plugin list and the editor header. */
@@ -2932,6 +2941,86 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
 
 .pblsh--current-version--warning .pblsh--current-version__glyph { color: var(--color-orange); }
 .pblsh--current-version--info .pblsh--current-version__glyph { color: var(--color-blue); }
+
+/* Tested up to (editor header figure): the value with a state glyph whose tooltip says
+   what to do (PluginEditor.js, utils-tested-up-to.js) */
+.pblsh--tested-figure {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.pblsh--tested-figure__glyph {
+    display: inline-flex;
+}
+
+.pblsh--tested-figure--warning .pblsh--tested-figure__glyph { color: var(--color-orange); }
+
+/* Releases table, Tested up to column: the value with its edit pencil, or the inline field
+   with Save and Cancel; the field's error or hint takes a line of its own below the controls,
+   a warning as a notice box — tinted, easier to read than colored text. The form is a layout
+   stack of two tiers (hence the gap): the controls' row, then the messages. */
+.pblsh--table__tested-header,
+.pblsh--table__tested-cell {
+    white-space: nowrap;
+}
+
+.pblsh--table__tested-cell {
+    color: #666;
+    font-size: 0.875rem; /* 14px */
+}
+
+.pblsh--tested-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.pblsh--tested-value__text {
+    cursor: help;
+}
+
+/* The current release's row: the header figure's glyph, before the pencil that fixes it. */
+.pblsh--tested-value__glyph {
+    display: inline-flex;
+    cursor: help;
+}
+
+.pblsh--tested-value--warning .pblsh--tested-value__glyph { color: var(--color-orange); }
+
+.pblsh--tested-edit {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    white-space: normal;
+}
+
+.pblsh--tested-edit__controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* WordPress sizes the control's input at 100% with a two-class selector; this one outranks it. */
+.pblsh--tested-edit .pblsh--tested-edit__input .components-text-control__input {
+    width: 5.5em;
+}
+
+.pblsh--tested-edit__error,
+.pblsh--tested-edit__hint {
+    font-size: 0.8125rem; /* 13px */
+}
+
+.pblsh--tested-edit__error {
+    color: var(--color-red);
+}
+
+/* The warning box below the controls: the stack's gap as its spacing, a reading width. */
+.pblsh--tested-edit .pblsh--tested-edit__notice {
+    max-width: 35rem;
+    margin: 0;
+}
 
 /* Releases table, Current column: which release sites receive — a radio-like ring
    per row, with the dot in the selection blue on the current one (CSS only, no icon;
@@ -3314,6 +3403,18 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     font-weight: 600;
     z-index: 2;
     border-bottom-color: #fff;
+}
+
+/* Changes waiting for their commit: a dot after the tab's name, in the info color of the
+   status column's entry for the same fact. */
+.pblsh--tab-nav__pending {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-left: 0.375rem;
+    border-radius: 50%;
+    background: var(--color-blue);
+    vertical-align: middle;
 }
 
 .pblsh--tab-panel__body {

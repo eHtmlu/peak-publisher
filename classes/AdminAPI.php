@@ -106,6 +106,11 @@ class AdminAPI {
             'callback' => [$this, 'download_release'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
+        register_rest_route(self::NAMESPACE, '/releases/(?P<id>\d+)/tested-up-to', [
+            'methods' => 'POST',
+            'callback' => [$this, 'set_release_tested_up_to_rest'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
 
         register_rest_route(self::NAMESPACE, '/admin/upgrade-notice', [
             'methods' => 'DELETE',
@@ -334,6 +339,9 @@ class AdminAPI {
             // value of a flip.
             'pointer' => $current['pointer'],
             'released_at' => $current['release'] instanceof \WP_Post ? $this->release_published_at($current['release']) : null,
+            // Tested up to of what sites receive: the current release's effective value with its
+            // source; while wordpress.org distributes trunk, trunk's readme (source 'trunk').
+            'tested_up_to' => $this->plugin_tested_up_to($post, $current),
             // The distribution switch: self-hosted the post status, wordpress.org the
             // directory's verdict — 'closed' there means nothing is distributed.
             'status' => !$is_self_hosted && $wporg_directory['wporg_stats']['closed'] !== null ? 'closed' : $post->post_status,
@@ -373,6 +381,34 @@ class AdminAPI {
     }
 
     /**
+     * Tested up to of what is distributed — the current release's effective value
+     * (release_tested_up_to(): a well-formed plugin header value overrides the readme's), in
+     * the shape every release row has too; while wordpress.org distributes trunk (pointer
+     * trunk, a missing tag, or none while tags exist) the value of trunk's readme with source
+     * 'trunk' — the readme alone: the marker cache keeps trunk's readme, not its main file;
+     * null when nothing is distributed whose
+     * value anyone sees: self-hosted without a current release, wordpress.org without a
+     * pointer and without a single tag (approved, nothing published yet) — the same rule as
+     * the current release's notice (CurrentReleaseUtils.getCurrentReleaseIssue()), so the
+     * two never disagree.
+     *
+     * @return array{value:string, source:?string, header:string, readme:string}|null
+     */
+    private function plugin_tested_up_to(\WP_Post $post, array $current): ?array {
+        if ($current['release'] instanceof \WP_Post) {
+            return release_tested_up_to($current['release']);
+        }
+        $distributes_trunk = in_array($current['state'], [ 'trunk', 'tag_missing' ], true)
+            || ($current['state'] === 'none' && $current['latest'] instanceof \WP_Post);
+        if (is_wporg_plugin($post) && $distributes_trunk) {
+            $cache = wporg_decode_json_object((string) $post->post_content);
+            $tested = (string) ($cache['trunk_readme']['tested'] ?? '');
+            return [ 'value' => $tested, 'source' => $tested === '' ? null : 'trunk', 'header' => '', 'readme' => $tested ];
+        }
+        return null;
+    }
+
+    /**
      * When a release was published — its post date (docs/data-schema.md: the upload, or the
      * first creation of its wordpress.org tag) — as an ISO 8601 UTC moment.
      */
@@ -407,7 +443,7 @@ class AdminAPI {
 
         $releases = [];
         foreach ($releases_query->posts as $release) {
-            $rel_data = json_decode((string) $release->post_content, true) ?? [];
+            $rel_data = release_snapshot($release);
             $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
             $version = (string) (($release->post_title ?? '') !== '' ? $release->post_title : ($rel_data['plugin_data']['Version'] ?? ''));
             $releases[] = [
@@ -418,6 +454,11 @@ class AdminAPI {
                 'download_url' => $is_wporg ? '' : rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
                 // wordpress.org has no per-release figures — the column is not rendered there.
                 'installations_count' => $is_wporg ? null : ($normalized !== '' ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0),
+                // The release's own Tested up to, editable in the row; a release with neither a
+                // readme nor the plugin file's line has nowhere to take a value (the client locks
+                // the pencil from these two facts).
+                'tested_up_to' => release_tested_up_to($release),
+                'readme_found' => !empty($rel_data['plugin_readme_txt']['found']),
             ];
         }
 
@@ -632,6 +673,40 @@ class AdminAPI {
         refresh_plugin_title_from_reference((int) $plugin->ID);
 
         return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $version, 'revision' => $result['revision'] ];
+    }
+
+    /**
+     * Sets Tested up to of a release (set_release_tested_up_to(), includes/releases.php); a
+     * wordpress.org release commits with the plugin's write account. Answers the edit's facts —
+     * version, from, to, the revision and what trunk did — for the editor's notice.
+     */
+    public function set_release_tested_up_to_rest(\WP_REST_Request $request) {
+        $release = get_post((int) $request->get_param('id'));
+        if (!$release instanceof \WP_Post || $release->post_type !== 'pblsh_release') {
+            return $this->rest_error_response($this->make_rest_error('release_not_found', __('Release not found.', 'peak-publisher'), 404));
+        }
+        $params = $request->get_json_params();
+        $value = trim((string) ($params['value'] ?? ''));
+        $expected = trim((string) ($params['expected'] ?? ''));
+        $parent = get_post((int) $release->post_parent);
+        $username = null;
+        if (is_wporg_plugin($parent)) {
+            $username = $this->resolve_wporg_write_account($parent);
+            if ($username instanceof \WP_REST_Response) {
+                return $username;
+            }
+        }
+        try {
+            $result = set_release_tested_up_to($release, $value, $expected, $username);
+        } catch (\Throwable $e) {
+            // The pipeline's expected failures arrive as WP_Error; anything else is a bug and
+            // surfaces through this generic fallback, like the flip's.
+            return $this->rest_error_response($this->make_rest_error('tested_up_to_failed', __('Could not set Tested up to.', 'peak-publisher'), 502));
+        }
+        if (is_wp_error($result)) {
+            return $this->rest_error_response($result);
+        }
+        return [ 'status' => 'ok', ...$result ];
     }
 
     /**

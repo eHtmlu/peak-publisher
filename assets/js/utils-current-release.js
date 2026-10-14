@@ -9,18 +9,21 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
     // The plugin's current-release problem, if any: null when the plugin has a current
     // release or nothing to say (no releases yet). wordpress.org falls back to trunk whenever
     // the pointer does not name an existing tag; a self-hosted plugin offers no updates then.
+    // Closed on wordpress.org changes nothing here: closed means only that wordpress.org imports
+    // nothing from SVN — a commit may still go through (to prepare the reopening), so the
+    // pointer's state stays said and changeable; the commit alone decides. The list's status
+    // column keeps quiet about it (getPluginStatusItems()), the editor never.
     function getCurrentReleaseIssue(plugin) {
         if (!plugin || plugin.version) return null;
-        // Closed on wordpress.org: nothing is distributed whatever the pointer says — the
-        // closed notice is the one message; the pointer's issues return with the reopening.
-        if (plugin.wporg_stats && plugin.wporg_stats.closed) return null;
         const isWporg = plugin.hosting_type === 'wporg';
         const hasReleases = (Number(plugin.count_of_releases) || 0) > 0;
 
-        // One shape for every state: the fact (the list's tooltip, the notice's first line)
-        // and the remedy the notice adds as an emphasized line — the release list it points
-        // to sits right below; null when there is nothing to do.
-        const issue = (variant, fact, remedy = null) => ({ variant, fact, remedy });
+        // One shape for every state, like the Tested up to status item: the fact (the list's
+        // tooltip, the editor's tooltips, the notice's first line), the consequence where a
+        // short fact needs one (the notice's second line), and the remedy only the notice adds,
+        // as an emphasized line — the release list it points to sits right below; null when
+        // there is nothing to do.
+        const issue = (variant, fact, consequence = null, remedy = null) => ({ variant, fact, consequence, remedy });
         const remedy = isWporg
             ? __('Publishing your next release fixes it — or make one of the releases below current.', 'peak-publisher')
             : __('Make one of the releases below current to fix it.', 'peak-publisher');
@@ -28,26 +31,36 @@ lodash.set(window, 'Pblsh.CurrentReleaseUtils', (() => {
         switch (plugin.current_release_state) {
             case 'unknown':
                 return issue('info',
-                    __('The current release on wordpress.org could not be read (trunk/readme.txt). Peak Publisher will retry with the next refresh.', 'peak-publisher'),
+                    __('The current release on wordpress.org could not be read.', 'peak-publisher'),
+                    __('Peak Publisher reads trunk/readme.txt again with the next refresh.', 'peak-publisher'),
                 );
             case 'trunk':
                 return issue('warning',
-                    __('wordpress.org distributes the trunk directory (Stable tag: trunk), which wordpress.org asks authors to avoid so that plugins can be rolled back.', 'peak-publisher'),
+                    __('wordpress.org distributes the trunk directory (Stable tag: trunk).', 'peak-publisher'),
+                    __('wordpress.org asks authors to avoid this, so that plugins can be rolled back.', 'peak-publisher'),
                     remedy,
                 );
             case 'tag_missing':
-                return issue('warning',
-                    isWporg
-                        ? sprintf(__('The Stable tag on wordpress.org names %s, which does not exist — wordpress.org falls back to distributing trunk.', 'peak-publisher'), plugin.pointer)
-                        : sprintf(__('The current release %s does not exist, so the plugin offers no updates.', 'peak-publisher'), plugin.pointer),
-                    remedy,
-                );
+                // The short facts carry their few words of consequence themselves: without them
+                // the tooltip would only repeat the list's label.
+                return isWporg
+                    ? issue('warning',
+                        sprintf(__('The Stable tag names %s, which does not exist.', 'peak-publisher'), plugin.pointer),
+                        __('wordpress.org falls back to distributing trunk.', 'peak-publisher'),
+                        remedy,
+                    )
+                    : issue('warning',
+                        sprintf(__('The current release %s does not exist, so the plugin offers no updates.', 'peak-publisher'), plugin.pointer),
+                        null,
+                        remedy,
+                    );
             case 'none':
                 if (!hasReleases) return null;
                 return issue('warning',
                     isWporg
                         ? __('wordpress.org has no Stable tag for this plugin and distributes trunk.', 'peak-publisher')
                         : __('This plugin has no current release, so it offers no updates.', 'peak-publisher'),
+                    null,
                     remedy,
                 );
         }

@@ -7,14 +7,17 @@ namespace Pblsh\Tests\Unit;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 use function Pblsh\parse_readme_txt;
+use function Pblsh\set_plugin_file_header;
+use function Pblsh\set_readme_header;
 use function Pblsh\set_readme_stable_tag;
 
 /**
- * set_readme_stable_tag() (includes/functions.php): the one place a Stable tag is written
- * into a readme — the header block as wordpress.org's parser reads it, line endings kept,
- * everything below untouched.
+ * set_readme_header() (includes/readme.php): the one place a readme header line is written —
+ * the header block as wordpress.org's parser reads it, line endings kept, everything below
+ * untouched; set_readme_stable_tag() is its Stable tag consumer, Tested up to its second
+ * consumer. set_plugin_file_header(): the one place a plugin file's header line is replaced.
  */
-final class ReadmeStableTagTest extends TestCase {
+final class ReadmeHeaderTest extends TestCase {
 
     #[DataProvider('readmes')]
     public function test_the_header_block_gets_the_value(string $readme, string $expected): void {
@@ -207,5 +210,78 @@ final class ReadmeStableTagTest extends TestCase {
     public function test_invalid_utf8_is_a_caller_bug(): void {
         $this->expectException(\InvalidArgumentException::class);
         set_readme_stable_tag("=== My Plugin ===\nStable tag: 1.0\n\xC3\x28\n", '1.2.3');
+    }
+
+    #[DataProvider('readmes_with_tested_up_to')]
+    public function test_tested_up_to_is_set_in_the_header_block(string $readme, string $expected): void {
+        self::assertSame($expected, set_readme_header($readme, 'Tested up to', '7.2'));
+    }
+
+    public static function readmes_with_tested_up_to(): array {
+        return [
+            'replaces the value' => [
+                "=== My Plugin ===\nTested up to: 7.1\nStable tag: 1.0\n\nText.\n",
+                "=== My Plugin ===\nTested up to: 7.2\nStable tag: 1.0\n\nText.\n",
+            ],
+            'inserted after the last header line when missing' => [
+                "=== My Plugin ===\nStable tag: 1.0\n\nText.\n",
+                "=== My Plugin ===\nStable tag: 1.0\nTested up to: 7.2\n\nText.\n",
+            ],
+            'a Tested up to below the block stays, the block gets its own line' => [
+                "=== My Plugin ===\nStable tag: 1.0\n\nSay Tested up to: 6.0 here.\n",
+                "=== My Plugin ===\nStable tag: 1.0\nTested up to: 7.2\n\nSay Tested up to: 6.0 here.\n",
+            ],
+            'the key spelling is kept, CRLF and BOM survive' => [
+                "\xEF\xBB\xBF=== My Plugin ===\r\nTested Up To: 7.1\r\n\r\nText.\r\n",
+                "\xEF\xBB\xBF=== My Plugin ===\r\nTested Up To: 7.2\r\n\r\nText.\r\n",
+            ],
+            'the parser reads it back' => [
+                "=== My Plugin ===\nTested up to: WordPress 6.9\n",
+                "=== My Plugin ===\nTested up to: 7.2\n",
+            ],
+            'the alias key Tested: is the same header and keeps its spelling' => [
+                "=== My Plugin ===\nTested: 7.1\nStable tag: 1.0\n\nText.\n",
+                "=== My Plugin ===\nTested: 7.2\nStable tag: 1.0\n\nText.\n",
+            ],
+            'an alias and the full key are both set' => [
+                "=== My Plugin ===\nTested: 7.0\nTested Up To: 7.1\n",
+                "=== My Plugin ===\nTested: 7.2\nTested Up To: 7.2\n",
+            ],
+        ];
+    }
+
+    public function test_an_unknown_header_is_a_caller_bug(): void {
+        $this->expectException(\InvalidArgumentException::class);
+        set_readme_header("=== My Plugin ===\n", 'Fancy header', 'x');
+    }
+
+    public function test_without_insertion_a_missing_line_leaves_the_readme_untouched(): void {
+        $readme = "=== My Plugin ===\nStable tag: 1.0\n\nText.\n";
+        self::assertSame($readme, set_readme_header($readme, 'Tested up to', '7.2', false));
+        self::assertSame("=== My Plugin ===\nTested: 7.2\n", set_readme_header("=== My Plugin ===\nTested: 7.1\n", 'Tested up to', '7.2', false), 'an existing line is still set');
+    }
+
+    public function test_the_wordpress_org_parser_reads_tested_up_to_back(): void {
+        self::assertSame('7.2', parse_readme_txt(set_readme_header("=== My Plugin ===\nStable tag: 1.0\n\nText.\n", 'Tested up to', '7.2'))['tested']);
+    }
+
+    #[DataProvider('plugin_files')]
+    public function test_the_plugin_file_header_line_is_replaced_never_inserted(string $file, string $expected): void {
+        self::assertSame($expected, set_plugin_file_header($file, 'Tested up to', '7.2'));
+    }
+
+    public static function plugin_files(): array {
+        $header = "<?php\n/**\n * Plugin Name: My Plugin\n * Version: 1.0\n";
+        return [
+            'star-prefixed line' => [ $header . " * Tested up to: 7.1\n */\n", $header . " * Tested up to: 7.2\n */\n" ],
+            'empty value counts as carrying the line' => [ $header . " * Tested up to:\n */\n", $header . " * Tested up to: 7.2\n */\n" ],
+            'no line, nothing inserted' => [ $header . " */\n", $header . " */\n" ],
+            'only the first line is a header' => [ $header . " * Tested up to: 7.1\n */\n// Tested up to: 6.0\n", $header . " * Tested up to: 7.2\n */\n// Tested up to: 6.0\n" ],
+            'a line beyond the first 8 KB is not a header' => [ $header . " */\n" . str_repeat("// filler\n", 900) . "// Tested up to: 7.1\n", $header . " */\n" . str_repeat("// filler\n", 900) . "// Tested up to: 7.1\n" ],
+            'CRLF kept' => [ "<?php\r\n/**\r\n * Plugin Name: X\r\n * Tested up to: 7.1\r\n */\r\n", "<?php\r\n/**\r\n * Plugin Name: X\r\n * Tested up to: 7.2\r\n */\r\n" ],
+            'a comment closer on the same line survives' => [ $header . " * Tested up to: 7.1 */\n", $header . " * Tested up to: 7.2 */\n" ],
+            'a php closer on the same line survives' => [ "<?php /* Plugin Name: X\nTested up to: 7.1 ?>\n", "<?php /* Plugin Name: X\nTested up to: 7.2 ?>\n" ],
+            'a header on the php line is read by WordPress and replaced here' => [ "<?php // Tested up to: 7.1\n/* Plugin Name: X */\n", "<?php // Tested up to: 7.2\n/* Plugin Name: X */\n" ],
+        ];
     }
 }

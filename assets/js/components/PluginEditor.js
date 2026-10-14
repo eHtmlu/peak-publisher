@@ -1,11 +1,13 @@
 // PluginEditor Component (simplified overview + releases list)
 lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, refreshWporg, onTogglePluginStatus, pendingPluginStatus, initialTab, onTabChange }) => {
-    const { __, sprintf } = wp.i18n;
+    const { __, _n, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
-    const { Tooltip, Button, Spinner } = wp.components;
+    const { Tooltip, Button, Spinner, TextControl } = wp.components;
     const { getSvgIcon, getPluginStatus, getWporgPluginUrl } = Pblsh.Utils;
     const { getCurrentReleaseIssue, getFlipConfirmText, getFlipSuccessText } = Pblsh.CurrentReleaseUtils;
+    const { getFieldError, getFieldHint, describeSource, describeMissingValue, getStatusItem, isLower } = Pblsh.TestedUpToUtils;
+    const stableBranch = Pblsh.Utils.getStableBranch();
     const { getDownloads, getRating, getWporgClosedNotice } = Pblsh.InstallationsUtils;
     const { getChangesText } = Pblsh.WporgCheckUtils;
     const { NoticeBox, CurrentVersion, InstallationsCount, Figure, WporgCheckStatus, WporgRevisionLink, RelativeTime } = Pblsh.Components;
@@ -30,6 +32,16 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const [flippingReleaseId, setFlippingReleaseId] = useState(null);
     const [flipOutcome, setFlipOutcome] = useState(null);
     useEffect(() => { setFlipOutcome(null); }, [pluginData && pluginData.id]);
+    // Tested up to, edited in its row: which release's field is open with its value, which
+    // release is saving, and the last edit's outcome behind the transient notice — cleared
+    // with the next plugin like the flip's. The field's error follows the value.
+    const [editingReleaseId, setEditingReleaseId] = useState(null);
+    const [editingValue, setEditingValue] = useState('');
+    const [savingReleaseId, setSavingReleaseId] = useState(null);
+    const [testedOutcome, setTestedOutcome] = useState(null);
+    useEffect(() => { setTestedOutcome(null); setEditingReleaseId(null); }, [pluginData && pluginData.id]);
+    // An empty field is not wrong yet — the format sentence comes with the first character.
+    const editingError = editingReleaseId !== null && editingValue.trim() !== '' ? getFieldError(editingValue.trim(), stableBranch) : null;
     // The manual refresh from wordpress.org: while it runs, its link is busy and the status
     // line says so — for everything it brings, figures, releases and assets alike; what is
     // shown stays until the answer replaces it. Its outcome shows through the data: the status
@@ -167,6 +179,10 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             createElement(Figure, { title: downloads.title }, downloads.text),
                         ),
                     ),
+                    createElement('div', { className: 'pblsh--plugin-grid__item' },
+                        createElement('div', { className: 'pblsh--plugin-grid__label' }, __('Tested up to', 'peak-publisher')),
+                        createElement('div', { className: 'pblsh--plugin-grid__value' }, renderTestedUpToFigure()),
+                    ),
                     // Stars with the number of ratings beside them, the way the plugin installer
                     // shows a rating — the count qualifies the stars; the tooltip spells both out.
                     wporgFigures && createElement('div', { className: 'pblsh--plugin-grid__item' },
@@ -209,22 +225,176 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         }
     };
 
+    // Tested up to of a release, edited in its row: the field opens with the value shown and
+    // saves with that value as the expectation — a change by someone else in the meantime is
+    // refused, not overwritten —, then the plugin reloads and the notice tells the outcome.
+    const startTestedUpTo = (rel) => {
+        if (savingReleaseId !== null) return;
+        setEditingReleaseId(rel.id);
+        setEditingValue(rel.tested_up_to.value || '');
+    };
+    const cancelTestedUpTo = () => {
+        setEditingReleaseId(null);
+        setEditingValue('');
+    };
+    const saveTestedUpTo = async (rel) => {
+        const value = editingValue.trim();
+        if (savingReleaseId !== null || getFieldError(value, stableBranch) || value === (rel.tested_up_to.value || '')) return;
+        // A value above the next WordPress version is allowed, as at upload — with the same
+        // caution: the hint under the field, and a confirm before it is written.
+        const hint = getFieldHint(value, rel.tested_up_to.source, stableBranch, isWporg);
+        if (hint && !confirm(hint.join('\n') + '\n\n' + sprintf(__('Set Tested up to %1$s for version %2$s anyway?', 'peak-publisher'), value, rel.version))) return;
+        setTestedOutcome(null);
+        setSavingReleaseId(rel.id);
+        try {
+            const response = await Pblsh.API.setReleaseTestedUpTo(rel.id, value, rel.tested_up_to.value || '');
+            setEditingReleaseId(null);
+            if (typeof refreshPlugin === 'function') await refreshPlugin();
+            setTestedOutcome(response);
+        } catch (e) {
+            // apiFetch rejects with the REST error payload: message leads, the code follows.
+            alert((e?.message || __('Could not set Tested up to.', 'peak-publisher'))
+                + (e?.code ? '\n' + sprintf(__('Error code: %s', 'peak-publisher'), e.code) : ''));
+            // The value moved, the tag or the ZIP is gone: what the row shows is stale.
+            if (['tested_up_to_changed', 'invalid_tested_up_to_target', 'wporg_tag_not_found', 'release_zip_missing'].includes(e?.code)) {
+                setEditingReleaseId(null);
+                if (typeof refreshPlugin === 'function') refreshPlugin();
+            }
+        } finally {
+            setSavingReleaseId(null);
+        }
+    };
+
+    // Tested up to of what sites receive, beside the other figures: the value with a state
+    // glyph whose tooltip says what to do (utils-tested-up-to.js), "—" without one; the
+    // value's source in the tooltip. While wordpress.org distributes trunk, trunk's value.
+    const renderTestedUpToFigure = () => {
+        const tested = pluginData?.tested_up_to;
+        const item = tested ? getStatusItem(pluginData, stableBranch) : null;
+        let text = '—';
+        let title;
+        if (!tested) {
+            title = getCurrentReleaseIssue(pluginData)?.fact || __('No current release.', 'peak-publisher');
+        } else if (!tested.value) {
+            // The judgement on both channels; only wordpress.org warns about it (the item).
+            title = describeMissingValue(pluginData);
+        } else {
+            text = tested.value;
+            title = [ describeSource(tested.source), item && item.fact ].filter(Boolean).join(' — ');
+        }
+        return createElement(Figure, { title },
+            createElement('span', { className: 'pblsh--tested-figure' + (item ? ' pblsh--tested-figure--' + item.variant : '') },
+                text,
+                item && createElement('span', { className: 'pblsh--tested-figure__glyph' }, getSvgIcon('alert', { size: 16 })),
+            ),
+        );
+    };
+
+    // The Tested up to cell of a release row: the value (its source in the tooltip) with the
+    // pencil, or the inline field with Save and Cancel — Enter saves, Escape cancels; the
+    // field says what it will not accept, when the value goes down, and that emptying it
+    // removes nothing. The current release's
+    // row repeats the header figure's glyph right before its pencil: the figure says something
+    // is wrong, the row is where it is fixed.
+    const renderTestedUpToCell = (rel) => {
+        const tested = rel.tested_up_to || { value: '', source: null };
+        if (editingReleaseId === rel.id) {
+            const value = editingValue.trim();
+            const fieldHint = value ? getFieldHint(value, tested.source, stableBranch, isWporg) : null;
+            // Two tiers: the controls in a row, and below them, each on a line of its own, what
+            // the field has to say.
+            return createElement('form', { className: 'pblsh--tested-edit', onSubmit: (e) => { e.preventDefault(); saveTestedUpTo(rel); } },
+                createElement('div', { className: 'pblsh--tested-edit__controls' },
+                createElement(TextControl, {
+                    className: 'pblsh--tested-edit__input',
+                    label: sprintf(__('Tested up to of version %s', 'peak-publisher'), rel.version),
+                    hideLabelFromVision: true,
+                    value: editingValue,
+                    onChange: setEditingValue,
+                    autoFocus: true,
+                    onKeyDown: (e) => { if (e.key === 'Escape') cancelTestedUpTo(); },
+                    __nextHasNoMarginBottom: true,
+                    __next40pxDefaultSize: true,
+                }),
+                createElement(Button, { variant: 'primary', type: 'submit', isBusy: savingReleaseId === rel.id, disabled: savingReleaseId !== null || !!editingError || value === '' || value === (tested.value || '') }, __('Save', 'peak-publisher')),
+                createElement(Button, { variant: 'tertiary', onClick: cancelTestedUpTo, disabled: savingReleaseId !== null }, __('Cancel', 'peak-publisher')),
+                ),
+                editingError && createElement('span', { className: 'pblsh--tested-edit__error' }, editingError),
+                !editingError && value && fieldHint && createElement(NoticeBox, { variant: 'warning', className: 'pblsh--tested-edit__notice' }, createElement('p', null, fieldHint[0], createElement('br'), fieldHint[1])),
+                !editingError && value && isLower(value, tested.value) && createElement('span', { className: 'pblsh--tested-edit__hint' }, __('Lower than before.', 'peak-publisher')),
+                // A value is not removed here; the field says so instead of saving nothing.
+                // Self-hosted it adds the way out — this release uploaded again without it, which
+                // the checklist lets through with a receipt; on wordpress.org a plugin without the
+                // value is a state the directory warns visitors about, so no guidance toward it.
+                value === '' && tested.value && createElement('span', { className: 'pblsh--tested-edit__hint' },
+                    __('Tested up to cannot be removed here.', 'peak-publisher'),
+                    !isWporg && ' ' + __('Upload this release again without it.', 'peak-publisher')),
+            );
+        }
+        // Nowhere to write: no readme, and the plugin file carries no value either (a line with
+        // an empty value is invisible here — the server would still set it). The tooltip names
+        // no file: it says that a value cannot be added to this release — elsewhere the pencil
+        // adds the readme line — and the way out, on either channel.
+        const nowhere = rel.readme_found === false && !tested.header;
+        const editLabel = nowhere
+            ? __('Tested up to cannot be added to this release. Upload it again with a value.', 'peak-publisher')
+            : (wporgWriteBlocked && wporgWriteBlockedText ? wporgWriteBlockedText : sprintf(__('Set Tested up to of version %s', 'peak-publisher'), rel.version));
+        const item = rel.is_current ? getStatusItem(pluginData, stableBranch) : null;
+        return createElement('span', { className: 'pblsh--tested-value' + (item ? ' pblsh--tested-value--' + item.variant : '') },
+            tested.value
+                ? createElement(Tooltip, { text: describeSource(tested.source) }, createElement('span', { className: 'pblsh--tested-value__text', tabIndex: 0 }, tested.value))
+                : createElement('span', { className: 'pblsh--tested-value__text' }, '—'),
+            item && createElement(Tooltip, { text: item.fact },
+                createElement('span', { className: 'pblsh--tested-value__glyph', tabIndex: 0, role: 'img', 'aria-label': item.fact },
+                    getSvgIcon('alert', { size: 16 }),
+                ),
+            ),
+            createElement(Button, {
+                isTertiary: true,
+                className: 'pblsh--tested-value__edit',
+                icon: getSvgIcon('pencil', { size: 20 }),
+                label: editLabel,
+                showTooltip: true,
+                __experimentalIsFocusable: true,
+                disabled: nowhere || wporgWriteBlocked || savingReleaseId !== null,
+                onClick: () => startTestedUpTo(rel),
+            }),
+        );
+    };
+
     // Notices above the releases table, in this order: transient success → nothing is
     // distributed (closed on wordpress.org, or a self-hosted draft) → the pointer state
-    // (no current release).
+    // (no current release) → the Tested up to of what is distributed. Each problem the
+    // list's status column names has its notice here — the fact, then the remedy.
     const renderReleaseNotices = () => {
         const issue = getCurrentReleaseIssue(pluginData);
+        const tested = getStatusItem(pluginData, stableBranch);
+        const reopenedNotices = (issue ? 1 : 0) + (tested ? 1 : 0);
         const closed = isWporg ? pluginData.wporg_stats.closed : null;
         const draft = pluginData?.hosting_type === 'self_hosted' && pluginData.status !== 'publish';
         return [
+            // The last Tested up to edit — the value, the version, on wordpress.org the commit and,
+            // when trunk carries another version, that it was left unchanged.
+            testedOutcome && createElement(NoticeBox, { key: 'tested', variant: 'info', className: 'pblsh--tab-panel__notice' },
+                createElement('p', null, isWporg
+                    ? createInterpolateElement(sprintf(__('Tested up to set to %1$s for version %2$s in <revision /> — sites see it with their next update check once wordpress.org has processed the commit, usually within a few minutes.', 'peak-publisher'), testedOutcome.to, testedOutcome.version), { revision: createElement(WporgRevisionLink, { revision: testedOutcome.revision }) })
+                    : sprintf(__('Tested up to set to %1$s for version %2$s — sites see it with their next update check.', 'peak-publisher'), testedOutcome.to, testedOutcome.version)),
+                isWporg && testedOutcome.trunk && testedOutcome.trunk.state === 'other_version' && createElement('p', null,
+                    sprintf(__('trunk carries version %s and was left unchanged.', 'peak-publisher'), testedOutcome.trunk.version)),
+            ),
             // The self-hosted sentence has no <revision /> slot: the link stays unrendered there.
             flipOutcome && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--tab-panel__notice' },
                 createElement('p', null, createInterpolateElement(getFlipSuccessText(isWporg, flipOutcome.version), { revision: createElement(WporgRevisionLink, { revision: flipOutcome.revision }) })),
             ),
             // Closed on wordpress.org — the most important fact of the daily stats fetch:
-            // nothing is distributed, whatever the pointer says.
-            closed && createElement(NoticeBox, { key: 'closed', variant: 'warning', className: 'pblsh--tab-panel__notice' },
-                createElement('p', null, getWporgClosedNotice(closed)),
+            // nothing is distributed, whatever the pointer says. Red, above everything else,
+            // and — when the pointer's or the Tested up to notice follows — the line that says
+            // they apply only once the plugin is reopened, so they do not contradict each other.
+            closed && createElement(NoticeBox, { key: 'closed', variant: 'error', className: 'pblsh--tab-panel__notice' },
+                createElement('p', null,
+                    getWporgClosedNotice(closed),
+                    ...(reopenedNotices > 0 ? [ createElement('br'), _n('The notice below applies once it is reopened.', 'The notices below apply once it is reopened.', reopenedNotices, 'peak-publisher') ] : []),
+                ),
             ),
             // A draft is the self-hosted way of distributing nothing — chosen, and undone
             // with the status button right above, which the remedy names.
@@ -240,7 +410,18 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             issue && createElement(NoticeBox, { key: 'current-release', variant: issue.variant, className: 'pblsh--tab-panel__notice' },
                 createElement('p', null,
                     issue.fact,
+                    ...(issue.consequence ? [ createElement('br'), issue.consequence ] : []),
                     ...(issue.remedy ? [ createElement('br'), createElement('strong', null, issue.remedy) ] : []),
+                ),
+            ),
+            // The same anatomy for Tested up to, with the consequence as the checklist says it on
+            // a line of its own between; the glyphs at the figure and in the current release's
+            // row stay, as the pointer's glyph does beside its notice.
+            tested && createElement(NoticeBox, { key: 'tested-up-to', variant: tested.variant, className: 'pblsh--tab-panel__notice' },
+                createElement('p', null,
+                    tested.fact,
+                    ...(tested.consequence ? [ createElement('br'), tested.consequence ] : []),
+                    ...(tested.remedy ? [ createElement('br'), createElement('strong', null, tested.remedy) ] : []),
                 ),
             ),
         ];
@@ -271,6 +452,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                         createElement('tr', null,
                             createElement('th', { className: 'pblsh--table__current-header' }, __('Current', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__tested-header' }, __('Tested up to', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__released-header' }, __('Released', 'peak-publisher')),
                             showReleaseInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher')),
@@ -279,7 +461,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                     createElement('tbody', null,
                         (releasesLoaded && releases.length === 0)
                             ? createElement('tr', null,
-                                createElement('td', { colSpan: showReleaseInstallations ? 5 : 4 }, __('No releases.', 'peak-publisher')),
+                                createElement('td', { colSpan: showReleaseInstallations ? 6 : 5 }, __('No releases.', 'peak-publisher')),
                             )
                             : releases.map((rel, index) =>
                                 createElement('tr', { key: String(rel.id) },
@@ -316,6 +498,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                                 ),
                                     ),
                                     createElement('td', { className: 'pblsh--table__version-cell' }, safe(rel.version)),
+                                    createElement('td', { className: 'pblsh--table__tested-cell' }, renderTestedUpToCell(rel)),
                                     createElement('td', { className: 'pblsh--table__released-cell' }, createElement(RelativeTime, { value: rel.released_at, tooltip: true })),
                                     showReleaseInstallations && createElement('td', { className: 'pblsh--table__installations-cell' }, String(rel.installations_count || 0)),
                                     createElement('td', { className: 'pblsh--table__actions-cell' },
@@ -419,7 +602,9 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
 
     // The releases tab carries its count — what lies behind it, from the plugin like the
     // figures above (the one payload the header reads); the assets tab none, their number is
-    // the assets store's, loaded with the tab.
+    // the assets store's, loaded with the tab. It carries a dot instead while asset changes
+    // wait for their commit — a mark, not a number, which beside the releases' count would read
+    // as one; its tooltip and the screen reader say it with the commit bar's words.
     const renderTabNav = () => createElement('div', { className: 'pblsh--tab-nav' },
         createElement('button', {
             type: 'button',
@@ -430,11 +615,19 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             __('Releases (%s)', 'peak-publisher'),
             (Number(pluginData?.count_of_releases) || 0).toLocaleString(),
         )),
-        createElement('button', {
-            type: 'button',
-            className: 'pblsh--tab-nav__tab' + (activeTab === 'assets' ? ' pblsh--tab-nav__tab--active' : ''),
-            onClick: () => switchToTab('assets'),
-        }, __('Assets', 'peak-publisher')),
+        (() => {
+            const pending = isWporg && Number(pluginData?.assets_pending) > 0 ? Pblsh.AssetsUtils.getPendingBarText(Number(pluginData.assets_pending)) : null;
+            const tab = createElement('button', {
+                type: 'button',
+                className: 'pblsh--tab-nav__tab' + (activeTab === 'assets' ? ' pblsh--tab-nav__tab--active' : ''),
+                onClick: () => switchToTab('assets'),
+            },
+                __('Assets', 'peak-publisher'),
+                pending && createElement('span', { className: 'pblsh--tab-nav__pending', 'aria-hidden': true }),
+                pending && createElement('span', { className: 'screen-reader-text' }, ' (' + pending + ')'),
+            );
+            return pending ? createElement(Tooltip, { text: pending }, tab) : tab;
+        })(),
         // wordpress.org: when the plugin page shows the last commit — plugin-wide, so beside the tabs.
         isWporg && pluginData && createElement(Pblsh.Components.ImportForecast, { forecast: pluginData.wporg_import, slug: pluginData.slug }),
     );

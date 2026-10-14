@@ -5,7 +5,7 @@
 lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
     const { __ } = wp.i18n;
     const sprintf = wp.i18n.sprintf ?? window.sprintf;
-    const { useState, createElement, createInterpolateElement } = wp.element;
+    const { useState, createElement, createInterpolateElement, isValidElement } = wp.element;
     const { CheckboxControl } = wp.components;
     const { formatBytes } = Pblsh.UploadResultUtils;
 
@@ -22,6 +22,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
     const [confirmRollback, setConfirmRollback] = useState(false);
     const [confirmPreReleaseCurrent, setConfirmPreReleaseCurrent] = useState(false);
     const [confirmReplaceReach, setConfirmReplaceReach] = useState(false);
+    const [confirmNoTestedUpTo, setConfirmNoTestedUpTo] = useState(false);
+    const [confirmTestedUpToAhead, setConfirmTestedUpToAhead] = useState(false);
+    const [confirmTestedUpToFarBehind, setConfirmTestedUpToFarBehind] = useState(false);
 
     function reset() {
         setUseDifferentCustomUpdateServer(false);
@@ -37,6 +40,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         setConfirmRollback(false);
         setConfirmPreReleaseCurrent(false);
         setConfirmReplaceReach(false);
+        setConfirmNoTestedUpTo(false);
+        setConfirmTestedUpToAhead(false);
+        setConfirmTestedUpToFarBehind(false);
     }
 
     function checkPluginFile(context) {
@@ -255,18 +261,36 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
             : [ [ preRelease, offered, preReleaseReceipt ] ]);
     }
 
+    // Lines of one description with real line breaks — one concern; checkRow() topics are
+    // concerns of their own, with their own spacing.
+    function joinLines(parts) {
+        return createElement(wp.element.Fragment, null, ...parts.filter(Boolean).flatMap((line, i) => i === 0 ? [ line ] : [ createElement('br', { key: i }), line ]));
+    }
+
+    // A readme the upload found but could not make UTF-8 (no mbstring/iconv, an unknown
+    // encoding): its information cannot be processed — the readme row blocks, the Tested up to
+    // row has nothing to add.
+    function isReadmeUnprocessable(meta) {
+        const actions = meta.cleanup_info?.readme_txt || {};
+        return !!meta.plugin_readme_txt?.found && !actions.already_utf8 && !actions.converted_to_utf8;
+    }
+
     // A check row from its topics in reading order. A topic is one matter — the lock's
-    // reason with the reach, the rollback, the pre-release — as sentences that flow into one
-    // paragraph, with its receipts ({label, checked, onChange}) as checkboxes beneath; topics
-    // stand apart from each other. The row is an error while a receipt is unticked,
-    // settledType once every receipt is.
+    // reason with the reach, the rollback, the pre-release — as sentences (strings, or
+    // elements such as a sentence with a link) that flow into one paragraph, with its
+    // receipts ({label, checked, onChange}) as checkboxes beneath; topics stand apart from
+    // each other. The row is an error while a receipt is unticked, settledType once every
+    // receipt is.
     function checkRow(title, topics, settledType = 'ok') {
         const present = topics.map((parts) => parts.filter(Boolean)).filter((parts) => parts.length > 0);
-        const type = present.flat().some((part) => typeof part === 'object' && !part.checked) ? 'error' : settledType;
+        const isReceipt = (part) => typeof part === 'object' && !isValidElement(part);
+        const type = present.flat().some((part) => isReceipt(part) && !part.checked) ? 'error' : settledType;
         const desc = present.map((parts, index) => createElement('span', { key: index, className: 'pblsh--check__topic' },
-            ...parts.map((part, position) => typeof part === 'string'
-                ? (position > 0 && typeof parts[position - 1] === 'string' ? ' ' : '') + part
-                : createElement(CheckboxControl, { key: position, __nextHasNoMarginBottom: true, ...part })),
+            ...parts.flatMap((part, position) => {
+                if (isReceipt(part)) return [ createElement(CheckboxControl, { key: position, __nextHasNoMarginBottom: true, ...part }) ];
+                const sentence = typeof part === 'string' ? part : createElement(wp.element.Fragment, { key: position }, part);
+                return position > 0 && !isReceipt(parts[position - 1]) ? [ ' ', sentence ] : [ sentence ];
+            }),
         ));
         return { title, type, desc };
     }
@@ -478,10 +502,9 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         const readmeTxtDetectedEncoding = readmeCleanup.detected_encoding || '';
         const readmeTxtConvertedToUtf8 = !!readmeCleanup.converted_to_utf8;
         const readmeTxtRemovedUtf8Bom = !!readmeCleanup.removed_utf8_bom;
-        // The conversion could not make the file UTF-8 (no mbstring/iconv, an unknown
-        // encoding): its information cannot be processed. A hard stop on both channels —
-        // no readme data could be stored, and wordpress.org requires UTF-8.
-        const readmeTxtUnprocessable = !readmeTxtAlreadyUtf8 && !readmeTxtConvertedToUtf8;
+        // A hard stop on both channels: no readme data could be stored, and wordpress.org
+        // requires UTF-8.
+        const readmeTxtUnprocessable = isReadmeUnprocessable(meta);
         // R1 (server): the release's readme names its own version as Stable tag. found = the
         // value before (null = the file could not be processed), written = the value set.
         const readmeStableTag = readmeCleanup.stable_tag || { found: null, written: null };
@@ -501,7 +524,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         }
 
         // One fact per line.
-        const lines = [
+        const facts = [
             meta.plugin_readme_txt?.file_name !== 'readme.txt' && sprintf(__('Although %s also works, the officially valid filename is readme.txt.', 'peak-publisher'), meta.plugin_readme_txt.file_name),
             readmeTxtAlreadyUtf8 && readmeTxtAlreadyWithoutBom && __('The file is a valid UTF-8 file without a BOM, exactly as it should be.', 'peak-publisher'),
             readmeTxtConvertedToUtf8 && (readmeTxtDetectedEncoding
@@ -512,12 +535,124 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 ? sprintf(__('Stable tag %s added so that the release names its own version.', 'peak-publisher'), readmeStableTag.written)
                 : sprintf(__('Stable tag set to %1$s (was %2$s) so that the release names its own version.', 'peak-publisher'), readmeStableTag.written, readmeStableTag.found)),
             readmeTxtUnprocessable && __('The file could not be converted to UTF-8, so its information cannot be processed. Convert it to UTF-8 without a BOM and upload again.', 'peak-publisher'),
-        ].filter(Boolean);
+        ];
         return {
             title: __('Readme file exists', 'peak-publisher'),
             type: readmeTxtUnprocessable ? 'error' : 'ok',
-            desc: lines.flatMap((line, index) => index === 0 ? [ line ] : [ createElement('br', { key: index }), line ]),
+            desc: joinLines(facts),
         };
+    }
+
+    // Tested up to — one row: the findings one line each (utils-tested-up-to.js), judged on the
+    // value after the carry; then, when the carry ran or the readme is a file without the line
+    // while the header carries one, the places with their values and what the upload is set
+    // to — how the value came about, after the judgement of it. Judged against the stable
+    // branch the analysis recorded with the facts, as the upload state keeps it.
+    // Nothing blocks. A receipt — the row red until it is set — confirms a fact: a missing
+    // value in a new state (lost after the predecessor had one, or the first version on
+    // wordpress.org), and on wordpress.org a value above the next version or three branches
+    // behind. A missing value in a known state (the predecessor had none either) is a warning
+    // on wordpress.org and a quiet info self-hosted, where a plugin without a Tested up to is
+    // a normal plugin — a self-hosted first version without one too.
+    function checkTestedUpTo(context) {
+        const { isWporg, target, currentRelease, meta } = context;
+        const facts = target && target.tested_up_to;
+        if (!facts || !facts.upload) return null;
+        const stableBranch = facts.stable_branch;
+        // Where the readme row already blocks — none on wordpress.org, one that could not be
+        // processed — this row has nothing to add; a self-hosted upload without a readme is a
+        // plugin without a Tested up to and gets the row like any other.
+        const readme = meta.plugin_readme_txt || {};
+        if (isReadmeUnprocessable(meta) || (isWporg && !readme.found)) return null;
+        const { getFindings, getState, wporgWarnsVisitors, describeNoValue, describeSources, describeCurrent } = Pblsh.TestedUpToUtils;
+        const value = facts.carry ? facts.carry.value : (facts.upload.value || '');
+        // The receipt for the plugin page's notice ("hasn't been tested with the latest 3 major
+        // releases … may no longer be maintained") — the same notice for no value and for a
+        // value three branches behind, so the same receipt.
+        const presentedAsOutdated = __('That\'s fine, I understand that wordpress.org will warn visitors on the plugin page.', 'peak-publisher');
+
+        if (!value) {
+            const predecessorHad = !!(facts.predecessor && facts.predecessor.value);
+            const knownState = !!facts.predecessor && !facts.predecessor.value;
+            const consequence = describeNoValue(isWporg);
+            // Without a predecessor value the author may never have written one: say where.
+            const howTo = !predecessorHad && createInterpolateElement(
+                __('Add <code>Tested up to</code> to readme.txt to state the WordPress version you tested — see the <a>documentation</a>.', 'peak-publisher'),
+                {
+                    code: createElement('code'),
+                    a: createElement('a', { href: 'https://developer.wordpress.org/plugins/wordpress-org/how-your-readme-txt-works/#readme-header-information', target: '_blank', rel: 'noreferrer' }),
+                },
+            );
+            if (knownState || (!predecessorHad && !isWporg)) {
+                return { title: __('No Tested up to', 'peak-publisher'), type: isWporg ? 'warning' : 'info', desc: [ consequence, ' ', howTo ] };
+            }
+            // The loss on its own line, like the judgement of a value; then what follows — the row
+        // is one concern, the receipt included: one topic.
+            return checkRow(__('No Tested up to', 'peak-publisher'), [ [
+                joinLines([
+                    predecessorHad && sprintf(__('Version %1$s of this plugin says Tested up to %2$s — this version says none.', 'peak-publisher'), facts.predecessor.version, facts.predecessor.value),
+                    howTo ? createElement(wp.element.Fragment, null, consequence, ' ', howTo) : consequence,
+                ]),
+                {
+                    // The receipt names the effect, by channel — the loss itself is the line above.
+                    label: isWporg
+                        ? presentedAsOutdated
+                        : __('That\'s fine, I understand that sites will show this plugin as not tested on their update screen.', 'peak-publisher'),
+                    checked: confirmNoTestedUpTo,
+                    onChange: setConfirmNoTestedUpTo,
+                },
+            ] ], 'warning');
+        }
+
+        // A readme that lacks the line while the plugin header carries the value: the readme is
+        // where it belongs (a plugin without a readme file is the exception the header is for).
+        const readmeMissing = !!readme.found && !!facts.upload.header && !facts.upload.readme;
+        const places = facts.carry || readmeMissing ? describeSources(facts, !!readme.found) : null;
+        const findings = getFindings({ facts, isWporg, stableBranch, becomesCurrent: !!(currentRelease && currentRelease.makeCurrent) });
+        const texts = findings.map((finding) => finding.text);
+        // The judgement of the value against WordPress opens the row — unless a finding judges
+        // it (behind, ahead); a finding about the current release comes after it.
+        const fine = findings.some((finding) => finding.key === 'behind' || finding.key === 'ahead') ? null : describeCurrent(value, stableBranch);
+        if (isWporg && getState(value, stableBranch) === 'ahead') {
+            // The receipt names what wordpress.org does with the value: a readme value is
+            // dropped, a plugin header value is taken as it is. A carry-over sets the value
+            // where the upload has it and creates no line, so the source stays the upload's.
+            const fromHeader = !!facts.upload.header;
+            return checkRow(__('Unexpected Tested up to', 'peak-publisher'), [ [
+                joinLines([ ...texts, places ]),
+                {
+                    label: fromHeader
+                        ? __('That\'s fine, I understand that wordpress.org ranks the plugin far down in search, and may warn visitors on the plugin page one day.', 'peak-publisher')
+                        : __('That\'s fine, I understand that wordpress.org will drop the value and warn visitors on the plugin page.', 'peak-publisher'),
+                    checked: confirmTestedUpToAhead,
+                    onChange: setConfirmTestedUpToAhead,
+                },
+            ] ], 'warning');
+        }
+        if (isWporg && wporgWarnsVisitors(value, stableBranch)) {
+            // Three branches behind: the plugin page carries the same notice as without a value,
+            // a fact to confirm — nothing justifies such a value, and the upload is the moment
+            // to end it.
+            return checkRow(__('Outdated Tested up to', 'peak-publisher'), [ [
+                joinLines([ ...texts, places ]),
+                { label: presentedAsOutdated, checked: confirmTestedUpToFarBehind, onChange: setConfirmTestedUpToFarBehind },
+            ] ], 'warning');
+        }
+        if (findings.length === 0) {
+            if (readmeMissing) {
+                // The value is fine, its place is not: the judgement stays the first line, the
+                // places line says where the value is and where it is missing. On wordpress.org
+                // the readme is the documented place and its checker reports the readme without
+                // the line; self-hosted nothing happens, the places line is a note.
+                return { title: __('Unexpected Tested up to', 'peak-publisher'), type: isWporg ? 'warning' : 'info', desc: joinLines([ fine, places ]) };
+            }
+            // The title says that the upload's value was changed; the places line says what.
+            return { title: facts.carry ? __('Adjusted Tested up to', 'peak-publisher') : __('Expected Tested up to', 'peak-publisher'), type: 'ok', desc: joinLines([ fine, places ]) };
+        }
+        // Behind the current WordPress version is the finding every release brings, and gets
+        // its own title; a finding is the headline even after a carry.
+        const outdated = findings.some((finding) => finding.key === 'behind');
+        return { title: outdated ? __('Outdated Tested up to', 'peak-publisher') : __('Unexpected Tested up to', 'peak-publisher'), type: 'warning', desc: joinLines([ fine, ...texts, places ]) };
     }
 
     // Warn-only probe failure — the target stays usable: upfront verification
@@ -641,6 +776,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 checkBootstrapCode(context),
                 checkWorkspaceArtifacts(context),
                 checkReadmeTxt(context),
+                checkTestedUpTo(context),
             ],
         ].flat(Infinity).filter(Boolean);
     }

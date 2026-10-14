@@ -113,7 +113,7 @@ class WporgOperations {
             // A successful commit is the strongest possible credential verdict.
             record_wporg_credentials_verdict($username, true);
             $revision = (int) ($commit['revision'] ?? 0);
-            record_wporg_operation((int) $marker->ID, $operation, $username, $revision, $plan['details']);
+            record_operation((int) $marker->ID, $operation, $username, $revision, $plan['details']);
             // Every own commit changes when the plugin page shows it: the forecast follows the log entry.
             refresh_wporg_import_forecast($marker, $client);
             if ($after_commit !== null) {
@@ -310,6 +310,124 @@ class WporgOperations {
         });
 
         return [ ...$result, ...$outcome ];
+    }
+
+    /**
+     * Sets Tested up to of tags/{version} in one commit: the readme's header line and, when the
+     * main file carries the line, that line too; trunk gets the same lines when its main file
+     * names this very version — trunk carries the files of the highest deployed version, and
+     * only then is the edit also trunk's. Built under the lock from fresh reads; the tag's
+     * snapshot is read back into its release post while the lock is held.
+     *
+     * @param string $expected The effective value the dialog showed.
+     * @return array{revision:int|null, committed:bool, base_revision:int, details:array, from:string, trunk:array{state:string, version:?string}, trunk_readme:?array}
+     *         trunk: state written | other_version (version = trunk's) | absent; trunk_readme:
+     *         the marker cache's entry of trunk's readme when the commit changed it, else null.
+     * @throws WporgSvnException wporg_tag_not_found (404), tested_up_to_nowhere (409),
+     *         tested_up_to_changed (409), invalid_tested_up_to_target (400), the primitive's.
+     */
+    public static function set_tested_up_to(\WP_Post $marker, string $version, string $value, string $expected, string $username): array {
+        $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
+        $version = self::safe_path_segment($version);
+
+        $outcome = [];
+        $result = self::commit_files($marker, $username, 'tested_up_to', function(WporgPluginSvnClient $client) use ($wporg_slug, $version, $value, $expected, &$outcome): array {
+            $tag_base = $wporg_slug . '/tags/' . $version;
+            try {
+                $entries = $client->list_directory($tag_base . '/', 1);
+            } catch (WporgSvnException $e) {
+                if ($e->get_error_code() === 'not_found') {
+                    throw self::exception('wporg_tag_not_found');
+                }
+                throw $e;
+            }
+            $children = self::direct_children($entries, $tag_base);
+            $readme_entry = self::find_readme_entry($children);
+            $readme_name = $readme_entry !== null ? (string) $readme_entry['name'] : '';
+            $readme = $readme_entry !== null ? self::normalize_readme_content($client->read_file($tag_base . '/' . $readme_name)) : null;
+            // The main file is found by reading the tag's PHP files; its content is kept for the plan.
+            $read_contents = [];
+            $plugin_file = self::plugin_file_data_from_children($wporg_slug, $children, static function(array $entry) use ($client, &$read_contents): ?string {
+                $path = (string) ($entry['path'] ?? '');
+                return $path !== '' ? ($read_contents[basename((string) ($entry['name'] ?? ''))] = $client->read_file($path)) : null;
+            });
+            $main_name = (string) ($plugin_file['plugin_info']['main_file'] ?? '');
+            $main = $read_contents[$main_name] ?? null;
+            $effective = effective_tested_up_to($plugin_file['plugin_data'], $readme !== null ? parse_readme_txt($readme) : null);
+
+            // The tag's files as plan_tested_up_to_edit() decides — the rule both channels share.
+            $changes = plan_tested_up_to_edit($readme, $main, $effective, $value, $expected);
+            if (is_wp_error($changes)) {
+                throw WporgSvnException::from_wp_error($changes);
+            }
+            $names = [ 'readme' => $readme_name, 'main' => $main_name ];
+            $files = [];
+            foreach ($changes as $file => $content) {
+                $files['tags/' . $version . '/' . $names[$file]] = $content;
+            }
+
+            // trunk follows when it carries this version: its main file names it — its existing
+            // lines only, nothing is created there (tested_up_to_line_changes()). The outcome says
+            // what was written; a main file without a version is no mirror of anything.
+            $trunk = [ 'state' => 'absent', 'version' => null ];
+            $trunk_readme_entry = null;
+            $trunk_main = $main_name !== '' ? self::read_file_or_null($client, $wporg_slug . '/trunk/' . $main_name) : null;
+            if ($trunk_main !== null) {
+                $trunk_data = self::parse_plugin_data_from_contents($main_name, $trunk_main) ?? [];
+                $trunk_version = (string) ($trunk_data['Version'] ?? '');
+                if ($trunk_version !== '' && normalize_version_number($trunk_version) === normalize_version_number($version)) {
+                    $trunk_readme = self::read_trunk_readme($client, $wporg_slug);
+                    $trunk_changes = tested_up_to_line_changes($trunk_readme['file_name'] !== null ? $trunk_readme['content'] : null, $trunk_main, $value, false);
+                    $trunk_names = [ 'readme' => (string) $trunk_readme['file_name'], 'main' => $main_name ];
+                    foreach ($trunk_changes as $file => $content) {
+                        $files['trunk/' . $trunk_names[$file]] = $content;
+                    }
+                    if ($trunk_changes !== []) {
+                        $trunk['state'] = 'written';
+                    }
+                    // The marker cache's entry of trunk's readme as this commit leaves it — only
+                    // when the readme itself changed; a changed main file leaves it as it was.
+                    if (isset($trunk_changes['readme'])) {
+                        $trunk_readme_entry = self::trunk_readme_cache_entry([ ...$trunk_readme, 'tested' => $value ]);
+                    }
+                } elseif ($trunk_version !== '') {
+                    $trunk = [ 'state' => 'other_version', 'version' => $trunk_version ];
+                }
+            }
+
+            $puts = [];
+            $cleanup = [];
+            foreach ($files as $path => $content) {
+                $variant = self::file_variant($content);
+                $puts[] = [ 'path' => $path, 'local_path' => $variant['path'] ];
+                $cleanup[] = $variant['path'];
+            }
+            $outcome = [ 'from' => $effective['value'], 'trunk' => $trunk, 'trunk_readme' => $trunk_readme_entry ];
+            return [
+                'puts' => $puts,
+                'message' => sprintf('Set Tested up to %s for version %s of %s via Peak Publisher', $value, $version, $wporg_slug),
+                'details' => [ 'version' => $version, 'from' => $effective['value'], 'to' => $value, 'source_before' => $effective['source'], 'files' => array_keys($files), 'trunk' => $trunk ],
+                'cleanup' => $cleanup,
+            ];
+        }, static function(int $revision) use ($marker, $version): void {
+            // Still under the lock: the tag's snapshot read back from SVN, as after a deploy. A
+            // failure returns a WP_Error the next refresh heals; after_commit must not throw.
+            sync_wporg_deployed_release_post($marker, $version);
+        });
+
+        return [ ...$result, ...$outcome ];
+    }
+
+    /** A file read that answers null for not_found — a tag or trunk without the file. */
+    private static function read_file_or_null(WporgPluginSvnClient $client, string $path): ?string {
+        try {
+            return $client->read_file($path);
+        } catch (WporgSvnException $e) {
+            if ($e->get_error_code() === 'not_found') {
+                return null;
+            }
+            throw $e;
+        }
     }
 
     public static function list_tags(string $wporg_slug): array {
@@ -543,9 +661,10 @@ class WporgOperations {
      * Reads trunk's readme for the marker cache: the pointer (Stable tag) and the screenshot
      * captions — the `trunk_readme` structure of wporg_cache.php.
      *
-     * @return array{stable_tag:string, file_name:string|null, screenshots:array<int,string>}
+     * @return array{stable_tag:string, file_name:string|null, screenshots:array<int,string>, tested:string}
      *         file_name null = trunk has no readme (stable_tag '' then); stable_tag '' = no
-     *         header; otherwise the parser's sanitized value, 'trunk' included.
+     *         header; otherwise the parser's sanitized value, 'trunk' included; tested = the
+     *         readme's Tested up to as the parser reads it ('' = none).
      * @throws WporgSvnException When trunk cannot be listed or the readme not read.
      */
     public static function fetch_trunk_readme(string $wporg_slug): array {
@@ -558,12 +677,12 @@ class WporgOperations {
      * tag line. $trunk_tree is a read_remote_tree() of trunk when the caller has one (the
      * trunk_and_tag deploy), else trunk is listed.
      *
-     * @return array{stable_tag:string, file_name:string|null, screenshots:array, content:string}
+     * @return array{stable_tag:string, file_name:string|null, screenshots:array, tested:string, content:string}
      *         content is the file as parsed: UTF-8, BOM stripped.
      * @throws WporgSvnException When trunk cannot be listed or the file not read.
      */
     private static function read_trunk_readme(WporgPluginSvnClient $client, string $wporg_slug, ?array $trunk_tree = null): array {
-        $none = [ 'stable_tag' => '', 'file_name' => null, 'screenshots' => [], 'content' => '' ];
+        $none = [ 'stable_tag' => '', 'file_name' => null, 'screenshots' => [], 'tested' => '', 'content' => '' ];
         if ($trunk_tree === null) {
             $base_path = $wporg_slug . '/trunk';
             try {
@@ -591,13 +710,18 @@ class WporgOperations {
             'stable_tag' => (string) ($parsed['stable_tag'] ?? ''),
             'file_name' => $file_name,
             'screenshots' => is_array($parsed['screenshots'] ?? null) ? $parsed['screenshots'] : [],
+            'tested' => sanitize_tested_up_to((string) ($parsed['tested'] ?? '')),
             'content' => $content,
         ];
     }
 
-    /** The marker cache's `trunk_readme` entry of a read or written readme (without the content). */
+    /**
+     * The marker cache's `trunk_readme` entry of a read or written readme (without the
+     * content): the pointer, the file, the captions, and Tested up to — what the editor shows
+     * while wordpress.org distributes trunk.
+     */
     private static function trunk_readme_cache_entry(array $readme): array {
-        return [ 'stable_tag' => $readme['stable_tag'], 'file_name' => $readme['file_name'], 'screenshots' => $readme['screenshots'] ];
+        return [ 'stable_tag' => $readme['stable_tag'], 'file_name' => $readme['file_name'], 'screenshots' => $readme['screenshots'], 'tested' => $readme['tested'] ];
     }
 
     public static function fetch_tags_data_batch(string $wporg_slug, array $versions): array {
@@ -693,23 +817,31 @@ class WporgOperations {
      * Writes a readme with its Stable tag set to $value into a temp file for a PUT and parses
      * what was written. The caller lists the path in the Plan's cleanup.
      *
-     * @return array{path:string, size:int, hash:string, stable_tag:string, screenshots:array}
+     * @return array{path:string, size:int, hash:string, stable_tag:string, screenshots:array, tested:string}
      */
     private static function readme_variant(string $content, string $value): array {
         $variant = set_readme_stable_tag($content, $value);
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        $path = wp_tempnam('readme.txt');
-        if (!is_string($path) || $path === '' || @file_put_contents($path, $variant) === false) {
-            throw self::exception('wporg_readme_variant_failed');
-        }
         $parsed = parse_readme_txt($variant);
         return [
-            'path' => $path,
-            'size' => strlen($variant),
-            'hash' => md5($variant),
+            ...self::file_variant($variant),
             'stable_tag' => (string) ($parsed['stable_tag'] ?? ''),
             'screenshots' => is_array($parsed['screenshots'] ?? null) ? $parsed['screenshots'] : [],
+            'tested' => sanitize_tested_up_to((string) ($parsed['tested'] ?? '')),
         ];
+    }
+
+    /**
+     * Writes content into a temp file for a PUT; the caller lists the path in the Plan's cleanup.
+     *
+     * @return array{path:string, size:int, hash:string}
+     */
+    private static function file_variant(string $content): array {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        $path = wp_tempnam('pblsh-put');
+        if (!is_string($path) || $path === '' || @file_put_contents($path, $content) === false) {
+            throw self::exception('wporg_commit_file_failed');
+        }
+        return [ 'path' => $path, 'size' => strlen($content), 'hash' => md5($content) ];
     }
 
     /**
@@ -1502,7 +1634,7 @@ class WporgOperations {
             'wporg_plugin_busy' => [__("This plugin's data is being updated right now. Try again in a moment.", 'peak-publisher'), 409],
             'current_release_changed' => [__('The current release on wordpress.org changed in the meantime. Reload and check the decision again.', 'peak-publisher'), 409],
             'wporg_trunk_readme_unreadable' => [__('trunk/readme.txt could not be read from wordpress.org, so the Stable tag cannot be handled safely. Try again.', 'peak-publisher'), 502],
-            'wporg_readme_variant_failed' => [__('The readme variant for trunk could not be written on this server.', 'peak-publisher'), 500],
+            'wporg_commit_file_failed' => [__('A file for the commit to wordpress.org could not be prepared on this server.', 'peak-publisher'), 500],
             'current_release_target_missing' => [__('The tag to make current no longer exists on wordpress.org.', 'peak-publisher'), 404],
             'invalid_current_release_target' => [__('This release is the current release on wordpress.org already.', 'peak-publisher'), 400],
             'wporg_trunk_readme_missing' => [__('wordpress.org has no readme.txt in trunk yet — publish a release with a readme.txt first.', 'peak-publisher'), 409],
@@ -1627,7 +1759,6 @@ class WporgOperations {
     }
 
     private static function parse_plugin_data_from_contents(string $name, string $contents): ?array {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
 
         $tmp = wp_tempnam($name !== '' ? $name : 'pblsh-wporg-plugin.php');
@@ -1640,7 +1771,7 @@ class WporgOperations {
                 return null;
             }
 
-            $plugin_data = get_plugin_data($tmp, false, false);
+            $plugin_data = read_plugin_headers($tmp);
             return !empty($plugin_data['Name']) ? $plugin_data : null;
         } finally {
             if (file_exists($tmp)) {

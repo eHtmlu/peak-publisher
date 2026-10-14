@@ -1,8 +1,9 @@
 // CurrentVersion Component - a plugin's current release as the list cell and the editor
 // header show it: the version sites receive, or what they get instead ("trunk" on
 // wordpress.org, nothing self-hosted) with a state glyph whose tooltip explains why.
-// One rendering for both surfaces; the wording comes from Pblsh.CurrentReleaseUtils.
-const CurrentVersion = ({ plugin }) => {
+// One rendering for both surfaces; the wording comes from Pblsh.CurrentReleaseUtils. The
+// list passes glyph false: its status column carries the fact, the label stands alone there.
+const CurrentVersion = ({ plugin, glyph = true }) => {
     const { createElement } = wp.element;
     const { Tooltip } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
@@ -17,7 +18,7 @@ const CurrentVersion = ({ plugin }) => {
     const label = plugin && plugin.hosting_type === 'wporg' && issue && plugin.current_release_state !== 'unknown'
         ? 'trunk'
         : '—';
-    if (!issue) {
+    if (!issue || !glyph) {
         return createElement('span', { className: 'pblsh--current-version' }, label);
     }
     return createElement('span', { className: 'pblsh--current-version pblsh--current-version--' + issue.variant },

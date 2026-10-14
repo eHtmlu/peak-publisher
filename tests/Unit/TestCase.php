@@ -35,7 +35,8 @@ abstract class TestCase extends PHPUnitTestCase {
 
     /**
      * A release post as finalize and the tag sync store it: the version as title, the
-     * plugin name in the content's plugin_data.
+     * snapshot {plugin_data, plugin_info, plugin_readme_txt} as content with the plugin name
+     * in plugin_data.
      */
     protected function create_release(\WP_Post $plugin, string $version, string $status = 'publish', string $name = 'My Plugin'): \WP_Post {
         $id = wp_insert_post([
@@ -44,7 +45,11 @@ abstract class TestCase extends PHPUnitTestCase {
             'post_title' => $version,
             'post_name' => $plugin->post_name . '_' . $version,
             'post_parent' => $plugin->ID,
-            'post_content' => (string) json_encode([ 'plugin_data' => [ 'Name' => $name, 'Version' => $version ] ]),
+            'post_content' => (string) json_encode([
+                'plugin_data' => [ 'Name' => $name, 'Version' => $version ],
+                'plugin_info' => [ 'normalized_version' => \Pblsh\normalize_version_number($version) ],
+                'plugin_readme_txt' => \Pblsh\default_plugin_readme_txt_data(),
+            ]),
         ]);
         return get_post($id);
     }

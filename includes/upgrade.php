@@ -79,6 +79,7 @@ function acquire_schema_migration_lock(): bool {
  */
 function upgrade_schema_from_live(): void {
     upgrade_asset_manifest_entries();
+    upgrade_self_hosted_release_snapshots();
 
     $topics = array_filter([
         'release_drafts' => upgrade_release_drafts_to_pointer(),
@@ -213,6 +214,61 @@ function upgrade_drop_readme_conversion_setting(): ?array {
     unset($settings['readme_txt_convert_to_utf8_without_bom']);
     update_option('pblsh_settings', $settings, false);
     return $was_disabled ? [ 'was_disabled' => true ] : null;
+}
+
+
+/**
+ * Schema version 1 (ships with the release after 1.3.1): a self-hosted release post's content
+ * becomes the snapshot {plugin_data, plugin_info, plugin_readme_txt} — regenerable from its
+ * ZIP, like a wporg tag's from SVN — and the upload state moves to the meta
+ * _pblsh_upload_state.
+ *
+ * Why: an edit after the upload (Tested up to) changes the release's readme; the upload state
+ * must stay the verbatim record of the upload, and one stored state must say what the release
+ * is now. The content hash is recomputed with the current formula (content_hash_from_entries():
+ * sha256 over the paths and file contents of the ZIP's entries).
+ *
+ * What, per self-hosted release whose content carries keys beyond the three and whose meta is
+ * missing: content → meta; the snapshot from the ZIP (release_snapshot_from_zip()), or — ZIP
+ * gone or unreadable without the zip extension — the three keys of the old content; the hash
+ * from the ZIP, '' without one. A repeated
+ * run finds nothing to do. Nothing for the notice. wporg release posts carry tag snapshots
+ * already and are not touched.
+ */
+function upgrade_self_hosted_release_snapshots(): void {
+    $plugin_ids = get_posts([
+        'post_type' => 'pblsh_plugin',
+        'post_status' => 'any',
+        'posts_per_page' => -1,
+        'fields' => 'ids',
+    ]);
+    foreach ($plugin_ids as $plugin_id) {
+        $releases = get_posts([
+            'post_type' => 'pblsh_release',
+            'post_status' => 'any',
+            'post_parent' => (int) $plugin_id,
+            'posts_per_page' => -1,
+        ]);
+        foreach ($releases as $release) {
+            $content = json_decode((string) $release->post_content, true);
+            if (!is_array($content) || metadata_exists('post', (int) $release->ID, '_pblsh_upload_state')) {
+                continue;
+            }
+            if (array_diff(array_keys($content), [ 'plugin_data', 'plugin_info', 'plugin_readme_txt' ]) === []) {
+                continue;
+            }
+            update_post_meta((int) $release->ID, '_pblsh_upload_state', wp_slash((string) $release->post_content));
+            // Without the zip extension the ZIP stays unread: the old content's three keys and no
+            // hash — the migration must never fail on init.
+            $zip = release_zip_path($release);
+            $zip_readable = $zip !== '' && is_file($zip) && release_zip_support();
+            $snapshot = $zip_readable ? release_snapshot_from_zip($zip) : null;
+            // A failed write is tolerated here, on init: the content stays the old upload state,
+            // which carries the three keys release_snapshot() reads.
+            write_release_snapshot($release, $snapshot ?? release_snapshot($release));
+            update_post_meta((int) $release->ID, '_pblsh_directory_content_hash', $zip_readable ? content_hash_from_entries(zip_entries($zip)) : '');
+        }
+    }
 }
 
 

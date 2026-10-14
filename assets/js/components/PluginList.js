@@ -4,9 +4,11 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
-    const { showAlert, getSvgIcon, getPluginStatus, getWporgPluginUrl } = Pblsh.Utils;
+    const { showAlert, getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus, RelativeTime } = Pblsh.Components;
     const { getCheck } = Pblsh.WporgCheckUtils;
+    const { getPluginStatusItems } = Pblsh.PluginStatusUtils;
+    const stableBranch = Pblsh.Utils.getStableBranch();
     //const { exportPlugin } = Pblsh.API;
 
     const handleDelete = async (plugin) => {
@@ -45,20 +47,30 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     // said here: the rows would age without a word.
     const checkFailed = wporgPlugins.length > 0 && !!getCheck(wporgPlugins).error;
 
-    // Only the exceptions are marked — a public plugin is the normal case. The badge says
-    // the status in the status vocabulary's word and color; it is a mark, not a control:
-    // the switch is the editor's (self-hosted only). The consequence is its tooltip,
-    // reachable by keyboard like the row's other tooltips.
-    const renderStatusBadge = (plugin) => {
-        const status = getPluginStatus(plugin.status);
-        const consequence = plugin.status === 'closed'
-            ? __('Closed on wordpress.org. The directory distributes nothing.', 'peak-publisher')
-            : __('Sites receive nothing while the plugin is a draft. Switch it in the editor.', 'peak-publisher');
-        return createElement(Tooltip, { text: consequence },
-            createElement('span', {
-                className: 'pblsh--table__status-badge pblsh--table__status-badge--' + status.modifier,
-                tabIndex: 0,
-            }, status.label),
+    // The status column: what needs attention, one item per line in the editor's notice
+    // vocabulary (utils-plugin-status.js) — a mark, not a control: the remedies live in the
+    // editor. The whole sentence is the tooltip, reachable by keyboard like the row's other
+    // tooltips; a check says all clear, so the column is never blank.
+    // The glyph per variant: a problem warns or informs; a state (closed, draft) shows the
+    // editor status button's dot.
+    const statusGlyphs = { warning: 'alert', info: 'information_outline', closed: 'circle', draft: 'circle' };
+    const renderStatusCell = (plugin) => {
+        const items = getPluginStatusItems(plugin, stableBranch);
+        if (items.length === 0) {
+            const allClear = __('All clear', 'peak-publisher');
+            return createElement(Tooltip, { text: allClear },
+                createElement('span', { className: 'pblsh--status-item pblsh--status-item--ok', tabIndex: 0, role: 'img', 'aria-label': allClear },
+                    createElement('span', { className: 'pblsh--status-item__glyph' }, getSvgIcon('check_bold', { size: 16 })),
+                ),
+            );
+        }
+        return createElement('span', { className: 'pblsh--status-items' },
+            ...items.map((item) => createElement(Tooltip, { key: item.key, text: item.text },
+                createElement('span', { className: 'pblsh--status-item pblsh--status-item--' + item.variant, tabIndex: 0 },
+                    createElement('span', { className: 'pblsh--status-item__glyph' }, getSvgIcon(statusGlyphs[item.variant] || 'information_outline', { size: 16 })),
+                    createElement('span', { className: 'pblsh--status-item__label' }, item.label),
+                ),
+            )),
         );
     };
 
@@ -86,6 +98,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                             )),
                             createElement('th', { className: 'pblsh--table__version-header' }, __('Version', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__released-header' }, __('Released', 'peak-publisher')),
+                            createElement('th', { className: 'pblsh--table__status-header' }, __('Status', 'peak-publisher')),
                             showInstallations && createElement('th', { className: 'pblsh--table__installations-header' }, __('Installations', 'peak-publisher')),
                             createElement('th', { className: 'pblsh--table__actions-header' }, __('Actions', 'peak-publisher'))
                         )
@@ -106,7 +119,6 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                         }),
                                         createElement('div', { className: 'pblsh--table__name-content' },
                                             createElement('div', { className: 'pblsh--table__name-line' },
-                                                plugin.status !== 'publish' && renderStatusBadge(plugin),
                                                 createElement('strong', null, plugin.name),
                                             ),
                                             createElement(ChannelPath, { channel: plugin.hosting_type, slug: plugin.slug }),
@@ -114,12 +126,13 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                     ),
                                 ),
                                 createElement('td', { className: 'pblsh--table__version-cell' },
-                                    createElement(CurrentVersion, { plugin })
+                                    createElement(CurrentVersion, { plugin, glyph: false })
                                 ),
                                 // When the current release was published; nothing to date without one.
                                 createElement('td', { className: 'pblsh--table__released-cell' },
                                     plugin.released_at ? createElement(RelativeTime, { value: plugin.released_at, tooltip: true }) : '—'
                                 ),
+                                createElement('td', { className: 'pblsh--table__status-cell' }, renderStatusCell(plugin)),
                                 showInstallations && createElement('td', { className: 'pblsh--table__installations-cell' },
                                     createElement(InstallationsCount, { plugin })
                                 ),

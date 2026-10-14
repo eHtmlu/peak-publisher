@@ -106,6 +106,17 @@ class UploadWorkflow {
             return $this->upload_error('invalid_current_release_decision', __('The current-release decision of this upload is missing or invalid.', 'peak-publisher'));
         }
 
+        // The carry (carry_tested_up_to()): when a Tested up to line of the upload says something
+        // else than the other line or the predecessor in the version line, every existing line
+        // gets the highest value, trimmed to the first two numbers — in the files of the
+        // workspace, before the ZIP is built or the tag deployed, whatever the current-release
+        // switch says. The target's facts in the upload state record it, with the stable branch
+        // the dialog judged against (tested_up_to_upload_facts()).
+        $carry = $target['tested_up_to']['carry'] ?? null;
+        if (is_array($carry)) {
+            $this->apply_tested_up_to_to_workspace($data, (string) $carry['value']);
+        }
+
         if ($active_target['hosting_type'] === 'wporg') {
             return $this->finalize_wporg_upload($data, $target, $make_current);
         }
@@ -231,10 +242,17 @@ class UploadWorkflow {
             }
         }
 
-        // Create pblsh_release post (child of plugin)
+        // Create pblsh_release post (child of plugin). Its content is the snapshot — what the
+        // APIs and the editor read, regenerable from the ZIP as a wporg tag's is from SVN
+        // (docs/data-schema.md) — taken from the upload state that built the ZIP, so no ZIP is
+        // read here and a host without the zip extension keeps building releases; the upload
+        // state itself, the forensic record of this upload, lives in post meta like a wporg
+        // deploy's.
+        $snapshot = release_snapshot_from_upload_state($data);
         $release_meta = [
             '_pblsh_zip_path' => $this->rel_path($target_zip, peak_publisher_upload_basedir()),
             '_pblsh_directory_content_hash' => $data['plugin_info']['content_hash'] ?? '',
+            '_pblsh_upload_state' => wp_slash(json_encode($data)),
         ];
         $release_post_data = [
             'ID' => $existing_release_id,
@@ -243,7 +261,7 @@ class UploadWorkflow {
             'post_title' => $data['plugin_data']['Version'] ?? '',
             'post_name' => $release_slug,
             'post_parent' => (int) $plugin_post_id,
-            'post_content' => wp_slash(json_encode($data)),
+            'post_content' => wp_slash(json_encode($snapshot)),
             'meta_input' => $release_meta,
         ];
         if ($existing_release_id > 0) {
@@ -281,6 +299,38 @@ class UploadWorkflow {
                 'plugin_post_id' => $plugin_post_id ?? null,
             ],
         ];
+    }
+
+    /**
+     * Writes the carried Tested up to into the workspace where the value lives — the existing
+     * lines only (tested_up_to_line_changes(): the carry never creates a line), readable or not
+     * (a line the facts could not read, `7.2-RC1`, gets the value too, unnamed by the checklist
+     * — see carry_tested_up_to()) — and brings the upload state's facts of both files and the
+     * content hash up to date, so the ZIP and the deploy ship what the state says.
+     */
+    private function apply_tested_up_to_to_workspace(array &$data, string $value): void {
+        $root = $this->detect_root_dir($this->tmp_root . 'data/');
+        $paths = [
+            'readme' => (string) ($data['plugin_readme_txt']['file_name'] ?? ''),
+            'main' => (string) ($data['plugin_info']['main_file'] ?? ''),
+        ];
+        $read = static fn(string $rel): ?string => $rel !== '' && is_file($root . $rel) ? (string) file_get_contents($root . $rel) : null;
+        $changes = tested_up_to_line_changes($read($paths['readme']), $read($paths['main']), $value, false);
+        foreach ($changes as $file => $content) {
+            // A write that fails in the plugin's own workspace is an invariant violation, not a
+            // user error: the upload state must never claim a value the files do not carry.
+            if (file_put_contents($root . $paths[$file], $content) === false) {
+                throw new \RuntimeException('tested_up_to_workspace_write_failed');
+            }
+        }
+        if (isset($changes['readme'])) {
+            $parsed = parse_readme_txt($changes['readme']);
+            $data['plugin_readme_txt']['content'] = json_encode($parsed) !== false ? $parsed : [];
+        }
+        if (isset($changes['main'])) {
+            $data['plugin_data'] = read_plugin_headers($root . $paths['main']);
+        }
+        $data['plugin_info']['content_hash'] = content_hash_from_entries(directory_entries($root));
     }
 
     /**
@@ -422,9 +472,8 @@ class UploadWorkflow {
             $size_before_cleanup = $this->get_path_size($root);
             $entry_count_before_cleanup = $this->count_directory_entries($root);
 
-            // Get plugin data
-            require_once ABSPATH . 'wp-admin/includes/plugin.php'; // For WordPress before version 6.8 we need to include this file to ensure the function get_plugin_data() is available.
-            $plugin_data = $main_file ? get_plugin_data($main_file, false, false) : [];
+            // The plugin headers — WordPress's and Tested up to (read_plugin_headers()).
+            $plugin_data = $main_file ? read_plugin_headers($main_file) : [];
 
             // Slug candidates from user-chosen names — the plugin name first (wordpress.org parity:
             // submissions mint the slug from the plugin name, so pre-import wporg uploads fit
@@ -533,7 +582,7 @@ class UploadWorkflow {
                     'bootstrap_version' => $bootstrap['version'] ?? '',
                     'bootstrap_is_latest' => $bootstrap['is_latest'] ?? false,
                     'slug_candidates' => $slug_candidates,
-                    'content_hash' => $this->get_directory_content_hash($root),
+                    'content_hash' => content_hash_from_entries(directory_entries($root)),
                 ],
                 'cleanup_info' => [
                     'found_workspace_artifacts' => $found_workspace_artifacts,
@@ -882,7 +931,24 @@ class UploadWorkflow {
             'release_slug' => $slug !== '' && $version !== '' ? get_release_slug('self_hosted', $slug, $version) : '',
             'related_releases' => $related_releases,
             'current_release' => $version !== '' ? $this->build_current_release_facts($plugin_post, $related_releases, $version, false) : null,
+            'tested_up_to' => $this->tested_up_to_facts($data, $related_releases, $plugin_post),
         ];
+    }
+
+    /**
+     * The Tested up to facts of the upload against a target (tested_up_to_upload_facts()):
+     * what the upload says, what the predecessor in the version line and the current release
+     * say, and the carry-over finalize applies. The client's checklist row reads them.
+     *
+     * @param array|false $related_releases find_related_releases() of the target plugin, false without one.
+     */
+    private function tested_up_to_facts(array $data, $related_releases, ?\WP_Post $plugin): array {
+        return tested_up_to_upload_facts(
+            is_array($data['plugin_data'] ?? null) ? $data['plugin_data'] : [],
+            is_array($data['plugin_readme_txt']['content'] ?? null) ? $data['plugin_readme_txt']['content'] : null,
+            $related_releases,
+            $plugin instanceof \WP_Post ? get_current_release($plugin) : null
+        );
     }
 
     /**
@@ -949,6 +1015,7 @@ class UploadWorkflow {
                 'blocking_errors' => $blockers,
             ],
             'related_releases' => false,
+            'tested_up_to' => $this->tested_up_to_facts($data, false, null),
         ];
     }
 
@@ -1047,6 +1114,7 @@ class UploadWorkflow {
             ],
             'related_releases' => $related_releases,
             'current_release' => $version !== '' ? $this->build_current_release_facts($marker, $related_releases, $version, true, $deploy_mode) : null,
+            'tested_up_to' => $this->tested_up_to_facts($data, $related_releases, $marker),
         ];
     }
 
@@ -1593,33 +1661,6 @@ class UploadWorkflow {
     }
 
     /**
-     * Calculates the content hash of a path.
-     *
-     * @param string $path Absolute path to the file or directory.
-     * @return string Content hash of the path.
-     */
-    private function get_directory_content_hash(string $path): string {
-        // Iterate over all files and directories and hash each relative path and, for files, also the content. At the end, sort all hashes and hash the concatenation (sha256, like the ZIP fingerprints in original_zip/release_zip).
-        // Releases created before 2026-08 stored md5 values (32 hex chars) under the same keys
-        // (plugin_info.content_hash, _pblsh_directory_content_hash). Before using these hashes
-        // for comparisons, migrate the stored values (recompute from the stored ZIPs) or
-        // discriminate by length — an md5 value can never match a sha256 value.
-        $hashes = [];
-        $dirIt = new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS);
-        $it = new \RecursiveIteratorIterator($dirIt, \RecursiveIteratorIterator::SELF_FIRST);
-        foreach ($it as $entry) {
-            $entry_path = $entry->getPathname();
-            $relative_path = $this->rel_path($entry_path, $path);
-            $hashes[] = hash('sha256', $relative_path);
-            if (is_file($entry_path)) {
-                $hashes[] = hash_file('sha256', $entry_path);
-            }
-        }
-        sort($hashes);
-        return hash('sha256', implode('', $hashes));
-    }
-
-    /**
      * Checks if the working directory has a top-level folder.
      *
      * @param string $working_dir Absolute path to the working directory.
@@ -1658,7 +1699,7 @@ class UploadWorkflow {
     private function find_main_plugin_file(string $root): ?string {
         $candidates = $this->list_php_files($root, 0);
         foreach ($candidates as $file) {
-            $data = get_plugin_data($file, false, false);
+            $data = read_plugin_headers($file);
             if (!empty($data['Name'])) {
                 return $file;
             }
@@ -1832,14 +1873,20 @@ class UploadWorkflow {
         wp_mkdir_p($zip_dir);
         $zip_path = $zip_dir . $slug . '.' . $version . '.zip';
 
-        // Build file list once (used by ZipArchive and PclZip paths)
+        // The file and directory lists, built once for both ZIP paths. Every directory gets an
+        // entry of its own, empty ones included — like wordpress.org's builder; WordPress's
+        // unzip creates them, and an empty folder a plugin ships arrives as one.
         $files = [];
-        $rii = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($content_root, \FilesystemIterator::SKIP_DOTS));
+        $dirs = [];
+        $rii = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($content_root, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST);
         foreach ($rii as $entry) {
             if ($entry->isFile()) {
                 $files[] = $entry->getPathname();
+            } elseif ($entry->isDir()) {
+                $dirs[] = $entry->getPathname();
             }
         }
+        $relative = static fn(string $abs): string => $slug . '/' . substr($abs, strlen($content_root));
 
         get_wp_filesystem(); // Ensure the WordPress file functions are initialized
         wp_zip_file_is_valid($zip_path); // Ensure the respective WordPress zip class is initialized
@@ -1851,8 +1898,12 @@ class UploadWorkflow {
         if (class_exists('\\ZipArchive')) {
             $zip = new \ZipArchive();
             if ($zip->open($zip_path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true) {
+                $zip->addEmptyDir($slug);
+                foreach ($dirs as $abs) {
+                    $zip->addEmptyDir($relative($abs));
+                }
                 foreach ($files as $abs) {
-                    $zip->addFile($abs, $slug . '/' . substr($abs, strlen($content_root)));
+                    $zip->addFile($abs, $relative($abs));
                 }
                 $zip->close();
                 $created = file_exists($zip_path);
@@ -1862,8 +1913,11 @@ class UploadWorkflow {
 
         // Fallback: use WordPress bundled PclZip if ZipArchive is unavailable or failed
         if (!$created && class_exists('\\PclZip')) {
+            // PclZip adds a listed directory with everything below it, so only the empty ones
+            // are listed — the others come with their files.
+            $empty_dirs = array_values(array_filter($dirs, static fn(string $dir): bool => count((array) scandir($dir)) === 2));
             $pcl = new \PclZip($zip_path);
-            $res = $pcl->create($files, PCLZIP_OPT_REMOVE_PATH, $content_root, PCLZIP_OPT_ADD_PATH, $slug);
+            $res = $pcl->create(array_merge($empty_dirs, $files), PCLZIP_OPT_REMOVE_PATH, $content_root, PCLZIP_OPT_ADD_PATH, $slug);
             $created = ($res !== 0);
             $generated_with = 'pclzip';
         }

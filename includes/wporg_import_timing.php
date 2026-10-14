@@ -168,7 +168,7 @@ function refresh_wporg_import_forecast(\WP_Post $marker, ?WporgPluginSvnClient $
         delete_post_meta((int) $marker->ID, PBLSH_WPORG_IMPORT_META);
         return;
     }
-    $flips = wporg_operation_revisions((int) $marker->ID, 'stable_tag');
+    $flips = operation_revisions((int) $marker->ID, 'stable_tag');
     $forecast = predict_wporg_import(wporg_commits_from_log($entries, $marker->post_name, $flips), time());
     if ($forecast === null) {
         delete_post_meta((int) $marker->ID, PBLSH_WPORG_IMPORT_META);

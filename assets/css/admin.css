@@ -63,7 +63,8 @@
 }
 
 
-.pblsh-app button {
+/* A disabled button keeps the arrow: the pointer promises a click that does nothing. */
+.pblsh-app button:not(:disabled) {
     cursor: pointer;
 }
 
@@ -4476,11 +4477,11 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--upload-result button.pblsh--publish-path__trigger {
     border: 1px solid var(--border-color-light);
     background: #fff;
-    cursor: pointer;
     padding-inline: 0.5rem;
 }
 
-.pblsh--upload-result button.pblsh--publish-path__trigger:hover {
+/* Hover only while the trigger can be used — not while the dialog is busy. */
+.pblsh--upload-result button.pblsh--publish-path__trigger:not(:disabled):hover {
     border-color: color-mix(in srgb, var(--color-blue) 45%, var(--border-color-light));
 }
 
@@ -4562,11 +4563,10 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     border-radius: 3px;
     background: none;
     text-align: start;
-    cursor: pointer;
     line-height: inherit;
 }
 
-.pblsh--upload-result .pblsh--publish-path__option:hover {
+.pblsh--upload-result .pblsh--publish-path__option:not(:disabled):hover {
     background: rgba(0, 0, 0, 0.05);
 }
 

@@ -20,6 +20,13 @@ require_once __DIR__ . '/WporgSvnException.php';
 class WporgPluginSvnClient {
     private const REPO_URL = 'https://plugins.svn.wordpress.org/';
 
+    // The MERGE is wordpress.org's commit with its hooks: 7.5 s for a one-file commit, unmeasured
+    // for large ones. Given up too early, the commit may land all the same while the caller
+    // reports a failure; so it waits longer than any other request — but stays clearly below
+    // the upload dialog's PBLSH_FINALIZE_LOST_AFTER, the silence after which it takes a publish
+    // for lost (the MERGE writes no sign of life).
+    private const MERGE_TIMEOUT = 100; // seconds
+
     private ?string $username;
     private ?string $password;
     private string $commit_slug = '';
@@ -466,30 +473,27 @@ class WporgPluginSvnClient {
         );
     }
 
+    /**
+     * Creates one directory — its parent must exist or have been created before it (a PUT or
+     * MKCOL below a missing directory gets a 404 from wordpress.org). An existing directory
+     * answers 405 and is no error.
+     */
     public function mkdir(string $path): void {
         $this->require_commit_context();
         $path = $this->safe_relative_path($path);
 
-        $parts = explode('/', trim($path, '/'));
-        $current = '';
-        foreach ($parts as $part) {
-            if ($part === '') {
-                continue;
-            }
-            $current = $current === '' ? $part : $current . '/' . $part;
-            $response = $this->request_url('MKCOL', $this->working_url($current, true));
-            $status = (int) ($response['status'] ?? 0);
-            if ($this->is_success_status($status) || $status === 405 || $status === 409) {
-                continue;
-            }
-
-            $code = $this->write_error_code_from_response($response);
-            throw new WporgSvnException(
-                $code,
-                $this->write_failure_message($code, __('wordpress.org SVN directory creation failed.', 'peak-publisher'), $response),
-                $this->write_failure_status($code, $status)
-            );
+        $response = $this->request_url('MKCOL', $this->working_url($path, true));
+        $status = (int) ($response['status'] ?? 0);
+        if ($this->is_success_status($status) || $status === 405) {
+            return;
         }
+
+        $code = $this->write_error_code_from_response($response);
+        throw new WporgSvnException(
+            $code,
+            $this->write_failure_message($code, __('wordpress.org SVN directory creation failed.', 'peak-publisher'), $response),
+            $this->write_failure_status($code, $status)
+        );
     }
 
     public function commit(string $message): array {
@@ -756,7 +760,7 @@ class WporgPluginSvnClient {
 
         return $this->request_url('MERGE', $merge_url, [
             'Content-Type' => 'text/xml; charset=utf-8',
-        ], $body);
+        ], $body, [ 'timeout' => self::MERGE_TIMEOUT ]);
     }
 
     private function multistatus_has_failure(string $body): bool {

@@ -25,7 +25,7 @@ class WporgOperations {
      *
      * Plan = [
      *   'deletes' => string[]                                  paths relative to the plugin root
-     *   'mkdirs'  => string[]                                  directories to create (tolerant)
+     *   'mkdirs'  => string[]                                  directories to create, one MKCOL each
      *   'copies'  => array{path:string, from_path:string, from_revision:int}[]
      *                                                          server-side copies with history
      *   'puts'    => array{path:string, local_path:string}[]   a PUT replaces existing content
@@ -35,7 +35,8 @@ class WporgOperations {
      *   'cleanup' => string[]                                  temp files deleted in finally
      * ]
      * Every entry counts as a change: a directory is listed only when it may be missing,
-     * never one known to exist (creating an existing one is tolerated, but it is no change).
+     * never one known to exist (creating an existing one is tolerated, but it is no change) —
+     * and with every parent that may be missing too: mkdir() creates the one directory.
      * The primitive orders the operations: deletes deep-first, mkdirs shallow-first, then
      * copies, puts and mime types by path. An empty plan (none of these) commits nothing:
      * committed false, revision null, no log entry.
@@ -137,6 +138,9 @@ class WporgOperations {
             }
             $report('save');
             $commit = $client->commit($plan['message']);
+            // A sign of life after the MERGE, its longest silence: what follows under the lock
+            // (log, forecast, the caller's write-through) starts a silence of its own.
+            $report('save');
 
             // A successful commit is the strongest possible credential verdict.
             record_wporg_credentials_verdict($username, true);
@@ -1435,10 +1439,11 @@ class WporgOperations {
 
         return [
             'deletes' => array_values(array_map(static fn(array $delete): string => (string) $delete['path'], $delete_paths)),
-            // The base only when it does not exist yet (nothing was listed): a new tag directory
-            // must exist before its children. An existing base is not a change and stays out, so
-            // a plan without changes stays empty.
-            'mkdirs' => [ ...($remote_tree === [] ? [ $base ] : []), ...array_values($mkdir_paths) ],
+            // The base only when it does not exist yet (nothing was listed), with the folders
+            // above it, which may be missing too (tags/ for a new tag): it must exist before its
+            // children. An existing base is not a change and stays out, so a plan without
+            // changes stays empty.
+            'mkdirs' => [ ...($remote_tree === [] ? self::path_with_ancestors($base) : []), ...array_values($mkdir_paths) ],
             'puts' => array_values($put_paths),
         ];
     }
@@ -1522,6 +1527,12 @@ class WporgOperations {
             $out[$path] = $delete_paths[$path];
         }
         return $out;
+    }
+
+    /** 'tags/1.0' → ['tags', 'tags/1.0']: a path and every folder above it, shallow first. */
+    private static function path_with_ancestors(string $path): array {
+        $parts = explode('/', trim($path, '/'));
+        return array_map(static fn(int $depth): string => implode('/', array_slice($parts, 0, $depth)), range(1, count($parts)));
     }
 
     private static function join_svn_path(string $base, string $rel): string {

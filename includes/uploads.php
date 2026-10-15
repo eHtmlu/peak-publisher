@@ -222,8 +222,9 @@ const PBLSH_FINALIZE_STATUS_FILE = 'finalize.json';
 
 /**
  * A running finalize without a sign of life for this long is taken for dead (killed by the
- * host, a fatal error). Its longest silent stretch is the MERGE of a wordpress.org commit,
- * measured at about 8 s.
+ * host, a fatal error). Its longest silent stretch is the MERGE of a wordpress.org commit:
+ * about 8 s for a one-file commit, cut off at WporgPluginSvnClient::MERGE_TIMEOUT, which stays
+ * clearly below this.
  */
 const PBLSH_FINALIZE_LOST_AFTER = 120; // seconds
 

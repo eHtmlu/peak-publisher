@@ -1351,15 +1351,46 @@ class WporgOperations {
 
     /**
      * The remote tree below $base as a flat map of relative paths — type, path, size and, for a
-     * file, its MD5 — null when $base does not exist (an existing empty folder is []).
+     * file, its MD5 — null when $base does not exist (an existing empty folder is []). Read
+     * level by level: the base's own listing tells whether it exists, the folders of each level
+     * below are listed in parallel (list_directories_multi(), as the import does) — one listing
+     * per folder, a large plugin has dozens to hundreds.
      *
      * @param callable|null $on_folder fn(): void — called after each folder listed.
      */
     private static function read_remote_tree(WporgPluginSvnClient $client, string $wporg_slug, string $base, ?callable $on_folder = null): ?array {
         $base = trim($base, '/');
+        $root = $wporg_slug . '/' . $base;
         $tree = [];
         try {
-            self::read_remote_tree_into($client, $wporg_slug, $base, '', $tree, $on_folder);
+            $listings = [ '' => $client->list_directory($root . '/', 1) ];
+            while ($listings !== []) {
+                $below = [];
+                foreach ($listings as $relative_dir => $entries) {
+                    if ($on_folder !== null) {
+                        $on_folder();
+                    }
+                    foreach (self::direct_children($entries, trim($root . '/' . $relative_dir, '/')) as $entry) {
+                        $name = (string) ($entry['name'] ?? '');
+                        $type = (string) ($entry['type'] ?? '');
+                        if ($name === '' || ($type !== 'dir' && $type !== 'file')) {
+                            continue;
+                        }
+                        $rel = trim($relative_dir . '/' . $name, '/');
+                        $tree[$rel] = [
+                            'type' => $type,
+                            'path' => $base . '/' . $rel,
+                            'size' => $entry['size'] ?? null,
+                            'md5' => $entry['md5'] ?? null,
+                        ];
+                        if ($type === 'dir') {
+                            $below[$rel] = $root . '/' . $rel . '/';
+                        }
+                    }
+                }
+                $by_path = $below !== [] ? $client->list_directories_multi(array_values($below), 1, 5) : [];
+                $listings = array_map(static fn(string $path): array => $by_path[$path] ?? [], $below);
+            }
         } catch (WporgSvnException $e) {
             if ($e->get_error_code() === 'not_found') {
                 return null;
@@ -1368,41 +1399,6 @@ class WporgOperations {
         }
         ksort($tree);
         return $tree;
-    }
-
-    private static function read_remote_tree_into(WporgPluginSvnClient $client, string $wporg_slug, string $base, string $relative_dir, array &$tree, ?callable $on_folder): void {
-        $remote_dir = trim($wporg_slug . '/' . $base . '/' . trim($relative_dir, '/'), '/') . '/';
-
-        $entries = $client->list_directory($remote_dir, 1);
-        if ($on_folder !== null) {
-            $on_folder();
-        }
-
-        $children = self::direct_children($entries, trim($wporg_slug . '/' . $base . '/' . trim($relative_dir, '/'), '/'));
-        // Add direct children and recurse into directories
-        foreach ($children as $entry) {
-            $name = (string) ($entry['name'] ?? '');
-            if ($name === '') {
-                continue;
-            }
-
-            $rel = trim($relative_dir . '/' . $name, '/');
-            $type = (string) ($entry['type'] ?? '');
-            if ($type !== 'dir' && $type !== 'file') {
-                continue;
-            }
-
-            $tree[$rel] = [
-                'type' => $type,
-                'path' => trim($base . '/' . $rel, '/'),
-                'size' => isset($entry['size']) ? $entry['size'] : null,
-                'md5' => $entry['md5'] ?? null,
-            ];
-
-            if ($type === 'dir') {
-                self::read_remote_tree_into($client, $wporg_slug, $base, $rel, $tree, $on_folder);
-            }
-        }
     }
 
     /** Concatenates the reconcile plans of several bases into one Plan (commit_files() orders them). */

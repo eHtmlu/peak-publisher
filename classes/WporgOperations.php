@@ -43,11 +43,18 @@ class WporgOperations {
      * @param \WP_Post      $marker       The wporg marker (post_name = slug; the log lives on it).
      * @param string        $operation    deploy | stable_tag | delete_tag | assets | readme — the
      *                                    lock's label and the log entry's operation.
-     * @param callable      $build_plan   fn(WporgPluginSvnClient $client, int $base_revision): Plan
+     * @param callable      $build_plan   fn(WporgPluginSvnClient $client, int $base_revision, callable $report): Plan
+     *                                    — $report('read', $done) reports the plan's long reads
+     *                                    (a deploy's folder listings), which keeps the lock
+     *                                    alive while they run.
      * @param callable|null $after_commit fn(int $revision): void — runs once the commit landed,
      *                                    still under the lock: local state written from the plan
      *                                    must not interleave with another writer. It must not
      *                                    throw; the commit cannot be taken back.
+     * @param callable|null $progress     fn(string $phase, int $done, int $total): void — how far
+     *                                    the write got: read (what $build_plan reports), send
+     *                                    ($done of $total operations of the plan), save (the
+     *                                    commit's MERGE and what follows it under the lock).
      * @return array{revision:int|null, committed:bool, base_revision:int, details:array}
      *         base_revision = the plugin's revision the plan was built against; a caller whose
      *         cache was fresh there can advance it once plugin_changed_only_in() confirms that
@@ -56,7 +63,7 @@ class WporgOperations {
      * @throws WporgSvnException Credentials, lock, not_found, concurrent change, transport
      *         errors — and whatever $build_plan throws.
      */
-    public static function commit_files(\WP_Post $marker, string $username, string $operation, callable $build_plan, ?callable $after_commit = null): array {
+    public static function commit_files(\WP_Post $marker, string $username, string $operation, callable $build_plan, ?callable $after_commit = null, ?callable $progress = null): array {
         raise_wporg_time_limit();
 
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
@@ -76,6 +83,18 @@ class WporgOperations {
         $username = $credentials['username'];
 
         $lock = self::acquire_wporg_deploy_lock($wporg_slug, $username, $operation, (int) $marker->ID);
+        // Every report is the lock's sign of life (LOCK_HEARTBEAT) — a deploy of a large plugin
+        // holds it for minutes — and, for the caller, the write's progress.
+        $beat_at = time();
+        $report = static function(string $phase, int $done = 0, int $total = 0) use ($lock, $progress, &$beat_at): void {
+            if (time() - $beat_at >= self::LOCK_HEARTBEAT) {
+                self::renew_wporg_deploy_lock($lock);
+                $beat_at = time();
+            }
+            if ($progress !== null) {
+                $progress($phase, $done, $total);
+            }
+        };
         $client = null;
         $plan = [ 'cleanup' => [] ];
         try {
@@ -85,29 +104,38 @@ class WporgOperations {
             }
             $client = self::svn_client($username, $credentials['password']);
 
-            $plan = self::normalize_plan($build_plan($client, $base_revision));
+            $plan = self::normalize_plan($build_plan($client, $base_revision, $report));
             if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['copies'] === [] && $plan['puts'] === [] && $plan['mime_types'] === []) {
                 return [ 'revision' => null, 'committed' => false, 'base_revision' => (int) $base_revision, 'details' => $plan['details'] ];
             }
 
+            $total = count($plan['deletes']) + count($plan['mkdirs']) + count($plan['copies']) + count($plan['puts']) + count($plan['mime_types']);
+            $done = 0;
+            $report('send', $done, $total);
             // The revision guard sits in the commit's opening read: the plan is void when the
             // plugin changed since it was built.
             $client->begin_commit($wporg_slug, (int) $base_revision);
             foreach ($plan['deletes'] as $path) {
                 $client->del($path);
+                $report('send', ++$done, $total);
             }
             foreach ($plan['mkdirs'] as $path) {
                 $client->mkdir($path);
+                $report('send', ++$done, $total);
             }
             foreach ($plan['copies'] as $copy) {
                 $client->copy($copy['from_path'], $copy['from_revision'], $copy['path']);
+                $report('send', ++$done, $total);
             }
             foreach ($plan['puts'] as $put) {
                 $client->add_file($put['path'], $put['local_path']);
+                $report('send', ++$done, $total);
             }
             foreach ($plan['mime_types'] as $typed) {
                 $client->set_mime_type($typed['path'], $typed['type']);
+                $report('send', ++$done, $total);
             }
+            $report('save');
             $commit = $client->commit($plan['message']);
 
             // A successful commit is the strongest possible credential verdict.
@@ -160,13 +188,15 @@ class WporgOperations {
      *        commit_files()): no refresh of the marker can read SVN between the commit and
      *        what the caller writes from it. $deploy is what this method returns, without
      *        commit_files()'s own base_revision and details.
+     * @param callable|null $progress See commit_files(); the phase read counts the folders
+     *        listed in trunk and the tag.
      * @return array{revision:int|null, committed:bool, details:array, touched_trunk:bool,
      *         stable_tag_before:?string, stable_tag_written:?string, pointer_changed:bool, trunk_readme:?array}
      *         stable_tag_before = the live pointer (null = unreadable), stable_tag_written = the
      *         value written to trunk (null = trunk readme untouched), trunk_readme = the cache
      *         entry of the written trunk readme (null = none written).
      */
-    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk, array $pointer, ?callable $after_commit = null): array {
+    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk, array $pointer, ?callable $after_commit = null, ?callable $progress = null): array {
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
         $version = self::safe_path_segment($version);
         $root = trailingslashit($root);
@@ -180,14 +210,21 @@ class WporgOperations {
         }
 
         $outcome = [ 'stable_tag_before' => null, 'stable_tag_written' => null, 'pointer_changed' => false, 'trunk_readme' => null ];
-        $result = self::commit_files($marker, $username, 'deploy', function(WporgPluginSvnClient $client) use ($wporg_slug, $root, $version, $touch_trunk, $pointer, $readme_file_name, &$outcome): array {
+        $result = self::commit_files($marker, $username, 'deploy', function(WporgPluginSvnClient $client, int $base_revision, callable $report) use ($wporg_slug, $root, $version, $touch_trunk, $pointer, $readme_file_name, &$outcome): array {
             $local_tree = self::collect_local_tree($root);
             if (!self::tree_has_php_file($local_tree)) {
                 throw self::exception('wporg_tag_requires_php');
             }
 
+            // One listing per folder: the reads of a large plugin take a while, the count shows them going.
+            $folders = 0;
+            $on_folder = static function() use ($report, &$folders): void {
+                $report('read', ++$folders);
+            };
+            $report('read', 0);
+
             // The live pointer, under the lock — from the trunk tree the trunk plan needs anyway.
-            $remote_trunk = $touch_trunk ? self::read_remote_tree($client, $wporg_slug, 'trunk') : null;
+            $remote_trunk = $touch_trunk ? self::read_remote_tree($client, $wporg_slug, 'trunk', $on_folder) : null;
             try {
                 $live = self::read_trunk_readme($client, $wporg_slug, $remote_trunk);
             } catch (WporgSvnException $e) {
@@ -198,7 +235,7 @@ class WporgOperations {
             $outcome['pointer_changed'] = $decision['pointer_changed'];
 
             $tag_base = 'tags/' . $version;
-            $plans = [ self::build_reconcile_plan($client, $wporg_slug, $tag_base, $local_tree, self::read_remote_tree($client, $wporg_slug, $tag_base)) ];
+            $plans = [ self::build_reconcile_plan($client, $wporg_slug, $tag_base, $local_tree, self::read_remote_tree($client, $wporg_slug, $tag_base, $on_folder)) ];
 
             // The readme variant is a temp file: until the plan is returned only this closure
             // knows it, so a failure after its creation cleans it up here.
@@ -254,7 +291,7 @@ class WporgOperations {
             ];
         }, $after_commit === null ? null : static function(int $revision) use ($after_commit, $touch_trunk, &$outcome): void {
             $after_commit([ 'revision' => $revision, 'committed' => true, 'touched_trunk' => $touch_trunk, ...$outcome ]);
-        });
+        }, $progress);
 
         return [ ...$result, 'touched_trunk' => $touch_trunk, ...$outcome ];
     }
@@ -1280,16 +1317,17 @@ class WporgOperations {
         return false;
     }
 
-    private static function read_remote_tree(WporgPluginSvnClient $client, string $wporg_slug, string $base): array {
+    /** @param callable|null $on_folder fn(): void — called after each folder listed. */
+    private static function read_remote_tree(WporgPluginSvnClient $client, string $wporg_slug, string $base, ?callable $on_folder = null): array {
         // Read the remote SVN subtree into a flat path map
         $base = trim($base, '/');
         $tree = [];
-        self::read_remote_tree_into($client, $wporg_slug, $base, '', $tree);
+        self::read_remote_tree_into($client, $wporg_slug, $base, '', $tree, $on_folder);
         ksort($tree);
         return $tree;
     }
 
-    private static function read_remote_tree_into(WporgPluginSvnClient $client, string $wporg_slug, string $base, string $relative_dir, array &$tree): void {
+    private static function read_remote_tree_into(WporgPluginSvnClient $client, string $wporg_slug, string $base, string $relative_dir, array &$tree, ?callable $on_folder): void {
         $remote_dir = trim($wporg_slug . '/' . $base . '/' . trim($relative_dir, '/'), '/') . '/';
 
         try {
@@ -1299,6 +1337,9 @@ class WporgOperations {
                 return;
             }
             throw $e;
+        }
+        if ($on_folder !== null) {
+            $on_folder();
         }
 
         $children = self::direct_children($entries, trim($wporg_slug . '/' . $base . '/' . trim($relative_dir, '/'), '/'));
@@ -1322,7 +1363,7 @@ class WporgOperations {
             ];
 
             if ($type === 'dir') {
-                self::read_remote_tree_into($client, $wporg_slug, $base, $rel, $tree);
+                self::read_remote_tree_into($client, $wporg_slug, $base, $rel, $tree, $on_folder);
             }
         }
     }
@@ -1495,6 +1536,13 @@ class WporgOperations {
     private const LOCAL_LOCK_OPERATIONS = [ 'assets_pull', 'assets_change', 'refresh' ];
     private const LOCAL_LOCK_WAIT = 10; // seconds
 
+    // A lock is left over from a request that died once it showed no sign of life for
+    // LOCK_STALE_AFTER, and is taken over. Its holder's sign of life is alive_at: a commit
+    // renews it every LOCK_HEARTBEAT while it works (commit_files()), so a deploy that runs
+    // for many minutes keeps its lock; the short holders never need to.
+    private const LOCK_STALE_AFTER = 5 * 60; // seconds
+    private const LOCK_HEARTBEAT = 30; // seconds
+
     private static function acquire_wporg_deploy_lock(string $wporg_slug, string $username, string $operation = 'deploy', ?int $plugin_id = null, bool $wait = true): array {
         // Acquire a cross-site lock for this wporg slug
         $key = 'pblsh_wporg_deploy_lock_' . $wporg_slug;
@@ -1505,6 +1553,7 @@ class WporgOperations {
             'blog_id' => $blog_id,
             'lock_blog_id' => $lock_blog_id,
             'acquired_at' => time(),
+            'alive_at' => time(),
             'username' => $username,
             'operation' => $operation,
             'wporg_slug' => $wporg_slug,
@@ -1537,9 +1586,9 @@ class WporgOperations {
                 }
 
                 $existing = $read_existing();
-                $existing_time = is_array($existing) ? (int) ($existing['acquired_at'] ?? 0) : 0;
+                $alive_at = is_array($existing) ? (int) ($existing['alive_at'] ?? 0) : 0;
                 // Reclaim stale locks before failing the deploy
-                if ($existing_time > 0 && (time() - $existing_time) > 5 * 60) {
+                if ($alive_at > 0 && (time() - $alive_at) > self::LOCK_STALE_AFTER) {
                     $delete_existing();
                     if ($acquire()) {
                         return $payload;
@@ -1566,7 +1615,23 @@ class WporgOperations {
     }
 
     private static function release_wporg_deploy_lock(array $lock): void {
-        // Release only the lock owned by this deploy
+        self::on_own_lock($lock, static function(string $key): void {
+            delete_option($key);
+        });
+    }
+
+    /** The holder's sign of life (LOCK_HEARTBEAT): alive_at moves on. */
+    private static function renew_wporg_deploy_lock(array $lock): void {
+        self::on_own_lock($lock, static function(string $key, array $existing): void {
+            update_option($key, [ ...$existing, 'alive_at' => time() ], false);
+        });
+    }
+
+    /**
+     * Runs $fn(string $key, array $existing) while the lock is still this holder's — one that
+     * lost it (taken over after it went silent) never touches the new holder's lock.
+     */
+    private static function on_own_lock(array $lock, callable $fn): void {
         $key = (string) ($lock['key'] ?? '');
         if ($key === '') {
             return;
@@ -1581,6 +1646,9 @@ class WporgOperations {
         }
 
         try {
+            // Another request may have taken the lock over: the option as stored, not this
+            // request's cached copy of it.
+            wp_cache_delete($key, 'options');
             $existing = get_option($key, null);
             $matches = is_array($existing)
                 && (int) ($existing['acquired_at'] ?? 0) === (int) ($lock['acquired_at'] ?? 0)
@@ -1588,7 +1656,7 @@ class WporgOperations {
                 && (string) ($existing['operation'] ?? '') === (string) ($lock['operation'] ?? '')
                 && (string) ($existing['wporg_slug'] ?? '') === (string) ($lock['wporg_slug'] ?? '');
             if ($matches) {
-                delete_option($key);
+                $fn($key, $existing);
             }
         } finally {
             if ($switched) {

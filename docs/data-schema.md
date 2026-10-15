@@ -62,13 +62,21 @@ code in this repository creates today:
   never / not since), `_pblsh_avatar_url` (the resolved Gravatar URL, `''` = unresolved).
 - **Options:** `pblsh_settings` (settings), `pblsh_secret_salt`, `pblsh_encryption_context_id`,
   `pblsh_schema_version` (autoloaded), `pblsh_upgrade_notice` (facts of the migration until
-  dismissed), `pblsh_schema_migration_lock` (only while the migration runs).
+  dismissed), `pblsh_schema_migration_lock` (only while the migration runs),
+  `pblsh_wporg_deploy_lock_{slug}` (only while an operation holds the plugin's write lock:
+  `{key, blog_id, lock_blog_id, acquired_at, alive_at, username, operation, wporg_slug,
+  plugin_id}`; a commit renews `alive_at`, a lock without it moving for 5 min is taken over;
+  `classes/WporgOperations.php`).
 - **Files** under `wp-content/uploads/pblsh-peak-publisher/`:
   `plugins/{slug}/releases/{slug}.{version}.zip` (an entry for every directory, empty ones
   included), `plugins/{slug}/assets/`,
   `wporg-plugins/{slug}/mirror/assets/` (the slot files of a wporg plugin's SVN `assets/`,
   regenerable), `wporg-plugins/{slug}/pending/assets/` (the files of the working copy's puts
-  under their canonical names, user work), `encryption-key.php`, `tmp/` (upload working directories, transient).
+  under their canonical names, user work), `encryption-key.php`, `tmp/` (upload working directories, transient: the files, `cache.json`
+  with the upload state, and from finalize on `finalize.json` — `{started_at, alive_at, phase,
+  done, total, response}`, `includes/uploads.php` —, the only file left after a successful
+  finalize; the first upload started 24 hours or more after it removes the directory,
+  `maybe_cleanup_tmp_uploads()`).
 
 `uninstall.php` removes the secrets when WordPress deletes the plugin (Plugins screen, WP-CLI): the account posts,
 `pblsh_encryption_context_id` and `encryption-key.php`; everything else stays for a reinstall.

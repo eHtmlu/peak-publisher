@@ -1078,6 +1078,117 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin: 0;
 }
 
+/* The steps of a running publish (PublishProgress), in the upload result's body instead of
+   the checklist and in its rhythm — the icon column, the title type, a passed check's green
+   for a done step; the running one with a spinner and, where the amount of work is known, a
+   bar; the ones to come muted. The list is centered as a whole, its steps aligned left to
+   each other; its width is the step names', which never change, so it stays in place while
+   the running step's detail comes and goes. */
+.pblsh--publish-progress {
+    list-style: none;
+    width: fit-content;
+    margin: 0 auto;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem; /* 12px */
+}
+
+.pblsh--publish-progress__step {
+    display: flex;
+    align-items: start;
+    gap: 1rem; /* 16px */
+    margin: 0;
+}
+
+.pblsh--publish-progress__text {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.pblsh--publish-progress__label {
+    font-weight: 600;
+    font-size: 1rem; /* 16px */
+    line-height: 1.75rem; /* 28px */
+}
+
+.pblsh--publish-progress__step.is-pending {
+    color: #646970;
+}
+
+.pblsh--publish-progress__icon {
+    width: 1.75rem; /* 28px */
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.pblsh--publish-progress__step.is-done .pblsh--publish-progress__icon {
+    color: var(--index-color-complete);
+}
+
+/* What the running step has done so far, under its name like a check's description: as wide
+   as the names, never wider (width 0, min-width 100% — no share in the list's width), and one
+   line high whether it shows something or not (no step moves when it fills or empties). */
+.pblsh--publish-progress__detail {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 0;
+    min-width: 100%;
+    min-height: 1.25rem; /* 20px */
+    line-height: 1.25rem;
+    color: #666666;
+    font-size: 0.875rem; /* 14px */
+}
+
+/* A step to come: a muted dot in the icon's place. */
+.pblsh--publish-progress__step.is-pending .pblsh--publish-progress__icon::before {
+    content: '';
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.5;
+}
+
+.pblsh--publish-progress__icon .components-spinner {
+    margin: 0;
+}
+
+.pblsh--publish-progress__bar {
+    flex: 1;
+    height: 0.5rem;
+    border-radius: 0.25rem;
+    background: var(--border-color-light);
+    overflow: hidden;
+}
+
+/* Glides from one status read to the next (FINALIZE_POLL_INTERVAL in GlobalDropOverlay, 1 s
+   plus the answer's way): a little longer than the interval, so a new value takes over a
+   running glide and the bar never stops in between. */
+.pblsh--publish-progress__bar::before {
+    content: '';
+    display: block;
+    height: 100%;
+    width: var(--pblsh-publish-progress, 0%);
+    background: var(--color-blue);
+    transition: width 1.5s linear;
+}
+
+.pblsh--publish-progress__count {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pblsh--publish-progress__bar::before {
+        transition: none;
+    }
+}
+
 /* Shared base: the running wporg import's work unit shows activity as a faint
    barber-pole drifting leftwards, matching the core button's is-busy stripes
    (-45deg, leftward travel), which run right next to it. Owned here; used by

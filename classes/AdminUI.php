@@ -141,6 +141,7 @@ class AdminUI {
             'components/Settings.js',
             'components/WporgImportFacts.js',
             'components/PluginAdditionProcess.js',
+            'components/PublishProgress.js',
             'components/GlobalDropOverlay.js',
             'admin.js',
             //'highlightjs/highlight.js',

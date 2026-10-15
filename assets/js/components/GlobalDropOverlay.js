@@ -8,7 +8,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     const { getSvgIcon, getChannelLabel, getChannelDescription, getChannelIcon } = Pblsh.Utils;
     const { getReleaseContext, getReleasePresentation } = Pblsh.UploadResultUtils;
     const { useUploadChecks } = Pblsh.Hooks;
-    const { WporgImportFacts, WporgAccountForm, WporgAccountSpellingNotice, ChannelChoiceCards, Checklist, CurrentReleaseSwitch, NoticeBox, ScrollFrame } = Pblsh.Components;
+    const { WporgImportFacts, WporgAccountForm, WporgAccountSpellingNotice, ChannelChoiceCards, Checklist, CurrentReleaseSwitch, NoticeBox, ScrollFrame, PublishProgress } = Pblsh.Components;
 
     const fileInputRef = useRef(null);
     const dialogRef = useRef(null);
@@ -24,6 +24,10 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     // True only while the wporg import request itself runs — the import
     // signals (busy label, stripes) must not fire for other processing.
     const importRunning = isProcessing && processPhase === 'wporg_import';
+    // While the finalize runs: how far it got, from the server's finalize status
+    // ({ phase, done, total }, PublishProgress).
+    const publishing = isProcessing && processPhase === 'finalize';
+    const [finalizeProgress, setFinalizeProgress] = useState(null);
     const [validationResult, setValidationResult] = useState(null);
     const [filename, setFilename] = useState('');
     const [destinationPanelOpen, setDestinationPanelOpen] = useState(false);
@@ -576,20 +580,102 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         });
     }
 
-    async function finalizeCreation(uploadId, opts = {}) {
+    // The dialog follows a publish through the server's finalize status (finalize_status_view()):
+    // it asks every second while the request runs, for the progress, and keeps asking when the
+    // request ends without an answer — a gateway in front of the site may cut it off long before
+    // a large wordpress.org deploy is done, while the server carries on. The server writes the
+    // status at most once a second: asking more often learns nothing new. The next question
+    // starts a second after the last answer, so a slow host slows the questions down.
+    const FINALIZE_POLL_INTERVAL = 1000;
+    // apiFetch's codes for a request that got no answer from WordPress (a gateway's error page,
+    // a dropped connection): the publish may still be running.
+    const FINALIZE_NO_ANSWER_CODES = ['invalid_json', 'fetch_error', 'offline_error'];
+    // How long the dialog keeps asking a server it cannot reach once the request lost its answer.
+    const FINALIZE_UNREACHABLE_AFTER = 120000;
+    // A request cut off at once may still reach WordPress and start: only a status still missing
+    // this long after the answer was lost means the publish did not start.
+    const FINALIZE_START_GRACE = 10000;
+
+    /**
+     * Runs the finalize request and resolves with its response — the request's own, or the one
+     * the status records when the request lost its answer. Without either, an error of its own:
+     * the publish did not start, or its outcome stayed unknown.
+     *
+     * @param {{ version: string, isWporg: boolean, pluginId: number|null }} publish What is
+     *        published where, for the message of an unknown outcome.
+     */
+    function followFinalize(uploadId, opts, publish) {
+        const unknownOutcome = {
+            code: 'finalize_result_unknown',
+            message: publish.isWporg
+                ? sprintf(__('Your server did not report how publishing version %s ended. Open the plugin and use Refresh to see whether it arrived on wordpress.org before you publish again.', 'peak-publisher'), publish.version)
+                : (publish.pluginId
+                    ? sprintf(__('Your server did not report how publishing version %s ended. Open the plugin and check its releases before you publish again.', 'peak-publisher'), publish.version)
+                    : sprintf(__('Your server did not report how publishing version %s ended. Look for the plugin in the plugin list before you publish again.', 'peak-publisher'), publish.version)),
+        };
+        const notStarted = {
+            code: 'finalize_not_started',
+            message: __('Your server did not answer, and publishing did not start. Publish again.', 'peak-publisher'),
+        };
+
+        return new Promise((resolve) => {
+            let settled = false;
+            let timer = null;
+            let answerLostAt = null;
+            let reachedAt = Date.now();
+            const settle = (res) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve(res);
+            };
+            const poll = async () => {
+                try {
+                    const status = await Pblsh.API.getFinalizeStatus(uploadId);
+                    if (settled) return;
+                    reachedAt = Date.now();
+                    if (status?.state === 'running') {
+                        setFinalizeProgress({ phase: status.phase, done: status.done, total: status.total });
+                    } else if (status?.state === 'finished') {
+                        settle(status.response);
+                    } else if (answerLostAt !== null && status?.state === 'lost') {
+                        settle(unknownOutcome);
+                    } else if (answerLostAt !== null && status?.state === 'not_started' && Date.now() - answerLostAt >= FINALIZE_START_GRACE) {
+                        settle(notStarted);
+                    }
+                } catch (err) {
+                    if (answerLostAt !== null && Date.now() - reachedAt >= FINALIZE_UNREACHABLE_AFTER) {
+                        settle(unknownOutcome);
+                    }
+                }
+                if (!settled) {
+                    timer = setTimeout(poll, FINALIZE_POLL_INTERVAL);
+                }
+            };
+            timer = setTimeout(poll, FINALIZE_POLL_INTERVAL);
+
+            Pblsh.API.finalizeUpload(uploadId, opts).then(settle, (err) => {
+                if (FINALIZE_NO_ANSWER_CODES.includes(err?.code)) {
+                    // The status decides from here on.
+                    answerLostAt = Date.now();
+                    return;
+                }
+                // Shape the exception like an error response so a single error path handles both.
+                settle({ code: err?.code || 'finalize_error', message: err?.message || '' });
+            });
+        });
+    }
+
+    async function finalizeCreation(uploadId, opts, publish) {
         if (!uploadId) return;
         setIsProcessing(true);
         // The operation declares what it is — a leftover re-resolution phase
         // must not show the destination wait state during the finalize.
         setProcessPhase('finalize');
-        let res;
-        try {
-            res = await Pblsh.API.finalizeUpload(uploadId, opts);
-        } catch (err) {
-            // Shape the exception like an error response so a single error path handles both.
-            res = { code: 'finalize_error', message: err?.message || '' };
-        }
+        setFinalizeProgress({ phase: 'prepare', done: 0, total: 0 });
+        const res = await followFinalize(uploadId, opts, publish);
         setIsProcessing(false);
+        setFinalizeProgress(null);
 
         if (res && res.status === 'ok' && res.plugin_id) {
             if (typeof onCreated === 'function') {
@@ -629,6 +715,8 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     function renderDiscardButton(uploadId) {
         return createElement(Button, {
             isSecondary: true,
+            // Discarding deletes the workspace a running publish reads its files from.
+            disabled: publishing,
             onClick: async () => {
                 closeOverlay();
                 if (uploadId) {
@@ -1053,7 +1141,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
     // render as pinned flush notices between body and footer, not as checklist
     // rows. Blocker codes are excluded: those have their dedicated checklist
     // items. Message leads, the machine code stays visible for support cases.
-    function renderResultErrorNotices(resultErrors, blockers, uploadId, meta) {
+    function renderResultErrorNotices(resultErrors, blockers, uploadId, meta, target) {
         const blockerCodes = (Array.isArray(blockers) ? blockers : []).map((blocker) => blocker?.code).filter(Boolean);
         const errors = (Array.isArray(resultErrors) ? resultErrors : [])
             .filter((error) => error && !blockerCodes.includes(error.code));
@@ -1078,6 +1166,15 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                 disabled: isProcessing,
                 __next40pxDefaultSize: true,
             }, __('Reload', 'peak-publisher')),
+            // The server did not report how the publish ended: the plugin shows what arrived.
+            error?.code === 'finalize_result_unknown' && target?.existing_plugin_id && createElement(Button, {
+                isSecondary: true,
+                onClick: () => {
+                    closeOverlay();
+                    onCreated(target.existing_plugin_id);
+                },
+                __next40pxDefaultSize: true,
+            }, __('Open plugin', 'peak-publisher')),
         ));
     }
 
@@ -1099,9 +1196,14 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             renderDiscardButton(uploadId),
             meta.plugin_ok && createElement(Button, {
                 isPrimary: true,
+                isBusy: publishing,
                 disabled: !canFinalize || isProcessing,
                 className: 'pblsh--button--add-plugin',
-                onClick: () => finalizeCreation(uploadId, finalizeOptions),
+                onClick: () => finalizeCreation(uploadId, finalizeOptions, {
+                    version: context.pluginData.Version || '',
+                    isWporg,
+                    pluginId: target?.existing_plugin_id || null,
+                }),
                 __next40pxDefaultSize: true,
             }, presentation.submitLabel),
         ];
@@ -1189,7 +1291,7 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
         return {
             classNames: presentation.classNames,
             // The import screen owns its error display (WporgImportFacts).
-            notices: screen === 'import' ? null : renderResultErrorNotices(resultErrors, context.blockers, uploadId, meta),
+            notices: screen === 'import' ? null : renderResultErrorNotices(resultErrors, context.blockers, uploadId, meta, target),
             // The pinned publish path row (channel + slug).
             identity: renderPublishPath(meta, context.uploadId),
             // The release block, once the checklist can be shown: the wporg pre-screens are the
@@ -1253,6 +1355,17 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
                     createElement(Spinner),
                     createElement('span', null, __('Resolving the publish destination…', 'peak-publisher')),
                 ),
+                checklistItems: null,
+            });
+        }
+        if (publishing) {
+            // The same for a running publish: its decisions are sent, its steps are what there
+            // is to watch. Header, publish path and the disabled actions stay; the checklist
+            // returns when the publish ends with an error, the error in the strip beside it.
+            return renderUploadResultShell({
+                ...model,
+                notices: null,
+                body: createElement(PublishProgress, { channel: modelTargetKey === 'wporg' ? 'wporg' : 'self_hosted', ...finalizeProgress }),
                 checklistItems: null,
             });
         }

@@ -13,8 +13,8 @@ defined('ABSPATH') || exit;
  * WporgOperations, no ZIP —, discard_upload() drops the upload. Between the requests an
  * upload lives in its working directory under tmp/: the files and cache.json with the upload
  * state $data, which finalize persists verbatim with the release as the record of what
- * happened. The server enforces hard facts only; the checklist and its decisions are the
- * client's.
+ * happened, and from finalize on its status (PBLSH_FINALIZE_STATUS_FILE). The server enforces
+ * hard facts only; the checklist and its decisions are the client's.
  */
 class UploadWorkflow {
     /**
@@ -62,8 +62,12 @@ class UploadWorkflow {
     }
 
     /**
-     * Finalizes a previously validated upload: creates the plugin and release posts,
-     * moves the ZIP to a permanent storage location, links entities and returns IDs.
+     * Finalizes a previously validated upload: publishes it to the chosen target
+     * (publish_to_target()) and records the attempt's progress and response in the upload's
+     * finalize status (record_finalize_status()), which the dialog reads back through
+     * finalize_status() — a gateway in front of the site may end this request long before a
+     * large wordpress.org deploy is done. A finalize that succeeded answers every later
+     * request with its response: a retry after a lost answer publishes nothing twice.
      *
      * Expects 'upload_id' referencing cache.json and ZIP in pblsh/tmp/<upload_id>/.
      *
@@ -76,6 +80,10 @@ class UploadWorkflow {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
         }
         $this->init_tmp_root($upload_id);
+        $recorded = read_finalize_status($this->tmp_root);
+        if (($recorded['response']['status'] ?? null) === 'ok') {
+            return $recorded['response'];
+        }
         $cache_file = $this->tmp_root . 'cache.json';
         if (!file_exists($cache_file)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'upload_not_found', 'message' => 'Upload not found.' ] ] ];
@@ -83,6 +91,52 @@ class UploadWorkflow {
         $cache = json_decode(file_get_contents($cache_file), true);
         $data = (array) ($cache['data'] ?? []);
 
+        // The publish goes on to its end when the client's connection ends first; the status
+        // tells the dialog how far it got. Written on every phase change and at most once a
+        // second within a phase.
+        ignore_user_abort(true);
+        $status = [ 'started_at' => time(), 'alive_at' => time(), 'phase' => 'prepare', 'done' => 0, 'total' => 0, 'response' => null ];
+        record_finalize_status($this->tmp_root, $status);
+        $report = function(string $phase, int $done = 0, int $total = 0) use (&$status): void {
+            $now = time();
+            if ($phase === $status['phase'] && $now === $status['alive_at']) {
+                return;
+            }
+            $status = [ ...$status, 'alive_at' => $now, 'phase' => $phase, 'done' => $done, 'total' => $total ];
+            record_finalize_status($this->tmp_root, $status);
+        };
+
+        $response = $this->publish_to_target($request, $data, $report);
+
+        record_finalize_status($this->tmp_root, [ ...$status, 'alive_at' => time(), 'response' => $response ]);
+        if (($response['status'] ?? null) === 'ok') {
+            $this->delete_workspace();
+        }
+        return $response;
+    }
+
+    /**
+     * The status of this upload's finalize for the dialog (finalize_status_view()): how far a
+     * running publish got, or how it ended — also when the finalize request lost its answer on
+     * the way.
+     */
+    public function finalize_status(\WP_REST_Request $request): array {
+        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? ''));
+        if ($upload_id === '') {
+            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
+        }
+        // Read only: an upload without a working directory has no status, and gets no directory.
+        return finalize_status_view(read_finalize_status(peak_publisher_upload_dir()['path'] . $this->tmp_subdir($upload_id) . '/'), time());
+    }
+
+    /**
+     * Publishes the upload to the target the request chose: self-hosted the release ZIP and
+     * the plugin and release posts, wordpress.org a deploy (finalize_wporg_upload()).
+     *
+     * @param callable $report fn(string $phase, int $done = 0, int $total = 0): void — the
+     *        progress (see PBLSH_FINALIZE_STATUS_FILE for the phases).
+     */
+    private function publish_to_target(\WP_REST_Request $request, array $data, callable $report): array {
         // Check if the plugin and version are valid
         if (!$data['plugin_ok'] || !$data['version_ok']) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'plugin_or_version_invalid', 'message' => 'Plugin or version is invalid.' ] ] ];
@@ -118,7 +172,7 @@ class UploadWorkflow {
         }
 
         if ($active_target['hosting_type'] === 'wporg') {
-            return $this->finalize_wporg_upload($data, $target, $make_current);
+            return $this->finalize_wporg_upload($data, $target, $make_current, $report);
         }
         $data['hosting_type_resolved'] = 'self_hosted';
         $data = $this->apply_target_release_context($data, $target);
@@ -171,6 +225,7 @@ class UploadWorkflow {
         if (!is_dir($content_root)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'upload_workdir_invalid', 'message' => 'Upload work directory is missing.' ] ] ];
         }
+        $report('build');
         $built_zip = $this->build_release_zip($content_root, $plugin_slug, $version);
         if ($built_zip === false) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'build_zip_failed', 'message' => 'Failed to build the release ZIP.' ] ] ];
@@ -283,9 +338,6 @@ class UploadWorkflow {
             update_post_meta((int) $plugin_post_id, '_pblsh_current_release', $version);
         }
         refresh_plugin_title_from_reference((int) $plugin_post_id);
-
-        // Optional: cleanup temp folder later
-        delete_directory_with_race_protection($this->tmp_root);
 
         return [
             'status' => 'ok',
@@ -1216,7 +1268,7 @@ class UploadWorkflow {
         ];
     }
 
-    private function finalize_wporg_upload(array $data, array $target, bool $make_current): array {
+    private function finalize_wporg_upload(array $data, array $target, bool $make_current, callable $report): array {
         // Last gate before the irreversible SVN deploy: deliberately re-validates the target state
         // that resolve_finalize_target() already checked in this request.
         if (empty($target['available'])) {
@@ -1325,7 +1377,7 @@ class UploadWorkflow {
                 'relation' => (string) $target['current_release']['relation'],
                 'expected' => $target['current_release']['pointer'],
                 'readme_file_name' => (string) ($data['plugin_readme_txt']['file_name'] ?? ''),
-            ], $write_through);
+            ], $write_through, $report);
         } catch (WporgSvnException $e) {
             return $this->upload_error($e->get_error_code(), $e->getMessage());
         } catch (\Throwable $e) {
@@ -1348,8 +1400,6 @@ class UploadWorkflow {
                 'plugin_id' => (int) $marker->ID,
             ];
         }
-
-        delete_directory_with_race_protection($this->tmp_root);
 
         return [
             'status' => 'ok',
@@ -1393,9 +1443,7 @@ class UploadWorkflow {
         if ($upload_id === null) {
             $upload_id = gmdate('Ymd-His_') . wp_generate_password(8, false);
         }
-        $user_id = get_current_user_id();
-
-        $subdir = '/tmp/' . $upload_id . '_user-' . $user_id;
+        $subdir = $this->tmp_subdir($upload_id);
         $peak_publisher_upload_dir = peak_publisher_upload_dir();
         $this->tmp_upload_dir = [
             'path' => $peak_publisher_upload_dir['path'] . $subdir,
@@ -1410,6 +1458,30 @@ class UploadWorkflow {
             wp_mkdir_p($this->tmp_root);
         }
         return $upload_id;
+    }
+
+    /** An upload's working directory below the plugin's upload dir — one per user. */
+    private function tmp_subdir(string $upload_id): string {
+        return '/tmp/' . $upload_id . '_user-' . get_current_user_id();
+    }
+
+    /**
+     * Deletes the working files of a finalized upload. The finalize status stays: the dialog
+     * reads the result there when the request lost its answer, until the tmp cleanup takes
+     * the directory (maybe_cleanup_tmp_uploads()).
+     */
+    private function delete_workspace(): void {
+        foreach (scandir($this->tmp_root) ?: [] as $name) {
+            if ($name === '.' || $name === '..' || $name === PBLSH_FINALIZE_STATUS_FILE) {
+                continue;
+            }
+            $path = $this->tmp_root . $name;
+            if (is_dir($path)) {
+                delete_directory_with_race_protection($path);
+            } else {
+                wp_delete_file($path);
+            }
+        }
     }
 
     /**

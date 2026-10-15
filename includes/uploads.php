@@ -201,3 +201,79 @@ function delete_directory_with_race_protection(string $path): void {
         $fs->delete($new_path, true);
     }
 }
+
+
+/**
+ * The status of an upload's finalize, a file in the upload's working directory: written while
+ * it runs, read back by the upload dialog. A gateway in front of the site may end the request
+ * long before a large wordpress.org deploy is done while PHP carries on, so the dialog learns
+ * how far the publish got and how it ended from this file, not from the request's answer.
+ *
+ * Status = [
+ *   'started_at' => int          when this attempt started
+ *   'alive_at'   => int          its last sign of life (every write)
+ *   'phase'      => string       wporg prepare | read | send | save; self-hosted prepare | build
+ *   'done'       => int          read: the folders read; send: the operations sent
+ *   'total'      => int          send: the commit's operations; 0 = no total known
+ *   'response'   => array|null   the finalize response, once the attempt ended
+ * ]
+ */
+const PBLSH_FINALIZE_STATUS_FILE = 'finalize.json';
+
+/**
+ * A running finalize without a sign of life for this long is taken for dead (killed by the
+ * host, a fatal error). Its longest silent stretch is the MERGE of a wordpress.org commit,
+ * measured at about 8 s.
+ */
+const PBLSH_FINALIZE_LOST_AFTER = 120; // seconds
+
+
+function read_finalize_status(string $tmp_root): ?array {
+    // Read back from disk: a file cut short or edited by hand is no status.
+    $file = $tmp_root . PBLSH_FINALIZE_STATUS_FILE;
+    if (!is_file($file)) {
+        return null;
+    }
+    $status = json_decode((string) file_get_contents($file), true);
+    return is_array($status) ? $status : null;
+}
+
+
+/**
+ * Records a finalize status. An ok response is final: an attempt that ran beside a successful
+ * one (the user published again after the first went silent) never hides that success. The
+ * file is replaced by a rename, so a reader never sees half of it.
+ */
+function record_finalize_status(string $tmp_root, array $status): void {
+    if ((read_finalize_status($tmp_root)['response']['status'] ?? null) === 'ok') {
+        return;
+    }
+    $file = $tmp_root . PBLSH_FINALIZE_STATUS_FILE;
+    $temp = $file . '.' . bin2hex(random_bytes(4)) . '.tmp';
+    if (file_put_contents($temp, json_encode($status)) !== false) {
+        rename($temp, $file);
+    }
+}
+
+
+/**
+ * What the upload dialog learns about a finalize: not_started (no status), running with its
+ * progress, lost (no sign of life for PBLSH_FINALIZE_LOST_AFTER), or finished with its response.
+ */
+function finalize_status_view(?array $status, int $now): array {
+    if ($status === null) {
+        return [ 'state' => 'not_started' ];
+    }
+    if (is_array($status['response'] ?? null)) {
+        return [ 'state' => 'finished', 'response' => $status['response'] ];
+    }
+    if ($now - (int) ($status['alive_at'] ?? 0) > PBLSH_FINALIZE_LOST_AFTER) {
+        return [ 'state' => 'lost' ];
+    }
+    return [
+        'state' => 'running',
+        'phase' => (string) ($status['phase'] ?? ''),
+        'done' => (int) ($status['done'] ?? 0),
+        'total' => (int) ($status['total'] ?? 0),
+    ];
+}

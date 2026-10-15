@@ -126,6 +126,11 @@ lodash.set(window, 'Pblsh.API', {
             body: { ...body, upload_id },
         });
     },
+    // How far the finalize of an upload got, or how it ended (finalize_status_view()):
+    // { state: not_started | running (phase, done, total) | lost | finished (response) }
+    getFinalizeStatus: async (upload_id) => {
+        return await window.Pblsh.API.request('admin/upload/finalize?upload_id=' + encodeURIComponent(upload_id));
+    },
     // Discard an uploaded ZIP (cleanup temp data)
     discardUpload: async (upload_id) => {
         return await window.Pblsh.API.request('admin/upload/discard', {

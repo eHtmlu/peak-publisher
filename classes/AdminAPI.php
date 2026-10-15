@@ -136,6 +136,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/admin/upload/finalize', [
+            'methods' => 'GET',
+            'callback' => [$this, 'upload_finalize_status'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         register_rest_route(self::NAMESPACE, '/admin/upload/discard', [
             'methods' => 'POST',
             'callback' => [$this, 'upload_discard'],
@@ -992,6 +998,12 @@ class AdminAPI {
         require_once __DIR__ . '/UploadWorkflow.php';
         $workflow = new UploadWorkflow();
         return $workflow->finalize($request);
+    }
+
+    public function upload_finalize_status(\WP_REST_Request $request): array {
+        require_once __DIR__ . '/UploadWorkflow.php';
+        $workflow = new UploadWorkflow();
+        return $workflow->finalize_status($request);
     }
 
     public function upload_discard(\WP_REST_Request $request): array {

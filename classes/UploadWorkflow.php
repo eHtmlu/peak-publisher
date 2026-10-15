@@ -75,9 +75,9 @@ class UploadWorkflow {
      * @return array { status, plugin_id, release_id } or error structure.
      */
     public function finalize(\WP_REST_Request $request): array {
-        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? '')); 
-        if ($upload_id === '') {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
         }
         $this->init_tmp_root($upload_id);
         $recorded = read_finalize_status($this->tmp_root);
@@ -121,9 +121,9 @@ class UploadWorkflow {
      * the way.
      */
     public function finalize_status(\WP_REST_Request $request): array {
-        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? ''));
-        if ($upload_id === '') {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
         }
         // Read only: an upload without a working directory has no status, and gets no directory.
         return finalize_status_view(read_finalize_status(peak_publisher_upload_dir()['path'] . $this->tmp_subdir($upload_id) . '/'), time());
@@ -482,9 +482,9 @@ class UploadWorkflow {
             return [ 'status' => 'ok', 'next' => 'unpack', 'upload_id' => $upload_id ];
         }
 
-        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? ''));
-        if ($upload_id === '') {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
         }
         $this->init_tmp_root($upload_id);
         $cache_file = $this->tmp_root . 'cache.json';
@@ -1460,6 +1460,19 @@ class UploadWorkflow {
         return $upload_id;
     }
 
+    /**
+     * The request's upload ID. It names the upload's working directory, so it is accepted in
+     * the format the upload creates only (is_upload_id()); null for anything else.
+     */
+    private function requested_upload_id(\WP_REST_Request $request): ?string {
+        $upload_id = $request->get_param('upload_id');
+        return is_string($upload_id) && is_upload_id($upload_id) ? $upload_id : null;
+    }
+
+    private function unknown_upload_error(): array {
+        return $this->upload_error('invalid_upload_id', __('This upload is unknown.', 'peak-publisher'));
+    }
+
     /** An upload's working directory below the plugin's upload dir — one per user. */
     private function tmp_subdir(string $upload_id): string {
         return '/tmp/' . $upload_id . '_user-' . get_current_user_id();
@@ -1915,9 +1928,9 @@ class UploadWorkflow {
      * @return array { status: 'ok'|'error', message? }
      */
     public function discard_upload(\WP_REST_Request $request): array {
-        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? ''));
-        if ($upload_id === '') {
-            return [ 'status' => 'error', 'message' => 'Missing upload_id.' ];
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
         }
         $this->init_tmp_root($upload_id);
         if (!is_dir($this->tmp_root)) {

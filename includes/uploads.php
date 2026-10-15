@@ -131,11 +131,25 @@ function remove_empty_folders(string $dir): void {
 
 
 /**
+ * The ID of an upload, as the upload creates it (UploadWorkflow::init_tmp_root()): its start
+ * time and eight random letters or digits, YYYYMMDD-HHMMSS_[A-Za-z0-9]{8}. It names the upload's
+ * working directory under tmp/, so a request's ID is accepted in this format only — nothing
+ * else could lead out of that directory.
+ */
+const PBLSH_UPLOAD_ID_PATTERN = '(?P<stamp>\d{8}-\d{6})_(?P<rand>[A-Za-z0-9]{8})';
+
+
+function is_upload_id(string $upload_id): bool {
+    return preg_match('/^' . PBLSH_UPLOAD_ID_PATTERN . '$/D', $upload_id) === 1;
+}
+
+
+/**
  * Opportunistically cleans the temporary upload directory.
  *
  * Scope:
- * - Only directories that match our temp naming scheme:
- *   YYYYMMDD-HHMMSS_[A-Za-z0-9]{8}_user-{ID}[_deleted-{UNIX}-[A-Za-z0-9]+]
+ * - Only directories that match our temp naming scheme: the upload ID
+ *   (PBLSH_UPLOAD_ID_PATTERN), then _user-{ID}[_deleted-{UNIX}-[A-Za-z0-9]+]
  *
  * Removes:
  * - Matching directories that were marked as deleted (suffix "_deleted-...").
@@ -151,7 +165,7 @@ function maybe_cleanup_tmp_uploads(): void {
 
     $now = time();
     $ttl = 24 * 60 * 60;
-    $pattern = '/^(?P<stamp>\d{8}-\d{6})_(?P<rand>[A-Za-z0-9]{8})_user-\d+(?P<deleted>_deleted-\d+-[A-Za-z0-9]+)?$/';
+    $pattern = '/^' . PBLSH_UPLOAD_ID_PATTERN . '_user-\d+(?P<deleted>_deleted-\d+-[A-Za-z0-9]+)?$/';
 
     try {
         $dir = new \DirectoryIterator($base);

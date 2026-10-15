@@ -556,6 +556,38 @@ function flip_current_release_pointer(\WP_Post $plugin, string $version, string 
 
 
 /**
+ * Inserts — or, with an ID, updates — a post whose content Peak Publisher stores as data: the
+ * JSON of a release snapshot or of a marker's cache. WordPress runs a post's content through
+ * its save filters on every write, an update that names only another field included: kses for
+ * a user without unfiltered_html (on a multisite all but super admins, with
+ * DISALLOW_UNFILTERED_HTML everyone), the entity conversion, whatever plugins hook there — each
+ * would rewrite the JSON. Here the content leaves the filters as it entered them; the title
+ * and the other fields pass as usual. Takes and returns what wp_insert_post() and
+ * wp_update_post() do.
+ *
+ * @return int|\WP_Error
+ */
+function write_data_post(array $postarr, bool $wp_error = false) {
+    $entered = null;
+    $enter = static function($content) use (&$entered) {
+        $entered = $content;
+        return $content;
+    };
+    $leave = static function() use (&$entered) {
+        return $entered;
+    };
+    add_filter('content_save_pre', $enter, PHP_INT_MIN);
+    add_filter('content_save_pre', $leave, PHP_INT_MAX);
+    try {
+        return !empty($postarr['ID']) ? wp_update_post($postarr, $wp_error) : wp_insert_post($postarr, $wp_error);
+    } finally {
+        remove_filter('content_save_pre', $enter, PHP_INT_MIN);
+        remove_filter('content_save_pre', $leave, PHP_INT_MAX);
+    }
+}
+
+
+/**
  * Sets the plugin's title from its reference release (current, else latest): the plugin
  * name follows what sites receive. Both channels; called after every change of the
  * pointer or of the release set.
@@ -574,7 +606,8 @@ function refresh_plugin_title_from_reference(int $plugin_id): void {
     if ($name === '' || $plugin->post_title === $name) {
         return;
     }
-    wp_update_post([
+    // A marker's content is its cache: the title update saves it again.
+    write_data_post([
         'ID' => $plugin_id,
         'post_title' => $name,
     ]);

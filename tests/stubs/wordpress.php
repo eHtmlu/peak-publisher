@@ -155,11 +155,17 @@ namespace {
         return $matches;
     }
 
-    /** Like WordPress: a failed write is 0, or the WP_Error when asked for it. */
+    /**
+     * Like WordPress: a failed write is 0, or the WP_Error when asked for it. The content passes
+     * the save filters (content_save_pre — kses among them for a user without unfiltered_html).
+     */
     function wp_insert_post(array $postarr, bool $wp_error = false) {
         $error = FakeWordPress::take_post_write_error();
         if ($error !== null) {
             return $wp_error ? $error : 0;
+        }
+        if (array_key_exists('post_content', $postarr)) {
+            $postarr['post_content'] = apply_filters('content_save_pre', $postarr['post_content']);
         }
         $post = new WP_Post($postarr);
         $post->ID = FakeWordPress::$next_post_id++;
@@ -180,6 +186,9 @@ namespace {
         if ($post === null) {
             return 0;
         }
+        // WordPress merges the stored post into the update and saves it whole: the content
+        // passes the save filters again, even when the update only names another field.
+        $postarr['post_content'] = apply_filters('content_save_pre', $postarr['post_content'] ?? $post->post_content);
         foreach ($postarr as $field => $value) {
             if ($field !== 'ID' && property_exists($post, $field)) {
                 $post->$field = $value;
@@ -252,14 +261,22 @@ namespace {
     }
 
     function add_filter(string $hook, callable $callback, int $priority = 10, int $accepted_args = 1): bool {
-        FakeWordPress::$filters[$hook][] = $callback;
+        FakeWordPress::$filters[$hook][] = [ 'callback' => $callback, 'priority' => $priority ];
         return true;
     }
 
-    /** The hook's filters in the order they were added (priorities are not modeled); without one the value passes through. */
+    function remove_filter(string $hook, callable $callback, int $priority = 10): bool {
+        $before = count(FakeWordPress::$filters[$hook] ?? []);
+        FakeWordPress::$filters[$hook] = array_values(array_filter(FakeWordPress::$filters[$hook] ?? [], static fn(array $entry): bool => !($entry['callback'] === $callback && $entry['priority'] === $priority)));
+        return count(FakeWordPress::$filters[$hook]) < $before;
+    }
+
+    /** The hook's filters by priority, equal ones in the order they were added; without one the value passes through. */
     function apply_filters(string $hook, $value, ...$args) {
-        foreach (FakeWordPress::$filters[$hook] ?? [] as $callback) {
-            $value = $callback($value, ...$args);
+        $entries = FakeWordPress::$filters[$hook] ?? [];
+        usort($entries, static fn(array $a, array $b): int => $a['priority'] <=> $b['priority']);
+        foreach ($entries as $entry) {
+            $value = ($entry['callback'])($value, ...$args);
         }
         return $value;
     }

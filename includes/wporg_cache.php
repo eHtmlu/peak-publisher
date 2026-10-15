@@ -160,7 +160,7 @@ function wporg_read_trunk_readme_for_cache(\WP_Post $plugin_post): ?array {
 
 /** Writes the marker cache, then the title, which follows the pointer just written. */
 function wporg_write_plugin_cache(\WP_Post $plugin_post, array $cache): void {
-    wp_update_post([
+    write_data_post([
         'ID' => (int) $plugin_post->ID,
         'post_content' => wp_slash(wp_json_encode($cache)),
     ]);
@@ -418,7 +418,7 @@ function persist_wporg_import_cache_bundle(string $wporg_slug, string $username,
 
         // The slug names the marker until its releases exist; the title then follows the
         // reference release like on every later refresh.
-        $marker_id = wp_insert_post([
+        $marker_id = write_data_post([
             'post_type' => 'pblsh_wporg_plugin',
             'post_status' => 'publish',
             'post_name' => $wporg_slug,
@@ -585,7 +585,7 @@ function mark_wporg_plugin_cache_stale(int $plugin_id, array $known = []): void 
     $cached = wporg_decode_json_object((string) $post->post_content);
     unset($cached['revision'], $cached['release_count']);
 
-    wp_update_post([
+    write_data_post([
         'ID' => $plugin_id,
         'post_content' => wp_slash(wp_json_encode((object) array_merge($cached, $known))),
     ]);
@@ -613,7 +613,7 @@ function advance_wporg_plugin_cache(int $plugin_id, int $base_revision, int $rev
         return;
     }
 
-    wp_update_post([
+    write_data_post([
         'ID' => $plugin_id,
         'post_content' => wp_slash(wp_json_encode((object) array_merge($cached, $known, [ 'revision' => $revision ]))),
     ]);
@@ -691,7 +691,7 @@ function wporg_release_snapshot(array $tag, array $tag_data): array {
  */
 function wporg_create_release_post(\WP_Post $marker, string $version, array $snapshot, int $published_at) {
     $post_date_gmt = gmdate('Y-m-d H:i:s', $published_at);
-    return wporg_persisted_release_id(wp_insert_post([
+    return wporg_persisted_release_id(write_data_post([
         'post_type' => 'pblsh_release',
         'post_status' => 'publish',
         'post_parent' => (int) $marker->ID,
@@ -711,7 +711,7 @@ function wporg_create_release_post(\WP_Post $marker, string $version, array $sna
  * @return int|\WP_Error
  */
 function wporg_update_release_post(\WP_Post $release_post, array $snapshot) {
-    return wporg_persisted_release_id(wp_update_post([
+    return wporg_persisted_release_id(write_data_post([
         'ID' => (int) $release_post->ID,
         'post_content' => wp_slash(wporg_encode_release_snapshot($snapshot)),
     ], true));

@@ -155,7 +155,8 @@ function upgrade_release_drafts_to_pointer(): ?array {
             if ($release->post_status === 'publish') {
                 continue;
             }
-            wp_update_post([
+            // The release's content is its snapshot: the status update saves it again.
+            write_data_post([
                 'ID' => (int) $release->ID,
                 'post_status' => 'publish',
                 // Keeps the release date: without it WordPress would assign the publish moment.

@@ -319,12 +319,7 @@ class UploadWorkflow {
             'post_content' => wp_slash(json_encode($snapshot)),
             'meta_input' => $release_meta,
         ];
-        if ($existing_release_id > 0) {
-            $release_post_data['ID'] = $existing_release_id;
-            $release_post_id = wp_update_post($release_post_data);
-        } else {
-            $release_post_id = wp_insert_post($release_post_data);
-        }
+        $release_post_id = write_data_post($release_post_data);
         if (is_wp_error($release_post_id)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_release_failed', 'message' => $release_post_id->get_error_message() ] ] ];
         }

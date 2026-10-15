@@ -254,7 +254,7 @@ function write_release_snapshot(\WP_Post $release, array $snapshot): bool {
     if ($json === false) {
         return false;
     }
-    return !is_wp_error(wp_update_post([ 'ID' => (int) $release->ID, 'post_content' => wp_slash($json) ], true));
+    return !is_wp_error(write_data_post([ 'ID' => (int) $release->ID, 'post_content' => wp_slash($json) ], true));
 }
 
 

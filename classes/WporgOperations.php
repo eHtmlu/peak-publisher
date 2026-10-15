@@ -27,7 +27,8 @@ class WporgOperations {
      *   'deletes' => string[]                                  paths relative to the plugin root
      *   'mkdirs'  => string[]                                  directories to create, one MKCOL each
      *   'copies'  => array{path:string, from_path:string, from_revision:int}[]
-     *                                                          server-side copies with history
+     *                                                          server-side copies with history, of a
+     *                                                          file or a whole folder (a new tag)
      *   'puts'    => array{path:string, local_path:string}[]   a PUT replaces existing content
      *   'mime_types' => array{path:string, type:string}[]      svn:mime-type set on the file, after its put or copy
      *   'message' => string                                    the commit message
@@ -37,8 +38,9 @@ class WporgOperations {
      * Every entry counts as a change: a directory is listed only when it may be missing,
      * never one known to exist (creating an existing one is tolerated, but it is no change) —
      * and with every parent that may be missing too: mkdir() creates the one directory.
-     * The primitive orders the operations: deletes deep-first, mkdirs shallow-first, then
-     * copies, puts and mime types by path. An empty plan (none of these) commits nothing:
+     * The primitive orders the operations (wporg_commit_operations()): deletes deep-first,
+     * mkdirs shallow-first, then copies, puts and mime types by path — what lies below a copied
+     * path after the copy. An empty plan (none of these) commits nothing:
      * committed false, revision null, no log entry.
      *
      * @param \WP_Post      $marker       The wporg marker (post_name = slug; the log lives on it).
@@ -106,34 +108,25 @@ class WporgOperations {
             $client = self::svn_client($username, $credentials['password']);
 
             $plan = self::normalize_plan($build_plan($client, $base_revision, $report));
-            if ($plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['copies'] === [] && $plan['puts'] === [] && $plan['mime_types'] === []) {
+            $operations = wporg_commit_operations($plan);
+            if ($operations === []) {
                 return [ 'revision' => null, 'committed' => false, 'base_revision' => (int) $base_revision, 'details' => $plan['details'] ];
             }
 
-            $total = count($plan['deletes']) + count($plan['mkdirs']) + count($plan['copies']) + count($plan['puts']) + count($plan['mime_types']);
+            $total = count($operations);
             $done = 0;
             $report('send', $done, $total);
             // The revision guard sits in the commit's opening read: the plan is void when the
             // plugin changed since it was built.
             $client->begin_commit($wporg_slug, (int) $base_revision);
-            foreach ($plan['deletes'] as $path) {
-                $client->del($path);
-                $report('send', ++$done, $total);
-            }
-            foreach ($plan['mkdirs'] as $path) {
-                $client->mkdir($path);
-                $report('send', ++$done, $total);
-            }
-            foreach ($plan['copies'] as $copy) {
-                $client->copy($copy['from_path'], $copy['from_revision'], $copy['path']);
-                $report('send', ++$done, $total);
-            }
-            foreach ($plan['puts'] as $put) {
-                $client->add_file($put['path'], $put['local_path']);
-                $report('send', ++$done, $total);
-            }
-            foreach ($plan['mime_types'] as $typed) {
-                $client->set_mime_type($typed['path'], $typed['type']);
+            foreach ($operations as $step) {
+                match ($step['op']) {
+                    'delete' => $client->del($step['path']),
+                    'mkdir' => $client->mkdir($step['path']),
+                    'copy' => $client->copy($step['from_path'], $step['from_revision'], $step['path']),
+                    'put' => $client->add_file($step['path'], $step['local_path']),
+                    'mime_type' => $client->set_mime_type($step['path'], $step['type']),
+                };
                 $report('send', ++$done, $total);
             }
             $report('save');
@@ -182,7 +175,8 @@ class WporgOperations {
      * showed (settle_pointer_decision()); trunk gets the workspace readme with the decided
      * Stable tag when it gets code (R2), only its Stable tag line when the pointer changes on a
      * tag-only deploy (R3), nothing otherwise. The tag gets the workspace as it is (R1 made its
-     * readme name its own version).
+     * readme name its own version); a new tag as a copy of trunk or its predecessor tag plus what
+     * differs from it (new_tag_plan()), in the same commit.
      *
      * @param array{make_current:bool, relation:string, expected:?string, readme_file_name:string} $pointer
      *        The decision, the relation and the pointer the dialog showed (null = unknown), and
@@ -193,7 +187,7 @@ class WporgOperations {
      *        what the caller writes from it. $deploy is what this method returns, without
      *        commit_files()'s own base_revision and details.
      * @param callable|null $progress See commit_files(); the phase read counts the folders
-     *        listed in trunk and the tag.
+     *        listed in trunk, the tag and the tag's copy source.
      * @return array{revision:int|null, committed:bool, details:array, touched_trunk:bool,
      *         stable_tag_before:?string, stable_tag_written:?string, pointer_changed:bool, trunk_readme:?array}
      *         stable_tag_before = the live pointer (null = unreadable), stable_tag_written = the
@@ -227,10 +221,11 @@ class WporgOperations {
             };
             $report('read', 0);
 
-            // The live pointer, under the lock — from the trunk tree the trunk plan needs anyway.
+            // The live pointer, under the lock — from the trunk tree the trunk plan needs anyway
+            // (null: there is no trunk).
             $remote_trunk = $touch_trunk ? self::read_remote_tree($client, $wporg_slug, 'trunk', $on_folder) : null;
             try {
-                $live = self::read_trunk_readme($client, $wporg_slug, $remote_trunk);
+                $live = self::read_trunk_readme($client, $wporg_slug, $touch_trunk ? ($remote_trunk ?? []) : null);
             } catch (WporgSvnException $e) {
                 $live = null;
             }
@@ -239,7 +234,10 @@ class WporgOperations {
             $outcome['pointer_changed'] = $decision['pointer_changed'];
 
             $tag_base = 'tags/' . $version;
-            $plans = [ self::build_reconcile_plan($client, $wporg_slug, $tag_base, $local_tree, self::read_remote_tree($client, $wporg_slug, $tag_base, $on_folder)) ];
+            $remote_tag = self::read_remote_tree($client, $wporg_slug, $tag_base, $on_folder);
+            $plans = [ $remote_tag !== null
+                ? wporg_reconcile_plan($tag_base, $local_tree, $remote_tag)
+                : self::new_tag_plan($client, $wporg_slug, $tag_base, $version, $local_tree, $touch_trunk, $remote_trunk, $base_revision, $on_folder) ];
 
             // The readme variant is a temp file: until the plan is returned only this closure
             // knows it, so a failure after its creation cleans it up here.
@@ -251,7 +249,7 @@ class WporgOperations {
                     $cleanup[] = $variant['path'];
                     $trunk_tree = $local_tree;
                     $trunk_tree[$readme_file_name] = [ 'type' => 'file', 'path' => $variant['path'], 'size' => $variant['size'], 'hash' => $variant['hash'] ];
-                    $plans[] = self::build_reconcile_plan($client, $wporg_slug, 'trunk', $trunk_tree, $remote_trunk);
+                    $plans[] = wporg_reconcile_plan('trunk', $trunk_tree, $remote_trunk ?? []);
                     $outcome['stable_tag_written'] = $decision['pointer_value'];
                     $outcome['trunk_readme'] = self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $readme_file_name ]);
                 } elseif ($decision['pointer_changed']) {
@@ -263,7 +261,7 @@ class WporgOperations {
                     $cleanup[] = $variant['path'];
                     $file_name = $trunk_has_readme ? $live['file_name'] : $readme_file_name;
                     // trunk may not exist at all when it has no readme; an existing trunk is no change.
-                    $plans[] = [ 'deletes' => [], 'mkdirs' => $trunk_has_readme ? [] : [ 'trunk' ], 'puts' => [ [ 'path' => 'trunk/' . $file_name, 'local_path' => $variant['path'] ] ] ];
+                    $plans[] = [ 'deletes' => [], 'mkdirs' => $trunk_has_readme ? [] : [ 'trunk' ], 'copies' => [], 'puts' => [ [ 'path' => 'trunk/' . $file_name, 'local_path' => $variant['path'] ] ] ];
                     $outcome['stable_tag_written'] = $decision['pointer_value'];
                     $outcome['trunk_readme'] = self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $file_name ]);
                 }
@@ -298,6 +296,36 @@ class WporgOperations {
         }, $progress);
 
         return [ ...$result, 'touched_trunk' => $touch_trunk, ...$outcome ];
+    }
+
+    /**
+     * The plan of a tag that does not exist yet: a copy of the first candidate source
+     * (wporg_tag_copy_candidates()) that exists and is not empty — as committed in
+     * $base_revision, the commit's staged changes cannot be copied — plus what the upload has
+     * otherwise; without such a source, the upload in full. $remote_trunk is trunk's tree when
+     * the deploy read it (trunk goes along; null: there is none); a tag-only deploy reads the
+     * candidate it reaches.
+     */
+    private static function new_tag_plan(WporgPluginSvnClient $client, string $wporg_slug, string $tag_base, string $version, array $local_tree, bool $touch_trunk, ?array $remote_trunk, int $base_revision, callable $on_folder): array {
+        try {
+            $tags = array_map(
+                static fn(array $entry): string => (string) $entry['name'],
+                array_filter(self::direct_children($client->list_directory($wporg_slug . '/tags/', 1), $wporg_slug . '/tags'), static fn(array $entry): bool => ($entry['type'] ?? '') === 'dir')
+            );
+        } catch (WporgSvnException $e) {
+            if ($e->get_error_code() !== 'not_found') {
+                throw $e;
+            }
+            $tags = [];
+        }
+
+        foreach (wporg_tag_copy_candidates($version, $tags, $touch_trunk) as $source) {
+            $source_tree = $source === 'trunk' && $touch_trunk ? $remote_trunk : self::read_remote_tree($client, $wporg_slug, $source, $on_folder);
+            if (!empty($source_tree)) {
+                return wporg_reconcile_plan($tag_base, $local_tree, $source_tree, [ 'from_path' => $source, 'from_revision' => $base_revision ]);
+            }
+        }
+        return wporg_reconcile_plan($tag_base, $local_tree, []);
     }
 
     /**
@@ -1321,12 +1349,23 @@ class WporgOperations {
         return false;
     }
 
-    /** @param callable|null $on_folder fn(): void — called after each folder listed. */
-    private static function read_remote_tree(WporgPluginSvnClient $client, string $wporg_slug, string $base, ?callable $on_folder = null): array {
-        // Read the remote SVN subtree into a flat path map
+    /**
+     * The remote tree below $base as a flat map of relative paths — type, path, size and, for a
+     * file, its MD5 — null when $base does not exist (an existing empty folder is []).
+     *
+     * @param callable|null $on_folder fn(): void — called after each folder listed.
+     */
+    private static function read_remote_tree(WporgPluginSvnClient $client, string $wporg_slug, string $base, ?callable $on_folder = null): ?array {
         $base = trim($base, '/');
         $tree = [];
-        self::read_remote_tree_into($client, $wporg_slug, $base, '', $tree, $on_folder);
+        try {
+            self::read_remote_tree_into($client, $wporg_slug, $base, '', $tree, $on_folder);
+        } catch (WporgSvnException $e) {
+            if ($e->get_error_code() === 'not_found') {
+                return null;
+            }
+            throw $e;
+        }
         ksort($tree);
         return $tree;
     }
@@ -1334,14 +1373,7 @@ class WporgOperations {
     private static function read_remote_tree_into(WporgPluginSvnClient $client, string $wporg_slug, string $base, string $relative_dir, array &$tree, ?callable $on_folder): void {
         $remote_dir = trim($wporg_slug . '/' . $base . '/' . trim($relative_dir, '/'), '/') . '/';
 
-        try {
-            $entries = $client->list_directory($remote_dir, 1);
-        } catch (WporgSvnException $e) {
-            if ($e->get_error_code() === 'not_found') {
-                return;
-            }
-            throw $e;
-        }
+        $entries = $client->list_directory($remote_dir, 1);
         if ($on_folder !== null) {
             $on_folder();
         }
@@ -1364,6 +1396,7 @@ class WporgOperations {
                 'type' => $type,
                 'path' => trim($base . '/' . $rel, '/'),
                 'size' => isset($entry['size']) ? $entry['size'] : null,
+                'md5' => $entry['md5'] ?? null,
             ];
 
             if ($type === 'dir') {
@@ -1372,85 +1405,9 @@ class WporgOperations {
         }
     }
 
-    private static function build_reconcile_plan(WporgPluginSvnClient $client, string $wporg_slug, string $base, array $local_tree, array $remote_tree): array {
-        $delete_paths = [];
-        $mkdir_paths = [];
-        $put_paths = [];
-
-        // Plan remote paths that must disappear or change type
-        foreach ($remote_tree as $rel => $remote) {
-            $local = $local_tree[$rel] ?? null;
-            if ($local === null || (string) ($local['type'] ?? '') !== (string) ($remote['type'] ?? '')) {
-                $delete_paths[$rel] = [
-                    'path' => self::join_svn_path($base, $rel),
-                    'type' => (string) ($remote['type'] ?? ''),
-                    'reason' => $local === null ? 'remote_only' : 'type_change',
-                ];
-            }
-        }
-
-        $delete_paths = self::compact_delete_paths($delete_paths);
-
-        // Fetch same-size files in one batch for the content comparison below
-        $compare_paths = [];
-        foreach ($local_tree as $rel => $local) {
-            $remote = $remote_tree[$rel] ?? null;
-            if ((string) ($local['type'] ?? '') !== 'file' || !is_array($remote) || (string) ($remote['type'] ?? '') !== 'file') {
-                continue;
-            }
-            if ((int) ($remote['size'] ?? -1) === (int) ($local['size'] ?? 0)) {
-                $compare_paths[$rel] = $wporg_slug . '/' . self::join_svn_path($base, $rel);
-            }
-        }
-        $remote_contents = self::read_remote_files($client, array_values($compare_paths));
-
-        // Plan local directories and files that must be created or updated
-        foreach ($local_tree as $rel => $local) {
-            $remote = $remote_tree[$rel] ?? null;
-            $local_type = (string) ($local['type'] ?? '');
-            $remote_type = is_array($remote) ? (string) ($remote['type'] ?? '') : '';
-
-            if ($local_type === 'dir') {
-                if ($remote_type !== 'dir') {
-                    $mkdir_paths[$rel] = self::join_svn_path($base, $rel);
-                }
-                continue;
-            }
-
-            if ($local_type !== 'file') {
-                continue;
-            }
-
-            $needs_put = false;
-            if ($remote_type !== 'file' || !isset($compare_paths[$rel])) {
-                $needs_put = true;
-            } else {
-                $remote_content = (string) ($remote_contents[$compare_paths[$rel]] ?? '');
-                $needs_put = md5($remote_content) !== (string) ($local['hash'] ?? '');
-            }
-
-            if ($needs_put) {
-                $put_paths[$rel] = [
-                    'path' => self::join_svn_path($base, $rel),
-                    'local_path' => (string) ($local['path'] ?? ''),
-                ];
-            }
-        }
-
-        return [
-            'deletes' => array_values(array_map(static fn(array $delete): string => (string) $delete['path'], $delete_paths)),
-            // The base only when it does not exist yet (nothing was listed), with the folders
-            // above it, which may be missing too (tags/ for a new tag): it must exist before its
-            // children. An existing base is not a change and stays out, so a plan without
-            // changes stays empty.
-            'mkdirs' => [ ...($remote_tree === [] ? self::path_with_ancestors($base) : []), ...array_values($mkdir_paths) ],
-            'puts' => array_values($put_paths),
-        ];
-    }
-
     /** Concatenates the reconcile plans of several bases into one Plan (commit_files() orders them). */
     private static function merge_reconcile_plans(array $plans): array {
-        $merged = [ 'deletes' => [], 'mkdirs' => [], 'puts' => [] ];
+        $merged = [ 'deletes' => [], 'mkdirs' => [], 'copies' => [], 'puts' => [] ];
         foreach ($plans as $plan) {
             foreach (array_keys($merged) as $key) {
                 $merged[$key] = [ ...$merged[$key], ...$plan[$key] ];
@@ -1459,21 +1416,13 @@ class WporgOperations {
         return $merged;
     }
 
-    /**
-     * Fills a Plan's optional keys and puts its operations into commit order: deletes
-     * deep-first, directories shallow-first, files by path.
-     */
+    /** Fills a Plan's optional keys; wporg_commit_operations() puts them into commit order. */
     private static function normalize_plan(array $plan): array {
         $deletes = array_values(array_filter((array) ($plan['deletes'] ?? []), 'is_string'));
         $mkdirs = array_values(array_filter((array) ($plan['mkdirs'] ?? []), 'is_string'));
         $copies = array_values(array_filter((array) ($plan['copies'] ?? []), static fn($copy): bool => is_array($copy) && !empty($copy['path']) && !empty($copy['from_path']) && (int) ($copy['from_revision'] ?? 0) > 0));
         $puts = array_values(array_filter((array) ($plan['puts'] ?? []), static fn($put): bool => is_array($put) && !empty($put['path']) && !empty($put['local_path'])));
         $mime_types = array_values(array_filter((array) ($plan['mime_types'] ?? []), static fn($typed): bool => is_array($typed) && !empty($typed['path']) && !empty($typed['type'])));
-        usort($deletes, static fn(string $a, string $b): int => substr_count($b, '/') <=> substr_count($a, '/'));
-        usort($mkdirs, static fn(string $a, string $b): int => substr_count($a, '/') <=> substr_count($b, '/'));
-        usort($copies, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
-        usort($puts, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
-        usort($mime_types, static fn(array $a, array $b): int => strcmp((string) $a['path'], (string) $b['path']));
         return [
             'deletes' => $deletes,
             'mkdirs' => $mkdirs,
@@ -1484,59 +1433,6 @@ class WporgOperations {
             'details' => is_array($plan['details'] ?? null) ? $plan['details'] : [],
             'cleanup' => array_values(array_filter((array) ($plan['cleanup'] ?? []), 'is_string')),
         ];
-    }
-
-    private static function read_remote_files(WporgPluginSvnClient $client, array $paths): array {
-        if (empty($paths)) {
-            return [];
-        }
-
-        // Sequential fallback keeps deploys working on hosts without curl_multi
-        if ($client::is_batch_transport_available()) {
-            return $client->read_files_multi($paths);
-        }
-
-        $contents = [];
-        foreach ($paths as $path) {
-            $contents[$path] = $client->read_file($path);
-        }
-        return $contents;
-    }
-
-    private static function compact_delete_paths(array $delete_paths): array {
-        // Drop child deletes when a parent directory delete already covers them
-        $paths = array_keys($delete_paths);
-        usort($paths, static fn(string $a, string $b): int => substr_count($a, '/') <=> substr_count($b, '/'));
-        $kept = [];
-
-        foreach ($paths as $path) {
-            $skip = false;
-            foreach ($kept as $kept_path) {
-                if ($path !== $kept_path && str_starts_with($path, $kept_path . '/')) {
-                    $skip = true;
-                    break;
-                }
-            }
-            if (!$skip) {
-                $kept[] = $path;
-            }
-        }
-
-        $out = [];
-        foreach ($kept as $path) {
-            $out[$path] = $delete_paths[$path];
-        }
-        return $out;
-    }
-
-    /** 'tags/1.0' → ['tags', 'tags/1.0']: a path and every folder above it, shallow first. */
-    private static function path_with_ancestors(string $path): array {
-        $parts = explode('/', trim($path, '/'));
-        return array_map(static fn(int $depth): string => implode('/', array_slice($parts, 0, $depth)), range(1, count($parts)));
-    }
-
-    private static function join_svn_path(string $base, string $rel): string {
-        return trim(trim($base, '/') . '/' . trim($rel, '/'), '/');
     }
 
     // Lock holders that are over in seconds — the assets pull, a working-copy change and the

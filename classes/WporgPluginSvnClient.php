@@ -19,6 +19,8 @@ require_once __DIR__ . '/WporgSvnException.php';
  */
 class WporgPluginSvnClient {
     private const REPO_URL = 'https://plugins.svn.wordpress.org/';
+    // Subversion's WebDAV properties (md5-checksum among them), beside the DAV: ones.
+    private const SVN_DAV_NS = 'http://subversion.tigris.org/xmlns/dav/';
 
     // The MERGE is wordpress.org's commit with its hooks: 7.5 s for a one-file commit, unmeasured
     // for large ones. Given up too early, the commit may land all the same while the caller
@@ -878,12 +880,14 @@ class WporgPluginSvnClient {
 
     // The one authoritative PROPFIND property list — the single (propfind) and batch
     // (list_directories_multi) transports must request identical fields; drift here would
-    // fail silently with different data per transport.
+    // fail silently with different data per transport. md5-checksum is Subversion's own
+    // property of a file: a deploy compares contents by it without downloading them.
     private function propfind_body(): string {
         return '<?xml version="1.0" encoding="utf-8"?>' .
-            '<D:propfind xmlns:D="DAV:"><D:prop>' .
+            '<D:propfind xmlns:D="DAV:" xmlns:S="' . self::SVN_DAV_NS . '"><D:prop>' .
             '<D:resourcetype/><D:getlastmodified/><D:getcontentlength/>' .
             '<D:version-name/><D:checked-in/><D:version-controlled-configuration/>' .
+            '<S:md5-checksum/>' .
             '</D:prop></D:propfind>';
     }
 
@@ -1368,6 +1372,8 @@ class WporgPluginSvnClient {
                 'size' => isset($props['getcontentlength']) && ctype_digit((string) $props['getcontentlength']) ? (int) $props['getcontentlength'] : null,
                 'last_modified' => (string) ($props['getlastmodified'] ?? ''),
                 'revision' => $this->revision_int((string) ($props['version-name'] ?? '')),
+                // A folder has none: its propstat answers the property with 404, read as ''.
+                'md5' => preg_match('/^[0-9a-f]{32}$/', (string) ($props['md5-checksum'] ?? '')) === 1 ? (string) $props['md5-checksum'] : null,
             ];
         }
 
@@ -1503,6 +1509,9 @@ class WporgPluginSvnClient {
                     }
 
                     $props[$name] = trim((string) $prop);
+                }
+                foreach ($prop_node->children(self::SVN_DAV_NS) as $prop) {
+                    $props[$prop->getName()] = trim((string) $prop);
                 }
             }
 

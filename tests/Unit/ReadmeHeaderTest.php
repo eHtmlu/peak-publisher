@@ -272,12 +272,17 @@ final class ReadmeHeaderTest extends TestCase {
 
     public static function plugin_files(): array {
         $header = "<?php\n/**\n * Plugin Name: My Plugin\n * Version: 1.0\n";
+        // A header line that starts 19 bytes before the 8 KB boundary: " * Tested up to: 7." lies
+        // within it, "1.2 */" beyond — WordPress reads the line cut short, the writer leaves it alone.
+        $padded = $header . ' * ' . str_repeat('x', 8192 - 19 - strlen($header) - 4) . "\n";
+        $across = $padded . " * Tested up to: 7.1.2 */\n";
         return [
             'star-prefixed line' => [ $header . " * Tested up to: 7.1\n */\n", $header . " * Tested up to: 7.2\n */\n" ],
             'empty value counts as carrying the line' => [ $header . " * Tested up to:\n */\n", $header . " * Tested up to: 7.2\n */\n" ],
             'no line, nothing inserted' => [ $header . " */\n", $header . " */\n" ],
             'only the first line is a header' => [ $header . " * Tested up to: 7.1\n */\n// Tested up to: 6.0\n", $header . " * Tested up to: 7.2\n */\n// Tested up to: 6.0\n" ],
             'a line beyond the first 8 KB is not a header' => [ $header . " */\n" . str_repeat("// filler\n", 900) . "// Tested up to: 7.1\n", $header . " */\n" . str_repeat("// filler\n", 900) . "// Tested up to: 7.1\n" ],
+            'a line across the 8 KB boundary is left alone' => [ $across, $across ],
             'CRLF kept' => [ "<?php\r\n/**\r\n * Plugin Name: X\r\n * Tested up to: 7.1\r\n */\r\n", "<?php\r\n/**\r\n * Plugin Name: X\r\n * Tested up to: 7.2\r\n */\r\n" ],
             'a comment closer on the same line survives' => [ $header . " * Tested up to: 7.1 */\n", $header . " * Tested up to: 7.2 */\n" ],
             'a php closer on the same line survives' => [ "<?php /* Plugin Name: X\nTested up to: 7.1 ?>\n", "<?php /* Plugin Name: X\nTested up to: 7.2 ?>\n" ],

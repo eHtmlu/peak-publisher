@@ -316,17 +316,23 @@ function set_readme_stable_tag(string $content, string $value): string {
  * WordPress's cleanup ends it: at a comment or PHP closer on the same line, which stays.
  * Only replaces — a file that does not carry the line is returned as it is: the readme is
  * the canonical place of a Tested up to, and a line is never planted into an author's PHP.
+ * A line that crosses the 8 KB boundary reaches WordPress cut short and is left alone too.
  * Line endings are kept; a `Tested up to:` with an empty value carries the line.
  */
 function set_plugin_file_header(string $content, string $key, string $value): string {
-    $head = substr($content, 0, 8192);
+    // The lines that lie whole within the first 8 KB.
+    $head = $content;
+    if (strlen($content) > 8192) {
+        $cut = strrpos(substr($content, 0, 8192), "\n");
+        $head = $cut === false ? '' : substr($content, 0, $cut + 1);
+    }
     // The line ends before "\r?\n": a lookahead, so a CR stays where it is.
     $pattern = '/^((?:[ \t]*<\?php)?[ \t\/*#@]*' . preg_replace('/\s+/', '[ \t]+', preg_quote($key, '/')) . ':)[ \t]*[^\r\n]*?((?:[ \t]*(?:\*\/|\?>)[^\r\n]*)?)(?=\r?$)/mi';
     $replaced = preg_replace_callback($pattern, static fn(array $m): string => $m[1] . ' ' . $value . $m[2], $head, 1, $count);
     if (!is_string($replaced) || $count === 0) {
         return $content;
     }
-    return $replaced . substr($content, 8192);
+    return $replaced . substr($content, strlen($head));
 }
 
 

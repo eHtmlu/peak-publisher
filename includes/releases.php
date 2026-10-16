@@ -315,7 +315,7 @@ function set_release_tested_up_to(\WP_Post $release, string $value, string $expe
         return new \WP_Error('invalid_tested_up_to', sprintf(__('Tested up to takes a WordPress version like %s.', 'peak-publisher'), wordpress_stable_branch()), [ 'status' => 400 ]);
     }
     $parent = get_post((int) $release->post_parent);
-    if ($release->post_type !== 'pblsh_release' || !is_plugin_post($parent)) {
+    if (!is_plugin_post($parent)) {
         return new \WP_Error('release_not_found', __('Release not found.', 'peak-publisher'), [ 'status' => 404 ]);
     }
     $version = (string) $release->post_title;

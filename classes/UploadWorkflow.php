@@ -67,7 +67,10 @@ class UploadWorkflow {
      * finalize status (record_finalize_status()), which the dialog reads back through
      * finalize_status() — a gateway in front of the site may end this request long before a
      * large wordpress.org deploy is done. A finalize that succeeded answers every later
-     * request with its response: a retry after a lost answer publishes nothing twice.
+     * request with its response, and one still running refuses a second (finalize_running):
+     * a retry after a lost answer publishes nothing twice — on wordpress.org the deploy lock
+     * would stop it, self-hosted nothing else would, and two publishes of one workspace end
+     * in two release posts of one version.
      *
      * Expects 'upload_id' referencing cache.json and ZIP in pblsh/tmp/<upload_id>/.
      *
@@ -80,9 +83,12 @@ class UploadWorkflow {
             return $this->unknown_upload_error();
         }
         $this->init_tmp_root($upload_id);
-        $recorded = read_finalize_status($this->tmp_root);
-        if (($recorded['response']['status'] ?? null) === 'ok') {
+        $recorded = finalize_status_view(read_finalize_status($this->tmp_root), time());
+        if ($recorded['state'] === 'finished' && ($recorded['response']['status'] ?? null) === 'ok') {
             return $recorded['response'];
+        }
+        if ($recorded['state'] === 'running') {
+            return $this->upload_error('finalize_running', __('This upload is being published right now. Wait for it to finish.', 'peak-publisher'));
         }
         $cache_file = $this->tmp_root . 'cache.json';
         if (!file_exists($cache_file)) {

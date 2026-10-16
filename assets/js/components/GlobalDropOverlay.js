@@ -598,8 +598,9 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
 
     /**
      * Runs the finalize request and resolves with its response — the request's own, or the one
-     * the status records when the request lost its answer. Without either, an error of its own:
-     * the publish did not start, or its outcome stayed unknown.
+     * the status records when the request lost its answer or when the server refused it
+     * because an earlier attempt is still publishing (finalize_running). Without either, an
+     * error of its own: the publish did not start, or its outcome stayed unknown.
      *
      * @param {{ version: string, isWporg: boolean, pluginId: number|null }} publish What is
      *        published where, for the message of an unknown outcome.
@@ -654,7 +655,15 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUpl
             };
             timer = setTimeout(poll, FINALIZE_POLL_INTERVAL);
 
-            Pblsh.API.finalizeUpload(uploadId, opts).then(settle, (err) => {
+            Pblsh.API.finalizeUpload(uploadId, opts).then((res) => {
+                if (res?.code === 'finalize_running') {
+                    // An earlier attempt is publishing this upload (its answer was lost, the
+                    // user published again, then it started after all): its status decides.
+                    answerLostAt = Date.now();
+                    return;
+                }
+                settle(res);
+            }, (err) => {
                 if (FINALIZE_NO_ANSWER_CODES.includes(err?.code)) {
                     // The status decides from here on.
                     answerLostAt = Date.now();

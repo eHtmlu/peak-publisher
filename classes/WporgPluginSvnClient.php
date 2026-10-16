@@ -11,11 +11,12 @@ require_once __DIR__ . '/WporgSvnException.php';
  * The HTTP/WebDAV transport to the wordpress.org plugin SVN — the protocol spoken directly,
  * no svn binary. Reads: directory listings, file contents, downloads streamed to disk, the
  * log with its changed paths; single requests go through the WordPress HTTP API, batched
- * reads through curl_multi. Writes: one commit transaction at a time — begin_commit(), the
- * changes, then commit() or abort() — with file contents streamed by cURL. Plus the
- * credential and access probes. The client knows the protocol, not what a commit means: what
- * is written and when is WporgOperations' business (commit_files(), the only caller of the
- * write methods). Failures arrive as WporgSvnException.
+ * reads through curl_multi where the host has it, else one after the other. Writes: one
+ * commit transaction at a time — begin_commit(), the changes, then commit() or abort() —
+ * with file contents streamed by cURL. Plus the credential and access probes. The client
+ * knows the protocol, not what a commit means: what is written and when is WporgOperations'
+ * business (commit_files(), the only caller of the write methods). Failures arrive as
+ * WporgSvnException.
  */
 class WporgPluginSvnClient {
     private const REPO_URL = 'https://plugins.svn.wordpress.org/';
@@ -1219,18 +1220,25 @@ class WporgPluginSvnClient {
             : sprintf(__('(HTTP %1$d: %2$s)', 'peak-publisher'), $status, $excerpt));
     }
 
+    /**
+     * The same requests to several paths, their responses by path. Batched through curl_multi
+     * where the host has it; on a host without the curl extension (the HTTP API runs on
+     * streams there) one after the other — slower, the same answers: a deploy's tree reads
+     * and the tag sync keep working everywhere; only the import insists on the batch
+     * (AdminAPI::import_wporg_plugins()).
+     */
     private function request_paths_multi(string $method, array $paths, array $headers = [], ?string $body = null, int $concurrency = 5): array {
-        if (!self::is_batch_transport_available()) {
-            throw new WporgSvnException(
-                'wporg_import_transport_unavailable',
-                __('wordpress.org import needs curl_multi_exec support.', 'peak-publisher'),
-                500
-            );
-        }
-
         $paths = array_values(array_unique(array_filter(array_map('strval', $paths), static fn($path) => $path !== '')));
         if (empty($paths)) {
             return [];
+        }
+
+        if (!self::is_batch_transport_available()) {
+            $responses = [];
+            foreach ($paths as $path) {
+                $responses[$path] = $this->request_url($method, $this->build_url($path), $headers, $body);
+            }
+            return $responses;
         }
 
         $method = strtoupper($method);

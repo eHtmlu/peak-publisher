@@ -412,7 +412,8 @@ function wordpress_branch(string $version): string {
  * The WordPress releases this server knows without a request of its own: the running
  * version and the offers of core's version check — the site transient update_core, refreshed
  * twice daily, naming the latest release and, when that differs, the latest of the running
- * branch.
+ * branch. A development offer (the beta or RC channel names the next version before it is
+ * released) is no release and stays out.
  *
  * @return string[] Full version strings, the running version first.
  */
@@ -421,7 +422,7 @@ function known_wordpress_releases(): array {
     $transient = get_site_transient('update_core');
     $updates = is_object($transient) && isset($transient->updates) && is_array($transient->updates) ? $transient->updates : [];
     foreach ($updates as $offer) {
-        if (is_object($offer)) {
+        if (is_object($offer) && ($offer->response ?? '') !== 'development') {
             $releases[] = (string) ($offer->current ?? '');
         }
     }

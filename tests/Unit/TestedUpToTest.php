@@ -11,6 +11,7 @@ use function Pblsh\plan_tested_up_to_edit;
 use function Pblsh\tested_up_to_line_changes;
 use function Pblsh\effective_tested_up_to;
 use function Pblsh\is_valid_tested_up_to;
+use function Pblsh\known_wordpress_releases;
 use function Pblsh\read_plugin_headers;
 use function Pblsh\sanitize_tested_up_to;
 use function Pblsh\served_tested_up_to;
@@ -78,6 +79,16 @@ final class TestedUpToTest extends TestCase {
         self::assertSame('7.1', wordpress_stable_branch(), 'without a transient the site version decides');
         set_site_transient('update_core', 'garbage');
         self::assertSame('7.1', wordpress_stable_branch());
+    }
+
+    public function test_a_development_offer_is_no_release(): void {
+        // The beta or RC channel: core offers the next version before it is released.
+        set_site_transient('update_core', (object) [ 'updates' => [
+            (object) [ 'response' => 'development', 'current' => '7.2-beta1' ],
+            (object) [ 'response' => 'latest', 'current' => '7.1.3' ],
+        ] ]);
+        self::assertSame('7.1', wordpress_stable_branch());
+        self::assertSame([ '7.1.3' ], known_wordpress_releases());
     }
 
     public function test_line_changes_set_existing_lines_and_create_only_in_the_readme(): void {

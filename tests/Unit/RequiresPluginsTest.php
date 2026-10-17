@@ -10,14 +10,15 @@ use function Pblsh\requires_plugins_slugs;
 
 /**
  * The Requires Plugins header (includes/readme.php): read on every WordPress version, its slugs
- * cleaned the way core's plugin dependencies clean them.
+ * cleaned the way core's plugin dependencies clean them, in the header's order.
  */
 final class RequiresPluginsTest extends TestCase {
 
-    public function test_the_slugs_are_cleaned_like_core_does(): void {
-        self::assertSame([ 'buddypress', 'woocommerce' ], requires_plugins_slugs(' woocommerce, Akismet ,buddypress,woocommerce,,my_plugin'), 'trimmed, wordpress.org slugs only, unique, sorted');
+    public function test_the_slugs_are_cleaned_like_core_does_in_the_headers_order(): void {
+        self::assertSame([ 'woocommerce', 'buddypress' ], requires_plugins_slugs(' woocommerce, Akismet ,buddypress,woocommerce,,my_plugin'), 'trimmed, wordpress.org slugs only, each once, in the header\'s order');
         self::assertSame([], requires_plugins_slugs(''));
-        self::assertSame([ 'a-b', 'c1' ], requires_plugins_slugs('c1,a-b,-x,y-,a--b'));
+        self::assertSame([ 'c1', 'a-b' ], requires_plugins_slugs('c1,a-b,-x,y-,a--b'));
+        self::assertSame([ 'advanced-custom-fields', 'acf-extended' ], requires_plugins_slugs('advanced-custom-fields, acf-extended'), 'a dependency that requires the other keeps its place after it');
     }
 
     public function test_a_wordpress_org_slug_is_lowercase_words_joined_by_single_hyphens(): void {

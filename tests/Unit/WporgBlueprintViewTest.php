@@ -47,7 +47,7 @@ final class WporgBlueprintViewTest extends TestCase {
         write_release_snapshot($current, [ 'plugin_data' => [ 'Name' => 'My Plugin', 'Version' => '1.0.0', 'RequiresPlugins' => 'woocommerce, buddypress' ], 'plugin_info' => [], 'plugin_readme_txt' => [] ]);
         $this->create_release($plugin, '1.1.0');
 
-        self::assertSame([ 'version' => '1.0.0', 'slugs' => [ 'buddypress', 'woocommerce' ] ], live_preview_requirements(get_post($plugin->ID)));
+        self::assertSame([ 'version' => '1.0.0', 'slugs' => [ 'woocommerce', 'buddypress' ] ], live_preview_requirements(get_post($plugin->ID)), 'in the header\'s order');
 
         $trunk = $this->create_plugin('pblsh_wporg_plugin', 'other-plugin', 'publish', [ 'revision' => 1, 'release_count' => 1, 'trunk_readme' => [ ...$readme, 'stable_tag' => 'trunk' ] ]);
         self::assertNull(live_preview_requirements($trunk), 'trunk is distributed: there is no release to read');

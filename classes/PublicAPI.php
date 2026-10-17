@@ -294,7 +294,7 @@ class PublicAPI {
 		$tested                     = served_tested_up_to(release_tested_up_to($current_release)['value'], $this->client_wordpress_version());
 		$result['tested']           = $tested === '' ? false : $tested;
 		$result['requires_php']     = empty($plugin_data['RequiresPHP']) ? false : $plugin_data['RequiresPHP'];
-		$result['requires_plugins'] = empty($plugin_data['RequiresPlugins']) ? [] : array_map('trim', explode(',', $plugin_data['RequiresPlugins']));
+		$result['requires_plugins'] = requires_plugins_slugs((string) ($plugin_data['RequiresPlugins'] ?? ''));
 		$result['compatibility']    = array();
 
 		// Determine the last_updated date.
@@ -488,7 +488,7 @@ class PublicAPI {
             // — served as the asking site's branch needs it (served_tested_up_to()).
             $tested = served_tested_up_to(release_tested_up_to($release)['value'], $this->client_wordpress_version());
 
-            $requires_plugins = (array) ($plugin_data['RequiresPlugins'] ? array_map('trim', explode(',', $plugin_data['RequiresPlugins'])) : []);
+            $requires_plugins = requires_plugins_slugs((string) ($plugin_data['RequiresPlugins'] ?? ''));
 
             // Record installation ping (only if a site URL could be extracted)
             $client_installed_version = (string) ($plugin_payload['Version'] ?? '');

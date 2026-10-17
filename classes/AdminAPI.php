@@ -250,6 +250,16 @@ class AdminAPI {
             'callback' => [$this, 'handle_resolve_asset'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/blueprint', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_change_blueprint'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/wporg/live-preview-check', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_live_preview_check'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
     }
 
     /**
@@ -310,6 +320,24 @@ class AdminAPI {
     }
 
     /**
+     * Whether the Live Preview on wordpress.org fails for the current release: the Requires
+     * Plugins the committed blueprint does not install before the plugin (live_preview_missing()),
+     * named with the release. Null without a committed blueprint or without a current release —
+     * nothing to fail, or nothing to compare with.
+     *
+     * @return array{version:string, missing:string[]}|null
+     */
+    private function live_preview_status(\WP_Post $post, ?\WP_Post $current_release, array $state): ?array {
+        if ($state['blueprints']['file'] === null || !$current_release instanceof \WP_Post) {
+            return null;
+        }
+        return [
+            'version' => (string) $current_release->post_title,
+            'missing' => live_preview_missing($state, (string) $post->post_name, release_requires_plugins($current_release)),
+        ];
+    }
+
+    /**
      * Serialize a plugin post for admin REST responses. `version` is the current release —
      * the one sites receive — `latest_version` the highest; both null when absent.
      * `released_at` is when the current release was published (its post date: the upload,
@@ -330,6 +358,7 @@ class AdminAPI {
         $is_self_hosted = $hosting_type === 'self_hosted';
         $current = resolve_current_release($post, $releases);
         $wporg_directory = $is_self_hosted ? null : serialize_wporg_directory((int) $post->ID);
+        $assets_state = $is_self_hosted ? null : get_wporg_assets_state((int) $post->ID);
 
         $out = [
             'id' => $post->ID,
@@ -364,7 +393,8 @@ class AdminAPI {
             'wporg_check' => $is_self_hosted ? null : $wporg_directory['wporg_check'],
             'wporg_token' => $is_self_hosted ? null : wporg_sync_token($post),
             // Asset changes not on wordpress.org yet — deleting the plugin here would lose them.
-            'assets_pending' => $is_self_hosted ? null : count(get_wporg_assets_state((int) $post->ID)['pending']),
+            'assets_pending' => $is_self_hosted ? null : count($assets_state['pending']),
+            'live_preview' => $is_self_hosted ? null : $this->live_preview_status($post, $current['release'], $assets_state),
         ];
 
         if ($detail) {
@@ -446,6 +476,7 @@ class AdminAPI {
             'post_parent' => $post->ID,
         ]);
         $current_release = resolve_current_release($post, $releases_query->posts)['release'];
+        $assets_state = $is_wporg ? get_wporg_assets_state((int) $post->ID) : null;
 
         $releases = [];
         foreach ($releases_query->posts as $release) {
@@ -465,6 +496,8 @@ class AdminAPI {
                 // the pencil from these two facts).
                 'tested_up_to' => release_tested_up_to($release),
                 'readme_found' => !empty($rel_data['plugin_readme_txt']['found']),
+                // What a flip to this release adds to the Live Preview (WporgOperations::set_stable_tag()).
+                'live_preview_missing' => $assets_state === null ? [] : live_preview_missing($assets_state, (string) $post->post_name, release_requires_plugins($release)),
             ];
         }
 
@@ -653,8 +686,10 @@ class AdminAPI {
             return $username;
         }
         require_once __DIR__ . '/WporgOperations.php';
+        // The release's Requires Plugins come into the Live Preview with the flip (its snapshot: a tag does not change).
+        $release = wporg_find_release_post_by_version((int) $plugin->ID, $version);
         try {
-            $result = WporgOperations::set_stable_tag($plugin, $version, $expected_pointer, $username);
+            $result = WporgOperations::set_stable_tag($plugin, $version, $expected_pointer, $username, $release instanceof \WP_Post ? release_requires_plugins($release) : []);
         } catch (WporgSvnException $e) {
             return $this->rest_error_response($this->make_rest_error($e->get_error_code(), $e->getMessage(), $e->get_http_status()));
         } catch (\Throwable $e) {
@@ -678,7 +713,7 @@ class AdminAPI {
         }
         refresh_plugin_title_from_reference((int) $plugin->ID);
 
-        return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $version, 'revision' => $result['revision'] ];
+        return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $version, 'revision' => $result['revision'], 'live_preview_added' => $result['live_preview_added'] ];
     }
 
     /**
@@ -1110,6 +1145,40 @@ class AdminAPI {
             return $this->rest_error_response($this->make_rest_error('invalid_request', __('Choose which version to keep: mine or theirs.', 'peak-publisher'), 400, 'keep'));
         }
         return $this->asset_write_response($this->assets()->resolve($post, sanitize_key((string) ($params['slot'] ?? '')), $keep));
+    }
+
+    /**
+     * Changes the Live Preview of a wordpress.org plugin in the working copy: JSON { change,
+     * value?, contents?, expected? } (AssetManager::change_blueprint()). A change built on a
+     * state that moved meanwhile answers 409 with the fresh view, like a commit's conflict.
+     */
+    public function handle_change_blueprint(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        $params = $request->get_json_params();
+        $result = $this->assets()->change_blueprint($post, is_array($params) ? $params : []);
+        if (is_wp_error($result) && $result->get_error_code() === 'blueprint_changed') {
+            $result = $this->make_rest_error($result->get_error_code(), $result->get_error_message(), 409, null, [ 'assets' => $this->assets()->describe($post) ]);
+        }
+        return $this->asset_write_response($result);
+    }
+
+    /**
+     * Whether the Live Preview of a wordpress.org plugin is public — checked on wordpress.org
+     * now (check_wporg_live_preview()) — with the fresh view, like every write's answer.
+     */
+    public function handle_live_preview_check(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        try {
+            return [ 'status' => 'ok', 'preview' => check_wporg_live_preview($post), 'assets' => $this->assets()->describe($post) ];
+        } catch (WporgSvnException $e) {
+            return $this->rest_error_response($e->to_wp_error());
+        }
     }
 
     /** The plugin of an asset request — both channels. */

@@ -4,7 +4,9 @@
 // function returning { title, content } — the title is the dialog heading and
 // doubles as the TipLink's default link text, so the link always promises
 // exactly what the dialog delivers. Registered centrally so the same tip can be
-// linked from any screen.
+// linked from any screen. A tip may take parameters for context-specific content
+// (TipLink passes them as `params`, the dialog hands them on): its comment names
+// them, and every screen that links the tip provides them.
 //
 // Editorial line: tips supplement wordpress.org's own documentation, they do
 // not mirror it. A tip earns its place by giving the reader something the
@@ -224,6 +226,41 @@ lodash.set(window, 'Pblsh.Tips', {
                 )),
                 createElement('h2', { key: 'release-title' }, __('A caption changes with a release', 'peak-publisher')),
                 createElement('p', { key: 'release' }, __('Captions come from the readme.txt of the release sites receive. A new or corrected caption shows once a release that carries it is the current release.', 'peak-publisher')),
+            ],
+        };
+    },
+
+    // The Live Preview, for the assets tab's Live Preview section: what visitors get, the
+    // technical background, where to read on. Parameter `slug` — the plugin's wordpress.org slug,
+    // for the link to its plugin page.
+    livePreview: ({ slug }) => {
+        const { __ } = wp.i18n;
+        const { createElement, createInterpolateElement } = wp.element;
+        const { getWporgPluginUrl } = Pblsh.Utils;
+
+        return {
+            title: __('How the Live Preview works', 'peak-publisher'),
+            content: [
+                createElement('h2', { key: 'visitors-title' }, __('What visitors will get', 'peak-publisher')),
+                createElement('p', { key: 'visitors' }, createInterpolateElement(
+                    __('<a>Your plugin page</a> gets a Live Preview button next to the Download button. It opens WordPress Playground: a full WordPress with your plugin installed and activated, running entirely in the visitor\'s browser. No server is involved: the browser itself runs PHP and the database. Nothing is installed on the visitor\'s computer, and the site is gone when the tab is closed — visitors can try everything without a second thought.', 'peak-publisher'),
+                    { a: createElement('a', { href: getWporgPluginUrl(slug), target: '_blank', rel: 'noreferrer' }) },
+                )),
+                createElement('h2', { key: 'background-title' }, __('Technical background and advanced settings', 'peak-publisher')),
+                createElement('p', { key: 'background' }, createInterpolateElement(
+                    __('Visiting <playground>playground.wordpress.net</playground> launches a fresh WordPress that can be configured in detail through a JSON file, the blueprint — for instance which themes and plugins to install, or which page to open first. For the Live Preview on wordpress.org, this blueprint lives in the plugin\'s SVN repository at <code>assets/blueprints/blueprint.json</code>. Peak Publisher takes care of that for you. A blueprint can do far more than install themes and plugins or choose the first page — run PHP code, for instance. For that, the Expert mode lets you edit the JSON directly.', 'peak-publisher'),
+                    {
+                        code: createElement('code'),
+                        playground: createElement('a', { href: 'https://playground.wordpress.net/', target: '_blank', rel: 'noreferrer' }),
+                    },
+                )),
+                createElement('p', { key: 'links' }, createInterpolateElement(
+                    __('For more, see wordpress.org\'s <guide>guide to plugin previews</guide> and the <documentation>blueprint documentation</documentation>, which covers everything a Playground blueprint can do.', 'peak-publisher'),
+                    {
+                        guide: createElement('a', { href: 'https://developer.wordpress.org/plugins/wordpress-org/previews-and-blueprints/', target: '_blank', rel: 'noreferrer' }),
+                        documentation: createElement('a', { href: 'https://developer.wordpress.org/playground/blueprints/', target: '_blank', rel: 'noreferrer' }),
+                    },
+                )),
             ],
         };
     },

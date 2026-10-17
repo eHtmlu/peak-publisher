@@ -175,13 +175,26 @@ function wporg_api_query_plugins_by_author(string $username): array {
  * The assets a listing serves, filename → the SVN revision the directory's URL names
  * (`?rev=`, the revision the file was last changed in): the icons (1x, 2x, svg), the banners
  * (low, high) and the screenshots' src. A generated icon (`default`, a geopattern on
- * s.w.org) names no revision and is no asset of the plugin: left out. In filename order, so
- * two listings of the same assets compare identical; empty when the listing serves none (the
- * API's [] for absent icons, banners, screenshots).
+ * s.w.org) names no revision and is no asset of the plugin: left out. The blueprints of
+ * assets/blueprints/ by their filename — their URL names blueprint.json for every file —, with
+ * the revision of the import that read them. In filename order, so two listings of the same
+ * assets compare identical; empty when the listing serves none (the API's [] for absent icons,
+ * banners, screenshots, blueprints).
  *
  * @return array<string, int>
  */
 function wporg_api_asset_revisions(array $listing): array {
+    $revision_of = static function($url): ?int {
+        parse_str((string) parse_url((string) $url, PHP_URL_QUERY), $query);
+        return is_string($url) && is_numeric($query['rev'] ?? null) ? (int) $query['rev'] : null;
+    };
+    $revisions = [];
+    foreach (is_array($listing['blueprints'] ?? null) ? $listing['blueprints'] : [] as $blueprint) {
+        $revision = is_array($blueprint) && is_string($blueprint['filename'] ?? null) ? $revision_of($blueprint['url'] ?? null) : null;
+        if ($revision !== null) {
+            $revisions[$blueprint['filename']] = $revision;
+        }
+    }
     $urls = [];
     foreach ([ 'icons', 'banners' ] as $field) {
         $urls = [ ...$urls, ...array_values(is_array($listing[$field] ?? null) ? $listing[$field] : []) ];
@@ -189,16 +202,11 @@ function wporg_api_asset_revisions(array $listing): array {
     foreach (is_array($listing['screenshots'] ?? null) ? $listing['screenshots'] : [] as $screenshot) {
         $urls[] = is_array($screenshot) ? ($screenshot['src'] ?? null) : null;
     }
-    $revisions = [];
     foreach ($urls as $url) {
-        if (!is_string($url)) {
-            continue;
+        $revision = $revision_of($url);
+        if ($revision !== null) {
+            $revisions[basename((string) parse_url($url, PHP_URL_PATH))] = $revision;
         }
-        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
-        if (!is_numeric($query['rev'] ?? null)) {
-            continue;
-        }
-        $revisions[basename((string) parse_url($url, PHP_URL_PATH))] = (int) $query['rev'];
     }
     ksort($revisions, SORT_STRING);
     return $revisions;
@@ -280,6 +288,38 @@ function wporg_profile_avatar_url(string $username): ?string {
     }
     $location = trim((string) wp_remote_retrieve_header($response, 'location'));
     return str_starts_with($location, 'https://') ? $location : null;
+}
+
+
+/** The themes API: whether a theme exists, for the Live Preview's theme field. */
+const PBLSH_WPORG_THEMES_API_URL = 'https://api.wordpress.org/themes/info/1.2/';
+
+/**
+ * Whether wordpress.org has a theme by this slug — the Live Preview's theme field asks before
+ * it writes a slug Playground could not install. A user action, one request.
+ *
+ * @throws WporgSvnException wporg_api_unavailable when the API gives no determinate answer.
+ */
+function wporg_theme_exists(string $slug): bool {
+    $response = wp_remote_get(add_query_arg([ 'action' => 'theme_information', 'request' => [ 'slug' => $slug ] ], PBLSH_WPORG_THEMES_API_URL), [
+        'timeout' => 10,
+        'redirection' => 3,
+        'user-agent' => wporg_user_agent(),
+    ]);
+    $state = is_wp_error($response) ? null : wporg_theme_state_from_response((int) wp_remote_retrieve_response_code($response), (string) wp_remote_retrieve_body($response));
+    if ($state === null) {
+        throw wporg_api_unavailable();
+    }
+    return $state === 'ok';
+}
+
+/** The themes API's answer: 200 with the theme's slug → ok, 404 (`{"error":"Theme not found"}`) → not_found, anything else null. */
+function wporg_theme_state_from_response(int $status, string $body): ?string {
+    if ($status === 404) {
+        return 'not_found';
+    }
+    $data = $status === 200 ? json_decode($body, true) : null;
+    return is_array($data) && is_string($data['slug'] ?? null) ? 'ok' : null;
 }
 
 

@@ -89,17 +89,36 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     const getNotSyncedNotice = () => __('The assets of this plugin have not been read from wordpress.org yet, so they cannot be changed here.', 'peak-publisher');
 
     // Files of assets/ that no slot of the tab shows — they stay on wordpress.org untouched.
+    // blueprints/ is the Live Preview's.
     function getOtherFilesText(count) {
         return sprintf(_n(
-            '%d other file in assets/ is not managed here (localized or right-to-left variants, unused sizes, blueprints)',
-            '%d other files in assets/ are not managed here (localized or right-to-left variants, unused sizes, blueprints)',
+            '%d other file in assets/ is not managed here (localized or right-to-left variants, unused sizes)',
+            '%d other files in assets/ are not managed here (localized or right-to-left variants, unused sizes)',
             count, 'peak-publisher'
         ), count);
     }
 
-    // The working copy of a wordpress.org plugin — the bar while it holds changes.
-    const getPendingBarText = (count) => sprintf(_n('%d change not on wordpress.org yet', '%d changes not on wordpress.org yet', count, 'peak-publisher'), count);
-    const getConflictBarText = (count) => sprintf(_n('%d conflict — resolve it to commit', '%d conflicts — resolve them to commit', count, 'peak-publisher'), count);
+    // The tab's sections, in their order: the Live Preview only on wordpress.org, which serves
+    // it — a self-hosted plugin's API has no blueprints.
+    function getAssetSections(isWporg) {
+        return [
+            { key: 'icons', label: __('Icon & Banner', 'peak-publisher') },
+            { key: 'screenshots', label: __('Screenshots', 'peak-publisher') },
+            ...(isWporg ? [ { key: 'live-preview', label: __('Live Preview', 'peak-publisher') } ] : []),
+        ];
+    }
+
+    // The section a slot of the working copy belongs to — where its pending change shows.
+    function getAssetSection(slotKey) {
+        if (slotKey === 'blueprint') return 'live-preview';
+        return /^screenshot-\d+$/.test(slotKey) ? 'screenshots' : 'icons';
+    }
+
+    // The working copy of a wordpress.org plugin — the sub-tab row's right half while it holds changes.
+    const getPendingChangesText = (count) => sprintf(_n('%d change not on wordpress.org yet', '%d changes not on wordpress.org yet', count, 'peak-publisher'), count);
+    const getConflictsText = (count) => sprintf(_n('%d conflict — resolve it to commit', '%d conflicts — resolve them to commit', count, 'peak-publisher'), count);
+    // The row's count beside the Commit button, which says the rest.
+    const getPendingCountText = (count) => sprintf(_n('%d change', '%d changes', count, 'peak-publisher'), count);
     const getCommittingText = () => __('Committing to wordpress.org…', 'peak-publisher');
     const getNoAccountCommitText = () => __('Committing assets needs your wordpress.org account — connect one under Settings › wordpress.org. Your changes are kept until then.', 'peak-publisher');
     // The closed box's second line in this tab, under the closed notice every tab shares
@@ -146,8 +165,8 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     }
 
     return {
-        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
-        getPendingBarText, getConflictBarText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
+        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText, getAssetSections, getAssetSection,
+        getPendingChangesText, getPendingCountText, getConflictsText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
     };
 })());

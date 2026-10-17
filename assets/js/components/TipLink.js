@@ -4,8 +4,9 @@
 // deliberately NOT rendered where the link sits — a dialog node does not belong
 // inside flowing content — but once at the app root as TipDialog, which listens
 // for the 'pblsh:open-tip' window event. Content comes from the Pblsh.Tips
-// registry; without children, the tip's title doubles as the link text. Both
-// render nothing when the tip key is unknown.
+// registry, built from the link's params (a tip's context, see tips.js), which
+// the event carries to the dialog; without children, the tip's title doubles as
+// the link text. Both render nothing when the tip key is unknown.
 
 // The tip system's mark — the lightbulb split into two paths so the glass can
 // glow over a metal-gray base. A deliberate one-off outside getSvgIcon's
@@ -34,16 +35,16 @@ const renderTipBulbIcon = (size) => {
     );
 };
 
-const TipLink = ({ tipKey = '', children = null } = {}) => {
+const TipLink = ({ tipKey = '', params = {}, children = null } = {}) => {
     const { createElement } = wp.element;
 
-    const tip = Pblsh.Tips[tipKey] ? Pblsh.Tips[tipKey]() : null;
+    const tip = Pblsh.Tips[tipKey] ? Pblsh.Tips[tipKey](params) : null;
     if (!tip) return null;
 
     return createElement('button', {
         type: 'button',
         className: 'pblsh--tip-link',
-        onClick: () => window.dispatchEvent(new CustomEvent('pblsh:open-tip', { detail: { tipKey } })),
+        onClick: () => window.dispatchEvent(new CustomEvent('pblsh:open-tip', { detail: { tipKey, params } })),
     },
         createElement('span', { className: 'pblsh--tip-link__icon', 'aria-hidden': 'true' }, renderTipBulbIcon(18)),
         createElement('span', { className: 'pblsh--tip-link__text' }, children || tip.title),
@@ -59,17 +60,17 @@ const TipDialog = () => {
     const { createElement, useEffect, useRef, useState } = wp.element;
     const { getSvgIcon } = Pblsh.Utils;
 
-    const [tipKey, setTipKey] = useState(null);
+    const [open, setOpen] = useState(null);   // { tipKey, params } while a tip is open
     const dialogRef = useRef(null);
 
     useEffect(() => {
-        const handleOpen = (event) => setTipKey(event.detail?.tipKey || null);
+        const handleOpen = (event) => setOpen(event.detail?.tipKey ? { tipKey: event.detail.tipKey, params: event.detail.params || {} } : null);
         window.addEventListener('pblsh:open-tip', handleOpen);
         return () => window.removeEventListener('pblsh:open-tip', handleOpen);
     }, []);
 
     useEffect(() => {
-        if (!tipKey) return;
+        if (!open) return;
         const dialogEl = dialogRef.current;
         if (!dialogEl) return;
         if (typeof dialogEl.showModal === 'function' && !dialogEl.open) {
@@ -78,9 +79,9 @@ const TipDialog = () => {
         if (window.hljs && typeof window.hljs.highlightElement === 'function') {
             dialogEl.querySelectorAll('pre code').forEach((code) => window.hljs.highlightElement(code));
         }
-    }, [tipKey]);
+    }, [open]);
 
-    const tip = tipKey && Pblsh.Tips[tipKey] ? Pblsh.Tips[tipKey]() : null;
+    const tip = open && Pblsh.Tips[open.tipKey] ? Pblsh.Tips[open.tipKey](open.params) : null;
     if (!tip) return null;
 
     // While open, showModal makes the rest of the page inert — the dialog IS
@@ -89,7 +90,7 @@ const TipDialog = () => {
         className: 'pblsh--modal pblsh--modal--tip',
         ref: dialogRef,
         'aria-labelledby': 'pblsh-tip-dialog-title',
-        onClose: () => setTipKey(null),
+        onClose: () => setOpen(null),
         onClick: (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); },
     },
         createElement('div', { className: 'pblsh--tip-dialog' },

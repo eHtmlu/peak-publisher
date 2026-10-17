@@ -1,15 +1,18 @@
-// PluginAssets Component - the assets tab of the plugin editor: icons, banners and
-// screenshots in fixed slots, uploaded, replaced, deleted and reordered from here. The view
+// PluginAssets Component - the assets tab of the plugin editor in its sections — Icon &
+// Banner, Screenshots and, on wordpress.org, the Live Preview (LivePreview), the section the
+// editor's URL names (section, onSectionChange): icons, banners and screenshots in fixed slots,
+// uploaded, replaced, deleted and reordered from here. The view
 // lives in the store pblsh/assets (loaded when the editor opens, reloaded with the plugin,
 // kept across tab switches), the upload in progress and the drag are the component's own;
 // the plugin comes with pluginData, a changed icon reaches the header and the list through
 // refreshPlugin. A
 // wordpress.org plugin edits a working copy over its mirror of SVN's assets/: while it holds
-// changes, the bar names them and commits them as one, every box shows what its change does,
-// a conflict box lets the user decide, and wordpress.org's state can be shown alone. A mirror
-// that was never read leaves the tab showing only; its notice offers the editor's Refresh
-// (refreshFromWporg, refreshingWporg).
-lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin, refreshFromWporg, refreshingWporg }) => {
+// changes, the right half of the sub-tab row names them and commits them as one, every box
+// shows what its change does, a conflict box lets the user decide, and wordpress.org's state
+// can be shown alone. A mirror that was never read leaves the tab showing only; its notice
+// offers the editor's Refresh (refreshFromWporg, refreshingWporg). Each section carries a dot
+// while changes in it wait for the commit; the row's right half is the whole working copy's.
+lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin, refreshFromWporg, refreshingWporg, section, onSectionChange }) => {
     const { __, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement, Fragment, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
@@ -17,10 +20,10 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const { getSvgIcon } = Pblsh.Utils;
     const {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
-        getPendingBarText, getConflictBarText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
+        getAssetSections, getAssetSection, getPendingCountText, getConflictsText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
     } = Pblsh.AssetsUtils;
-    const { TipLink, NoticeBox, WporgRevisionLink } = Pblsh.Components;
+    const { TipLink, NoticeBox, WporgRevisionLink, LivePreview } = Pblsh.Components;
 
     const isWporg = !!pluginData && pluginData.hosting_type === 'wporg';
     // The working copy waits without an account; only the commit needs one.
@@ -40,6 +43,12 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const [draggingN, setDraggingN] = useState(null);     // screenshot_n being dragged
     const [dragOverN, setDragOverN] = useState(null);     // slot N being hovered during drag
     const dragOverTimeout = useRef(null);                   // auto-clear drag-over when cursor leaves
+    // The Live Preview's draft (Pblsh.Controllers.BlueprintDraft): while it holds something not
+    // saved yet, the commit waits for it; while a save is in flight, nothing takes it back. A
+    // discard, a commit or a decided blueprint starts it over.
+    const blueprintDraft = useSelect((select) => pluginId ? select('pblsh/assets').getBlueprintDraft(pluginId) : null, [pluginId]);
+    const livePreviewUnsaved = Pblsh.Controllers.BlueprintDraft.isUnsaved(blueprintDraft);
+    const livePreviewSaving = !!(blueprintDraft && blueprintDraft.saving);
 
     // The editor loads the view when it opens; the tab finds it in the store. Only when that
     // load failed and nothing is in flight does the tab try again.
@@ -114,6 +123,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             const result = await Pblsh.API.commitPluginAssets(pluginData.id);
             setAssets(result.assets);
             setShowWporgState(false);
+            Pblsh.Controllers.BlueprintDraft.drop(pluginId);
             setCommittedRevision(result.committed ? result.revision : null);
             if (typeof refreshPlugin === 'function') refreshPlugin();
         } catch (e) {
@@ -138,11 +148,15 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
 
     const handleDiscard = () => {
         if (!confirm(getDiscardConfirmText(assets.wporg.pending_count))) return;
+        Pblsh.Controllers.BlueprintDraft.drop(pluginId);
         runWorkingCopyRequest(() => Pblsh.API.discardPluginAssets(pluginData.id), __('Discard failed.', 'peak-publisher'));
     };
 
     // keep 'theirs' drops the slot's change (the band's Discard); 'mine' keeps it over wordpress.org's new file.
-    const handleResolve = (slotKey, keep) => runWorkingCopyRequest(() => Pblsh.API.resolvePluginAsset(pluginData.id, slotKey, keep), __('The decision could not be saved.', 'peak-publisher'));
+    const handleResolve = (slotKey, keep) => {
+        if (slotKey === 'blueprint') Pblsh.Controllers.BlueprintDraft.drop(pluginId);
+        runWorkingCopyRequest(() => Pblsh.API.resolvePluginAsset(pluginData.id, slotKey, keep), __('The decision could not be saved.', 'peak-publisher'));
+    };
 
     const openFilePicker = (slot, screenshotN) => {
         const key = slot === 'screenshot' ? 'screenshot-' + (screenshotN !== null && screenshotN !== undefined ? screenshotN : 'new') : slot;
@@ -297,7 +311,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             className: classNames,
             ...dragProps,
         },
-            band && createElement('div', { className: 'pblsh--asset-slot__band pblsh--asset-slot__band--' + band },
+            band && createElement('div', { className: 'pblsh--assets-band pblsh--assets-band--' + band },
                 getBandText(band),
                 // The slot's change is taken back here, on every band alike — in a conflict too, where
                 // this is the familiar way out and "Take theirs" in the box below does the same as the
@@ -306,7 +320,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                 // taken back.
                 createElement(Button, {
                     isSecondary: true,
-                    className: 'pblsh--asset-slot__band-discard',
+                    className: 'pblsh--assets-band__discard',
                     disabled: busy !== null,
                     onClick: () => {
                         if (slotInfo.pending === 'put' && !confirm(getDiscardUploadConfirmText())) return;
@@ -503,54 +517,118 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             ),
         );
 
+        // The sections, each with a dot while changes in it wait for the commit — the same mark
+        // as the editor's assets tab, said to screen readers in the working copy's words.
+        const sections = getAssetSections(isWporg);
+        const activeSection = sections.some((candidate) => candidate.key === section) ? section : 'icons';
+        // The Live Preview's draft not saved yet counts there too — wherever one stands, its section says so.
+        const pendingIn = (key) => !!wporg && !showingWporgState && (Object.keys(wporg.slots).some((slotKey) => wporg.slots[slotKey].pending && getAssetSection(slotKey) === key)
+            || (key === 'live-preview' && livePreviewUnsaved));
+        // Tabs as the keyboard knows them: the active one in the tab order, the arrow keys, Home and
+        // End move between them, and the panel below is theirs.
+        const tabId = (key) => 'pblsh-assets-tab-' + key;
+        const panelId = (key) => 'pblsh-assets-section-' + key;
+        const onTabKeyDown = (e) => {
+            const keys = sections.map((candidate) => candidate.key);
+            const index = keys.indexOf(activeSection);
+            const next = { ArrowRight: keys[(index + 1) % keys.length], ArrowLeft: keys[(index - 1 + keys.length) % keys.length], Home: keys[0], End: keys[keys.length - 1] }[e.key];
+            if (!next) return;
+            e.preventDefault();
+            onSectionChange(next);
+            const tab = e.currentTarget.querySelector('#' + tabId(next));
+            if (tab) tab.focus();
+        };
+        const tabs = createElement('div', { className: 'pblsh--assets-subtabs__tabs', role: 'tablist', onKeyDown: onTabKeyDown },
+            sections.map((candidate) => createElement('button', {
+                key: candidate.key,
+                type: 'button',
+                role: 'tab',
+                id: tabId(candidate.key),
+                'aria-selected': candidate.key === activeSection,
+                'aria-controls': panelId(candidate.key),
+                tabIndex: candidate.key === activeSection ? 0 : -1,
+                className: 'pblsh--assets-subtabs__tab' + (candidate.key === activeSection ? ' pblsh--assets-subtabs__tab--active' : ''),
+                onClick: () => onSectionChange(candidate.key),
+            },
+                candidate.label,
+                pendingIn(candidate.key) && createElement('span', { className: 'pblsh--assets-subtabs__pending', 'aria-hidden': true }),
+                pendingIn(candidate.key) && createElement('span', { className: 'screen-reader-text' }, ' (' + __('changes not on wordpress.org yet', 'peak-publisher') + ')'),
+            )),
+        );
+        // The row: the tabs, and at its right end the working copy while there is one. Its
+        // sentinel stands before it, where the row rests.
+        const row = createElement(Fragment, null,
+            createElement('div', { ref: rowSentinelRef, className: 'pblsh--assets-subtabs__sentinel' }),
+            createElement('div', { className: ['pblsh--assets-subtabs', hasWorkingCopy ? 'pblsh--assets-subtabs--working-copy' : '', rowStuck ? 'pblsh--assets-subtabs--stuck' : ''].filter(Boolean).join(' ') },
+                tabs,
+                renderWorkingCopy(),
+            ),
+        );
+        // Files of assets/ that are no slot here stay as they are on wordpress.org — said under the images.
+        const otherFiles = wporg && wporg.other_files > 0 && createElement('div', { className: 'pblsh--assets-footer' },
+            getOtherFilesText(wporg.other_files), ' · ',
+            createElement('a', {
+                href: 'https://plugins.svn.wordpress.org/' + encodeURIComponent(pluginData.slug) + '/assets/',
+                target: '_blank',
+                rel: 'noreferrer',
+            }, __('Open on wordpress.org', 'peak-publisher')),
+        );
+
         return [
             ...renderNotices(),
             createElement('div', { key: 'card', className: 'pblsh--card pblsh--assets-card' },
-                renderBar(),
-                // Icons group
-                createElement('div', { className: 'pblsh--assets-group' },
-                    createElement('div', { className: 'pblsh--assets-group__label' }, __('Icons', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                        renderAssetBox('icon_svg', view && view.icon_svg),
-                        renderAssetBox('icon_256', view && view.icon_256),
-                        renderAssetBox('icon_128', view && view.icon_128),
-                    ),
-                ),
-                // Banners group
-                createElement('div', { className: 'pblsh--assets-group' },
-                    createElement('div', { className: 'pblsh--assets-group__label' }, __('Banners', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                        renderAssetBox('banner_svg', view && view.banner_svg),
-                        renderAssetBox('banner_hd', view && view.banner_hd),
-                        renderAssetBox('banner_sd', view && view.banner_sd),
-                    ),
-                ),
-                // Screenshots group (slot-based)
-                createElement('div', { className: 'pblsh--assets-group' },
-                    createElement('div', { className: 'pblsh--assets-group__label' }, __('Screenshots', 'peak-publisher')),
-                    hasCaptions
-                        ? createElement('div', { className: 'pblsh--assets-group__hints' },
-                            createElement('div', null, getCaptionsSourceText(pluginData, assets.captions_source)),
-                            createElement('div', null, getPositionsHint(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
-                        )
-                        : screenshots.length > 0 && createElement('div', { className: 'pblsh--assets-group__hints' },
-                            createElement('div', null, getNoCaptionsText(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
+                row,
+                createElement('div', { role: 'tabpanel', id: panelId(activeSection), 'aria-labelledby': tabId(activeSection) },
+                    activeSection === 'icons' && createElement(Fragment, null,
+                        // Icons group
+                        createElement('div', { className: 'pblsh--assets-group' },
+                            createElement('div', { className: 'pblsh--assets-group__label' }, __('Icons', 'peak-publisher')),
+                            createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                                renderAssetBox('icon_svg', view && view.icon_svg),
+                                renderAssetBox('icon_256', view && view.icon_256),
+                                renderAssetBox('icon_128', view && view.icon_128),
+                            ),
                         ),
-                    createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                        slots.map(({ n, screenshot, caption }) =>
-                            renderAssetBox('screenshot', screenshot, n, caption)
+                        // Banners group
+                        createElement('div', { className: 'pblsh--assets-group' },
+                            createElement('div', { className: 'pblsh--assets-group__label' }, __('Banners', 'peak-publisher')),
+                            createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                                renderAssetBox('banner_svg', view && view.banner_svg),
+                                renderAssetBox('banner_hd', view && view.banner_hd),
+                                renderAssetBox('banner_sd', view && view.banner_sd),
+                            ),
                         ),
-                        !readOnly && newScreenshotBox,
+                        otherFiles,
                     ),
-                ),
-                // Files of assets/ that are no slot here stay as they are on wordpress.org.
-                wporg && wporg.other_files > 0 && createElement('div', { className: 'pblsh--assets-footer' },
-                    getOtherFilesText(wporg.other_files), ' · ',
-                    createElement('a', {
-                        href: 'https://plugins.svn.wordpress.org/' + encodeURIComponent(pluginData.slug) + '/assets/',
-                        target: '_blank',
-                        rel: 'noreferrer',
-                    }, __('Open on wordpress.org', 'peak-publisher')),
+                    activeSection === 'screenshots' && createElement(Fragment, null,
+                        // Screenshots group (slot-based)
+                        createElement('div', { className: 'pblsh--assets-group' },
+                            hasCaptions
+                                ? createElement('div', { className: 'pblsh--assets-group__hints' },
+                                    createElement('div', null, getCaptionsSourceText(pluginData, assets.captions_source)),
+                                    createElement('div', null, getPositionsHint(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
+                                )
+                                : screenshots.length > 0 && createElement('div', { className: 'pblsh--assets-group__hints' },
+                                    createElement('div', null, getNoCaptionsText(), ' · ', createElement(TipLink, { tipKey: 'screenshotCaptions' })),
+                                ),
+                            createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                                slots.map(({ n, screenshot, caption }) =>
+                                    renderAssetBox('screenshot', screenshot, n, caption)
+                                ),
+                                !readOnly && newScreenshotBox,
+                            ),
+                        ),
+                        otherFiles,
+                    ),
+                    activeSection === 'live-preview' && assets && assets.blueprint && createElement(LivePreview, {
+                        pluginData,
+                        assets,
+                        readOnly,
+                        showingWporgState,
+                        applyAssets,
+                        reportError,
+                        onResolve: handleResolve,
+                    }),
                 ),
             ),
         ];
@@ -582,44 +660,51 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     ].filter(Boolean);
 
     // wordpress.org: the working copy's changes with commit, discard and the switch to
-    // wordpress.org's state; while committing, only that. Nothing to commit, no bar — how
-    // fresh the mirror is says the editor's status line for the whole plugin.
-    // The bar sticks below the admin bar. Whether it is held there right now (and shows the
-    // edge it has there, pblsh--assets-bar--stuck) tells a sentinel standing where the bar
-    // rests: once the sentinel has scrolled above the bar's sticky line, the bar is stuck.
-    const hasBar = !!wporg && (busy === 'committing' || wporg.pending_count > 0);
-    const [barStuck, setBarStuck] = useState(false);
-    const barSentinelRef = useRef(null);
+    // wordpress.org's state, in the right half of the sub-tab row — the tabs give the row its
+    // height, so nothing beneath moves when changes come or go; while committing, only that.
+    // Nothing to commit, nothing there — how fresh the mirror is says the editor's status line
+    // for the whole plugin. The row sticks below the admin bar. Whether it is held there right
+    // now (and shows the edge it has there, pblsh--assets-subtabs--stuck) tells a sentinel
+    // standing where the row rests: once the sentinel has scrolled above the row's sticky
+    // line, the row is stuck.
+    const hasWorkingCopy = !!wporg && (busy === 'committing' || wporg.pending_count > 0);
+    const [rowStuck, setRowStuck] = useState(false);
+    const rowSentinelRef = useRef(null);
+    const rowShown = !(assetsLoading && !assets);
     useEffect(() => {
-        const sentinel = barSentinelRef.current;
+        const sentinel = rowSentinelRef.current;
         if (!sentinel || typeof IntersectionObserver === 'undefined') return undefined;
         const stickyTop = parseFloat(getComputedStyle(sentinel.nextElementSibling).top) || 0;
         const observer = new IntersectionObserver(([entry]) => {
-            setBarStuck(!entry.isIntersecting && entry.boundingClientRect.top < stickyTop);
+            setRowStuck(!entry.isIntersecting && entry.boundingClientRect.top < stickyTop);
         }, { rootMargin: -stickyTop + 'px 0px 0px 0px' });
         observer.observe(sentinel);
         return () => observer.disconnect();
-    }, [hasBar]);
-    const barClass = (...classes) => ['pblsh--assets-bar', ...classes, barStuck ? 'pblsh--assets-bar--stuck' : ''].filter(Boolean).join(' ');
-    const renderBar = () => {
-        if (!hasBar) return null;
-        const sentinel = createElement('div', { ref: barSentinelRef, className: 'pblsh--assets-bar__sentinel' });
+    }, [rowShown]);
+    // One message for the working copy, the most pressing first: the commit under way, the
+    // conflicts, the Live Preview's draft not saved yet, the count. The details stand where they
+    // happen — the red band, the save line, the dot on the section.
+    const renderWorkingCopy = () => {
+        if (!hasWorkingCopy) return null;
         if (busy === 'committing') {
-            return createElement(Fragment, null, sentinel, createElement('div', { className: barClass() },
-                createElement('div', { className: 'pblsh--assets-bar__status pblsh--assets-bar__status--busy' }, createElement(Spinner), getCommittingText()),
-            ));
+            return createElement('div', { className: 'pblsh--assets-subtabs__working-copy' },
+                createElement('div', { className: 'pblsh--assets-subtabs__working-copy-text' }, createElement(Spinner), getCommittingText()),
+            );
         }
-        return createElement(Fragment, null, sentinel, createElement('div', { className: barClass('pblsh--assets-bar--pending') },
-            createElement('div', { className: 'pblsh--assets-bar__status' },
-                createElement('strong', null, getPendingBarText(wporg.pending_count)),
-                wporg.conflict_count > 0 && createElement('div', { className: 'pblsh--assets-bar__conflicts' }, getConflictBarText(wporg.conflict_count)),
-            ),
-            createElement('div', { className: 'pblsh--assets-bar__actions' },
+        const message = wporg.conflict_count > 0
+            ? createElement('strong', { className: 'pblsh--assets-subtabs__working-copy-conflicts' }, getConflictsText(wporg.conflict_count))
+            : livePreviewUnsaved
+                ? createElement(Fragment, null, Pblsh.LivePreviewUtils.getUnsavedWorkingCopyText(),
+                    section !== 'live-preview' && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => onSectionChange('live-preview') }, __('Open Live Preview', 'peak-publisher'))))
+                : createElement('strong', null, getPendingCountText(wporg.pending_count));
+        return createElement('div', { className: 'pblsh--assets-subtabs__working-copy' },
+            createElement('div', { className: 'pblsh--assets-subtabs__working-copy-text' }, message),
+            createElement('div', { className: 'pblsh--assets-subtabs__working-copy-actions' },
                 createElement(Button, { isLink: true, disabled: busy !== null, onClick: () => setShowWporgState(!showingWporgState) }, getShowWporgStateText(showingWporgState)),
-                createElement(Button, { isSecondary: true, disabled: busy !== null, onClick: handleDiscard }, __('Discard', 'peak-publisher')),
-                createElement(Button, { isPrimary: true, disabled: !canCommit || wporg.conflict_count > 0 || busy !== null, onClick: handleCommit }, __('Commit to wordpress.org', 'peak-publisher')),
+                createElement(Button, { isSecondary: true, disabled: busy !== null || livePreviewSaving, onClick: handleDiscard }, __('Discard', 'peak-publisher')),
+                createElement(Button, { isPrimary: true, disabled: !canCommit || wporg.conflict_count > 0 || busy !== null || livePreviewUnsaved, onClick: handleCommit }, __('Commit to wordpress.org', 'peak-publisher')),
             ),
-        ));
+        );
     };
 
     return renderAssetsSection();

@@ -254,4 +254,13 @@ lodash.set(window, 'Pblsh.API', {
             body: { slot, keep },
         });
     },
+    // The Live Preview in the working copy: { change: create | contents | landing_page | theme |
+    // dependencies | delete, value?, contents?, expected? } — the answer is the fresh view.
+    changePluginBlueprint: async (pluginId, change) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/blueprint', { method: 'POST', body: change });
+    },
+    // Whether the Live Preview is public, asked on wordpress.org now: { preview: { public, checked_at }, assets } — the fresh view, like every write's answer.
+    checkLivePreview: async (pluginId) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/wporg/live-preview-check', { method: 'POST' });
+    },
 });

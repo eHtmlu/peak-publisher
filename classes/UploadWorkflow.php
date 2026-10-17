@@ -1168,7 +1168,15 @@ class UploadWorkflow {
             'related_releases' => $related_releases,
             'current_release' => $version !== '' ? $this->build_current_release_facts($marker, $related_releases, $version, true, $deploy_mode) : null,
             'tested_up_to' => $this->tested_up_to_facts($data, $related_releases, $marker),
+            // The upload's Requires Plugins the Live Preview on wordpress.org does not install —
+            // added in the deploy's commit when the release becomes current (deploy_directory()).
+            'live_preview_missing' => live_preview_missing(get_wporg_assets_state((int) $marker->ID), (string) $marker->post_name, $this->upload_requires_plugins($data)),
         ];
+    }
+
+    /** The uploaded release's Requires Plugins as wordpress.org's slugs. */
+    private function upload_requires_plugins(array $data): array {
+        return requires_plugins_slugs((string) ($data['plugin_data']['RequiresPlugins'] ?? ''));
     }
 
     /**
@@ -1354,6 +1362,7 @@ class UploadWorkflow {
                     'stable_tag_written' => $deploy['stable_tag_written'],
                     'pointer_changed' => $deploy['pointer_changed'],
                 ],
+                'live_preview_added' => $deploy['live_preview_added'],
             ];
 
             // The cache learns the written trunk readme first (write-through), then the mirror post
@@ -1378,7 +1387,7 @@ class UploadWorkflow {
                 'relation' => (string) $target['current_release']['relation'],
                 'expected' => $target['current_release']['pointer'],
                 'readme_file_name' => (string) ($data['plugin_readme_txt']['file_name'] ?? ''),
-            ], $write_through, $report);
+            ], $this->upload_requires_plugins($data), $write_through, $report);
         } catch (WporgSvnException $e) {
             return $this->upload_error($e->get_error_code(), $e->getMessage());
         } catch (\Throwable $e) {

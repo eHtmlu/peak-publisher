@@ -43,7 +43,12 @@ final class AssetListingTest extends TestCase {
         ]);
 
         self::assertSame([], $listing['slots'], 'banner.svg is no slot while the filter is off; oversize and empty files are invisible to wordpress.org');
-        self::assertSame(9, $listing['other_files']);
+        self::assertSame(8, $listing['other_files'], 'blueprints/ is the Live Preview\'s, not an other file');
+    }
+
+    public function test_only_the_blueprints_directory_itself_is_no_other_file(): void {
+        self::assertSame(0, classify_asset_listing([ self::entry('blueprints', type: 'dir') ])['other_files']);
+        self::assertSame(3, classify_asset_listing([ self::entry('Blueprints', type: 'dir'), self::entry('blueprints'), self::entry('old', type: 'dir') ])['other_files'], 'wordpress.org reads blueprints/ by its exact name');
     }
 
     public function test_screenshot_numbers_are_normalized(): void {

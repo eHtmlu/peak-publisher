@@ -186,7 +186,8 @@ function select_shown_asset(array $candidates): ?array {
  * or RTL suffix and a size within wordpress.org's limit; one member per slot is the winner
  * (select_shown_asset()), the others are variants that go with the next replace or delete.
  * Everything else — localized and RTL variants, unused sizes, SVG banners while the filter is
- * off, empty and oversize files, foreign files and directories — is counted, never managed.
+ * off, empty and oversize files, foreign files and directories — is counted, never managed;
+ * the directory blueprints/ is the Live Preview's and no other file.
  *
  * @param array<int, array{name:string, type:string, size:int|null, revision:int}> $entries in listing order (bytewise by name)
  */
@@ -195,6 +196,11 @@ function classify_asset_listing(array $entries, ?array $slots = null): array {
     $candidates = [];
     $other = 0;
     foreach ($entries as $entry) {
+        // assets/blueprints/ holds the Live Preview of a wordpress.org plugin, managed there
+        // (includes/wporg_blueprint.php) — wordpress.org reads it by this exact name.
+        if (($entry['type'] ?? 'file') === 'dir' && $entry['name'] === 'blueprints') {
+            continue;
+        }
         $class = ($entry['type'] ?? 'file') === 'file' ? classify_asset_filename((string) $entry['name']) : null;
         $slot_id = $class === null ? null : asset_slot_id($class, $slots);
         $size = (int) ($entry['size'] ?? 0);

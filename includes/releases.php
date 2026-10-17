@@ -273,7 +273,7 @@ function release_tested_up_to(\WP_Post $release): array {
  * @param array<string, string> $entries ZIP entry name => new content.
  * @return true|\WP_Error release_zip_write_failed (500).
  */
-function replace_release_zip_entries(string $zip_path, array $entries): true|\WP_Error {
+function replace_release_zip_entries(string $zip_path, array $entries): bool|\WP_Error {
     $failed = static fn(): \WP_Error => new \WP_Error('release_zip_write_failed', __('The release ZIP could not be written. The stored file is unchanged.', 'peak-publisher'), [ 'status' => 500 ]);
     $copy = $zip_path . '.pblsh-edit';
     if (!@copy($zip_path, $copy)) {

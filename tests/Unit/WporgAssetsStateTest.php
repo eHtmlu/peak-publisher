@@ -18,10 +18,18 @@ final class WporgAssetsStateTest extends TestCase {
 
     public function test_the_state_reads_back_with_defaults_and_drops_foreign_keys(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
-        self::assertSame([ 'revision' => null, 'other_files' => 0, 'color_source' => null, 'pending' => [] ], get_wporg_assets_state($marker->ID));
+        $no_blueprints = [ 'revision' => null, 'blueprint_files' => 0, 'other_files' => 0, 'file' => null ];
+        self::assertSame([ 'revision' => null, 'other_files' => 0, 'color_source' => null, 'blueprints' => $no_blueprints, 'pending' => [] ], get_wporg_assets_state($marker->ID));
 
-        update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 7, 'junk' => 1, 'pending' => 'garbage' ]);
-        self::assertSame([ 'revision' => 7, 'other_files' => 0, 'color_source' => null, 'pending' => [] ], get_wporg_assets_state($marker->ID));
+        update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 7, 'junk' => 1, 'pending' => 'garbage', 'blueprints' => [ 'revision' => 'x' ] ]);
+        self::assertSame([ 'revision' => 7, 'other_files' => 0, 'color_source' => null, 'blueprints' => $no_blueprints, 'pending' => [] ], get_wporg_assets_state($marker->ID));
+
+        $mirrored = [ 'revision' => 9, 'blueprint_files' => 2, 'other_files' => 1, 'file' => [ 'revision' => 8, 'filesize' => 2, 'contents' => '{}' ] ];
+        update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 9, 'blueprints' => $mirrored ]);
+        self::assertSame($mirrored, get_wporg_assets_state($marker->ID)['blueprints']);
+        $oversize = [ ...$mirrored, 'file' => [ 'revision' => 8, 'filesize' => 200000, 'contents' => null ] ];
+        update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 9, 'blueprints' => $oversize ]);
+        self::assertSame($oversize, get_wporg_assets_state($marker->ID)['blueprints'], 'a file over the limit is mirrored without its contents');
 
         update_wporg_assets_state($marker->ID, [ ...get_wporg_assets_state($marker->ID), 'other_files' => 3, 'junk' => 2 ]);
         self::assertSame(3, get_wporg_assets_state($marker->ID)['other_files']);
@@ -37,6 +45,7 @@ final class WporgAssetsStateTest extends TestCase {
             'icon_128' => [ 'action' => 'put', 'file' => 'icon-128x128.png', 'base' => null, ...$content, ...$actor ],
             'screenshot-2' => [ 'action' => 'copy', 'from' => [ 'slot' => 'screenshot-1', ...$base ], 'base' => null, ...$content, ...$actor ],
             'screenshot-1' => [ 'action' => 'delete', 'base' => $base, ...$actor ],
+            'blueprint' => [ 'action' => 'put', 'contents' => '{}', 'base' => null, ...$actor ],
         ];
         $foreign = [
             'banner_sd' => [ 'file' => 'banner-772x250.png', 'base' => null, ...$content, ...$actor ],                   // no action
@@ -47,9 +56,20 @@ final class WporgAssetsStateTest extends TestCase {
             'screenshot' => [ 'action' => 'put', 'file' => 'screenshot.png', 'base' => null, ...$content, ...$actor ],    // no slot of the tab
             'icon_256' => 'garbage',
         ];
+        $foreign_blueprints = [
+            [ 'action' => 'put', 'base' => null, ...$actor ],                                                             // a put without its contents
+            [ 'action' => 'delete', 'base' => null, ...$actor ],                                                          // a delete of nothing
+            [ 'action' => 'copy', 'contents' => '{}', 'base' => null, ...$actor ],                                        // no action of a blueprint
+            [ 'action' => 'put', 'contents' => '{}', 'base' => [ 'filename' => 'blueprint.json' ], ...$actor ],          // a base that is no mirror state
+        ];
         update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 7, 'pending' => $valid + $foreign ]);
 
         self::assertSame($valid, get_wporg_assets_state($marker->ID)['pending']);
+
+        foreach ($foreign_blueprints as $entry) {
+            update_post_meta($marker->ID, PBLSH_WPORG_ASSETS_META, [ 'revision' => 7, 'pending' => [ 'blueprint' => $entry ] ]);
+            self::assertSame([], get_wporg_assets_state($marker->ID)['pending'], json_encode($entry));
+        }
     }
 
     public function test_the_pull_fetches_changed_winners_and_removes_vanished_slots(): void {

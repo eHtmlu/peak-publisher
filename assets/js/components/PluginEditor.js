@@ -1,5 +1,5 @@
 // PluginEditor Component (simplified overview + releases list)
-lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, refreshWporg, onTogglePluginStatus, pendingPluginStatus, initialTab, onTabChange }) => {
+lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin, refreshWporg, onTogglePluginStatus, pendingPluginStatus, initialTab, onTabChange, initialSection, onSectionChange }) => {
     const { __, _n, sprintf } = wp.i18n;
     const { createElement, createInterpolateElement, useState, useEffect, useRef } = wp.element;
     const { useSelect } = wp.data;
@@ -55,10 +55,29 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     const validTabs = ['releases', 'assets'];
     const [activeTab, setActiveTab] = useState(initialTab && validTabs.includes(initialTab) ? initialTab : 'releases');
 
+    // The assets tab's section (Pblsh.AssetsUtils.getAssetSections()) — held here, so a notice
+    // above the tabs can lead into one. Which sections the plugin has (self-hosted: no Live
+    // Preview) is known once the plugin is, and the editor mounts before it is loaded: a deep
+    // link to a section this plugin has not falls back to the first at that moment, and the URL
+    // follows.
+    const [assetsSection, setAssetsSection] = useState(initialSection || 'icons');
     const switchToTab = (tab) => {
         if (!validTabs.includes(tab)) tab = 'releases';
         setActiveTab(tab);
         if (typeof onTabChange === 'function') onTabChange(tab);
+        if (tab === 'assets' && typeof onSectionChange === 'function') onSectionChange(assetsSection);
+    };
+    const switchToSection = (section) => {
+        setAssetsSection(section);
+        if (typeof onSectionChange === 'function') onSectionChange(section);
+    };
+    const channel = pluginData ? pluginData.hosting_type : null;
+    useEffect(() => {
+        if (channel && !Pblsh.AssetsUtils.getAssetSections(isWporg).some((candidate) => candidate.key === assetsSection)) switchToSection('icons');
+    }, [channel]);
+    const openLivePreview = () => {
+        switchToTab('assets');
+        switchToSection('live-preview');
     };
 
     // Prefer releases from store (keeps UI in sync on toggles), fallback to pluginData.releases
@@ -208,13 +227,15 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
     // plugin reloaded — never overwritten.
     const makeCurrent = async (rel, relation) => {
         if (!pluginData || flippingReleaseId !== null) return;
-        if (!confirm(getFlipConfirmText(isWporg, rel.version, relation, isWporg ? pluginData.wporg_stats.closed : null))) return;
+        // A flip brings the release's Requires Plugins into the Live Preview, in the same commit.
+        const carry = isWporg && rel.live_preview_missing && rel.live_preview_missing.length > 0 ? '\n' + Pblsh.LivePreviewUtils.getFlipCarryText(rel.live_preview_missing) : '';
+        if (!confirm(getFlipConfirmText(isWporg, rel.version, relation, isWporg ? pluginData.wporg_stats.closed : null) + carry)) return;
         setFlipOutcome(null);
         setFlippingReleaseId(rel.id);
         try {
             const response = await Pblsh.API.setCurrentRelease(pluginData.id, rel.version, pluginData.pointer);
             if (typeof refreshPlugin === 'function') await refreshPlugin();
-            setFlipOutcome({ version: response.to, revision: response.revision });
+            setFlipOutcome({ version: response.to, revision: response.revision, added: response.live_preview_added || [] });
         } catch (e) {
             // apiFetch rejects with the REST error payload: message leads, the code follows.
             alert((e?.message || __('Could not change the current release.', 'peak-publisher'))
@@ -383,8 +404,12 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                     sprintf(__('trunk carries version %s and was left unchanged.', 'peak-publisher'), testedOutcome.trunk.version)),
             ),
             // The self-hosted sentence has no <revision /> slot: the link stays unrendered there.
+            // A wordpress.org flip that brought Requires Plugins into the Live Preview says so.
             flipOutcome && createElement(NoticeBox, { key: 'flip', variant: 'info', className: 'pblsh--tab-panel__notice' },
-                createElement('p', null, createInterpolateElement(getFlipSuccessText(isWporg, flipOutcome.version), { revision: createElement(WporgRevisionLink, { revision: flipOutcome.revision }) })),
+                createElement('p', null,
+                    createInterpolateElement(getFlipSuccessText(isWporg, flipOutcome.version), { revision: createElement(WporgRevisionLink, { revision: flipOutcome.revision }) }),
+                    flipOutcome.added.length > 0 ? ' ' + Pblsh.LivePreviewUtils.getFlipCarriedText(flipOutcome.added) : null,
+                ),
             ),
             // Closed on wordpress.org — the most important fact of the daily stats fetch:
             // nothing is distributed, whatever the pointer says. Red, above everything else,
@@ -616,7 +641,7 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             (Number(pluginData?.count_of_releases) || 0).toLocaleString(),
         )),
         (() => {
-            const pending = isWporg && Number(pluginData?.assets_pending) > 0 ? Pblsh.AssetsUtils.getPendingBarText(Number(pluginData.assets_pending)) : null;
+            const pending = isWporg && Number(pluginData?.assets_pending) > 0 ? Pblsh.AssetsUtils.getPendingChangesText(Number(pluginData.assets_pending)) : null;
             const tab = createElement('button', {
                 type: 'button',
                 className: 'pblsh--tab-nav__tab' + (activeTab === 'assets' ? ' pblsh--tab-nav__tab--active' : ''),
@@ -632,6 +657,8 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         isWporg && pluginData && createElement(Pblsh.Components.ImportForecast, { forecast: pluginData.wporg_import, slug: pluginData.slug }),
     );
 
+    const livePreviewFails = isWporg && !!(pluginData && pluginData.live_preview && pluginData.live_preview.missing.length > 0);
+
     return createElement('div', { className: 'pblsh--editor' },
         createElement('div', { className: 'pblsh--editor__content' },
             createElement('div', { className: 'pblsh--main' },
@@ -646,8 +673,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 wporgChanges && createElement(NoticeBox, { variant: 'info', className: 'pblsh--tab-panel__notice' },
                                     createElement('p', null, getChangesText(wporgChanges)),
                                 ),
+                                // What visitors of the plugin page get fails: plugin-wide, so above either tab.
+                                livePreviewFails && createElement(NoticeBox, { variant: 'error', className: 'pblsh--tab-panel__notice' },
+                                    createElement('p', null, Pblsh.LivePreviewUtils.getFailsText(pluginData.live_preview), ' ',
+                                        !(activeTab === 'assets' && assetsSection === 'live-preview') && createElement(Button, { isLink: true, onClick: openLivePreview }, __('Open Live Preview', 'peak-publisher'))),
+                                ),
                                 activeTab === 'releases' && renderReleasesTable(),
-                                activeTab === 'assets' && createElement(Pblsh.Components.PluginAssets, { pluginData, refreshPlugin, refreshFromWporg, refreshingWporg }),
+                                activeTab === 'assets' && createElement(Pblsh.Components.PluginAssets, { pluginData, refreshPlugin, refreshFromWporg, refreshingWporg, section: assetsSection, onSectionChange: switchToSection }),
                             ),
                         ),
                     ),

@@ -53,6 +53,7 @@ function wporg_directory_defaults(): array {
         'checked_at' => 0,           // the last completed check
         'check_error' => null,       // { code, message, at }, null after a completed check
         'downloads_fetched_at' => 0, // the last fetch of the download history, claimed before the request
+        'preview' => null,           // { public, checked_at } — the last check of the Live Preview's public switch, null = never
     ];
 }
 
@@ -64,7 +65,56 @@ function get_wporg_directory(int $plugin_id): array {
     $stored = get_post_meta($plugin_id, PBLSH_WPORG_DIRECTORY_META, true);
     $directory = is_array($stored) ? array_merge($defaults, array_intersect_key($stored, $defaults)) : $defaults;
     $directory['stamp'] = wporg_directory_stored_stamp($directory['stamp']);
+    $preview = $directory['preview'];
+    $directory['preview'] = is_array($preview) && is_bool($preview['public'] ?? null) && is_int($preview['checked_at'] ?? null)
+        ? [ 'public' => $preview['public'], 'checked_at' => $preview['checked_at'] ]
+        : null;
     return $directory;
+}
+
+
+/**
+ * Whether the Live Preview is public, from wordpress.org's answer to the plugin page's
+ * `?preview=1` without following it: a redirect to Playground when visitors get the preview
+ * (the switch is on and a blueprint is there), the page itself when they do not. Null for any
+ * other answer. The redirect is computed on every request — the info API's preview_link lags
+ * the switch by up to a day.
+ */
+function wporg_live_preview_public_from_response(int $status, string $location): ?bool {
+    if ($status === 200) {
+        return false;
+    }
+    $host = parse_url($location, PHP_URL_HOST);
+    return in_array($status, [ 301, 302, 303, 307 ], true) && $host === 'playground.wordpress.net' ? true : null;
+}
+
+
+/** Records a check of the Live Preview's public switch. */
+function record_wporg_live_preview_check(int $plugin_id, bool $public, int $at): void {
+    update_post_meta($plugin_id, PBLSH_WPORG_DIRECTORY_META, [ ...get_wporg_directory($plugin_id), 'preview' => [ 'public' => $public, 'checked_at' => $at ] ]);
+}
+
+
+/**
+ * Checks whether a plugin's Live Preview is public — one HEAD against its page on wordpress.org
+ * (the website, not SVN), on a user's look at the Live Preview — and records the answer.
+ *
+ * @return array{public:bool, checked_at:int}
+ * @throws WporgSvnException live_preview_check_failed when wordpress.org gives no determinate answer
+ */
+function check_wporg_live_preview(\WP_Post $marker): array {
+    $response = wp_remote_head('https://wordpress.org/plugins/' . rawurlencode($marker->post_name) . '/?preview=1', [
+        'timeout' => 10,
+        'redirection' => 0,
+        'user-agent' => wporg_user_agent(),
+    ]);
+    $public = is_wp_error($response) ? null : wporg_live_preview_public_from_response((int) wp_remote_retrieve_response_code($response), (string) wp_remote_retrieve_header($response, 'location'));
+    if ($public === null) {
+        throw new WporgSvnException('live_preview_check_failed', __('wordpress.org could not be asked whether the Live Preview is public. Try again.', 'peak-publisher'), 502);
+    }
+    $at = time();
+    record_wporg_live_preview_check((int) $marker->ID, $public, $at);
+    return [ 'public' => $public, 'checked_at' => $at ];
 }
 
 
@@ -171,7 +221,7 @@ function refresh_wporg_directory(?array $plugin_ids = null, bool $force = false)
 
     raise_wporg_time_limit();
     // The figures, and the stamp's fields: last_updated and the asset URLs with their revisions.
-    $fields = wporg_api_fields([ 'active_installs', 'downloaded', 'rating', 'last_updated', 'icons', 'banners', 'screenshots' ]);
+    $fields = wporg_api_fields([ 'active_installs', 'downloaded', 'rating', 'last_updated', 'icons', 'banners', 'screenshots', 'blueprints' ]);
     $open = [];
     // One client call per chunk, so a transport failure marks only the slugs of the
     // chunk it hit — the chunks before it are already written.

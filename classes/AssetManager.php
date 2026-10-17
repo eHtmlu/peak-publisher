@@ -40,7 +40,8 @@ class AssetManager {
      * number as they will be — a wordpress.org plugin's working copy applied over its mirror —
      * and the captions from the readme of the release sites receive (get_screenshot_captions()).
      * A wordpress.org plugin adds where its mirror stands and, per slot, what the working copy
-     * changes there and what wordpress.org has (wporg_view()).
+     * changes there and what wordpress.org has (wporg_view()), and its Live Preview
+     * (blueprint_view()).
      */
     public function describe(\WP_Post $plugin): array {
         $id = (int) $plugin->ID;
@@ -58,7 +59,101 @@ class AssetManager {
         $out['screenshot_captions'] = (object) $captions['captions'];
         $out['captions_source'] = $captions['source'];
         $out['wporg'] = $state === null ? null : $this->wporg_view($plugin, $state, $manifest);
+        $out['blueprint'] = $state === null ? null : $this->blueprint_view($plugin, $state);
         return $out;
+    }
+
+    /**
+     * The Live Preview as the tab shows it, the working copy applied: the blueprint in effect
+     * (contents null: none, or wordpress.org's is over the limit) with the hash a JSON edit
+     * builds on, the fields (null when there is none to write safely — blueprint_fields_of()), the warnings, what the current
+     * release requires and which of it is not installed before the plugin, the test link (the
+     * blueprint as the plugin page will serve it) or why there is none, wordpress.org's file —
+     * whether its import has read it, why it ignores it, its fields and what it lacks —, the
+     * counts of assets/blueprints/, and the last check of the public preview.
+     */
+    private function blueprint_view(\WP_Post $plugin, array $state): array {
+        $own = (string) $plugin->post_name;
+        $requirements = live_preview_requirements($plugin);
+        $required = $requirements['slugs'] ?? [];
+        $contents = effective_blueprint_contents($state);
+        $served = $contents === null ? null : normalize_blueprint_like_wporg($contents, $own);
+        $file = $state['blueprints']['file'];
+        $directory = get_wporg_directory((int) $plugin->ID);
+        $blocked = match (true) {
+            $contents === null => null,
+            $served === null => 'invalid',
+            in_array($directory['state'], [ 'closed', 'not_found' ], true) => 'not_downloadable',
+            default => null,
+        };
+        return [
+            'contents' => $contents,
+            'hash' => md5($contents ?? ''),
+            'fields' => blueprint_fields_of($contents, $own, $required),
+            'warnings' => blueprint_warnings($contents, $state['blueprints']['blueprint_files']),
+            'required' => $requirements,
+            'missing' => $contents === null ? [] : blueprint_missing_dependencies($contents, $own, $required),
+            'test' => [ 'url' => $served === null || $blocked !== null ? null : blueprint_playground_url(encode_blueprint_like_wporg($served)), 'blocked' => $blocked ],
+            // wordpress.org's file as the tab shows it alone: whether its import has read it (the
+            // public switch exists there only then), its fields and what it lacks.
+            'on_wporg' => $file === null ? null : [
+                ...$file,
+                'ignored' => blueprint_ignored_reason($file),
+                'problem' => $this->blueprint_problem($file),
+                'imported' => blueprint_imported($directory['stamp'], $file),
+                'fields' => blueprint_fields_of($file['contents'], $own, $required),
+                'missing' => live_preview_missing($state, $own, $required),
+            ],
+            'blueprint_files' => $state['blueprints']['blueprint_files'],
+            'other_files' => $state['blueprints']['other_files'],
+            'preview' => $directory['preview'],
+        ];
+    }
+
+    /** What makes wordpress.org's blueprint.json unreadable to its import, in the words the editor's save would use (validate_blueprint_contents()); null when it reads it or did not get it (too large). */
+    private function blueprint_problem(array $file): ?string {
+        $valid = $file['contents'] === null ? true : validate_blueprint_contents($file['contents']);
+        return is_wp_error($valid) ? $valid->get_error_message() : null;
+    }
+
+    /**
+     * A change of a wordpress.org plugin's Live Preview: the request's values checked at the
+     * boundary (the kind, the landing page's form, the theme's existence on wordpress.org), then
+     * decided under the lock from the blueprint in effect then (decide_blueprint_change(), through
+     * WporgAssetSync::change_blueprint()).
+     *
+     * @param array{change?:string, value?:string, contents?:string, expected?:string} $params
+     * @return array{assets: array}|\WP_Error
+     */
+    public function change_blueprint(\WP_Post $plugin, array $params): array|\WP_Error {
+        $kind = (string) ($params['change'] ?? '');
+        $value = trim((string) ($params['value'] ?? ''));
+        $own = (string) $plugin->post_name;
+        $error = static fn(string $code, string $message, int $status): \WP_Error => new \WP_Error($code, $message, [ 'status' => $status ]);
+
+        if (!in_array($kind, [ 'create', 'contents', 'landing_page', 'theme', 'dependencies', 'delete' ], true)) {
+            return $error('invalid_request', __('Unknown change of the Live Preview.', 'peak-publisher'), 400);
+        }
+        if ($kind === 'landing_page' && !str_starts_with($value, '/')) {
+            return $error('blueprint_invalid_landing_page', __('The landing page is a path on the site and starts with /, for example /wp-admin/admin.php?page=my-plugin.', 'peak-publisher'), 400);
+        }
+        if ($kind === 'theme' && $value !== '') {
+            if (!is_wordpress_org_slug($value)) {
+                return $error('blueprint_theme_not_found', __('A theme slug is written in lowercase letters, digits and hyphens, as in its address on wordpress.org/themes/.', 'peak-publisher'), 404);
+            }
+            try {
+                $exists = wporg_theme_exists($value);
+            } catch (WporgSvnException $e) {
+                return $e->to_wp_error();
+            }
+            if (!$exists) {
+                return $error('blueprint_theme_not_found', sprintf(__('wordpress.org has no theme with the slug %s.', 'peak-publisher'), $value), 404);
+            }
+        }
+
+        $required = live_preview_requirements($plugin)['slugs'] ?? [];
+        $result = $this->wporg()->change_blueprint($plugin, static fn(array $state): array|\WP_Error|null => decide_blueprint_change($kind, effective_blueprint_contents($state), [ ...$params, 'value' => $value ], $own, $required));
+        return is_wp_error($result) ? $result : [ 'assets' => $this->describe($plugin) ];
     }
 
     /** The screenshots as views, by number. */
@@ -109,15 +204,20 @@ class AssetManager {
      */
     private function wporg_view(\WP_Post $plugin, array $state, array $manifest): array {
         $pending = $state['pending'];
-        $conflicts = asset_conflicts($pending, $manifest);
+        $mirror = wporg_mirror_slots($manifest, $state);
+        $conflicts = asset_conflicts($pending, $mirror);
         $slots = [];
-        foreach (array_unique([ ...array_keys($manifest), ...array_keys($pending) ]) as $slot_id) {
+        foreach (array_unique([ ...array_keys($mirror), ...array_keys($pending) ]) as $slot_id) {
+            $on_wporg = null;
+            if ($slot_id === 'blueprint' && isset($mirror['blueprint'])) {
+                $on_wporg = [ ...$mirror['blueprint'], 'filesize' => (int) $state['blueprints']['file']['filesize'] ];
+            } elseif (isset($manifest[$slot_id])) {
+                $on_wporg = [ ...$manifest[$slot_id], 'url' => $this->shipped_url($plugin, $manifest, (string) $slot_id) ];
+            }
             $slots[$slot_id] = [
                 'pending' => $pending[$slot_id]['action'] ?? null,
                 'conflict' => in_array((string) $slot_id, $conflicts, true),
-                'on_wporg' => isset($manifest[$slot_id])
-                    ? [ ...$manifest[$slot_id], 'url' => $this->shipped_url($plugin, $manifest, (string) $slot_id) ]
-                    : null,
+                'on_wporg' => $on_wporg,
             ];
         }
         return [

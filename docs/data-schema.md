@@ -16,8 +16,9 @@ code in this repository creates today:
   plugin, `post_title` = version, `post_name` from `get_release_slug()`; `post_content` = the
   snapshot `{plugin_data, plugin_info, plugin_readme_txt}` on both channels — self-hosted
   derived from the release ZIP (`release_snapshot_from_zip()`, `includes/releases.php`), wporg
-  from the tag, with `tag_revision` there; `plugin_data` carries `TestedUpTo` beside WordPress's
-  headers (`read_plugin_headers()`); `post_date` = when the version
+  from the tag, with `tag_revision` there; `plugin_data` carries `TestedUpTo` and, on every
+  WordPress version, `RequiresPlugins` beside WordPress's headers (`read_plugin_headers()`);
+  `post_date` = when the version
   was first published: self-hosted the upload, kept by a Replace; wporg the first creation of
   its tag in SVN (`wporg_tag_publication_times()`), kept on every later change of the tag;
   status always `publish`), `pblsh_wporg_account` (a connected wordpress.org account:
@@ -40,17 +41,25 @@ code in this repository creates today:
   marker: the same
   manifest metas and `assets_banners_color` describing the assets mirror (revision = the SVN
   revision the file was last changed in; regenerable from SVN), `_pblsh_wporg_assets`
-  (`{revision, other_files, color_source, pending}` — the revision of `assets/` the
-  mirror holds, `0` = no directory, `null` = never pulled; `pending` = the working copy, user
-  work: slot id → `{action: put|copy|delete, file (put), from {slot, filename, revision} (copy),
-  base {filename, revision}|null, ext, filesize, width, height, at, user {id, login}}`;
+  (`{revision, other_files, color_source, blueprints, pending}` — the revision of `assets/` the
+  mirror holds, `0` = no directory, `null` = never pulled; `blueprints` = the mirror of
+  `assets/blueprints/`, regenerable: `{revision, blueprint_files, other_files, file}` — the
+  directory's revision, `null` = none; the files wordpress.org's import takes there and the
+  others; `file` = `blueprint.json` `{revision, filesize, contents}`, `contents` `null` over
+  wordpress.org's 100 KB, `file` `null` = none; `pending` = the working copy, user work: slot id →
+  `{action: put|copy|delete, file (put), from {slot, filename, revision} (copy), base {filename,
+  revision}|null, ext, filesize, width, height, at, user {id, login}}`, and for the Live Preview
+  `blueprint` → `{action: put|delete, contents (put), base {filename, revision}|null, at, user
+  {id, login}}`; stored slashed — the blueprint's JSON keeps its backslashes;
   `includes/wporg_assets.php`),
   `_pblsh_downloads` (the download history from the stats API, merged day by day: UTC day
   `Y-m-d` → downloads; the API's window of 730 days moves on, what it leaves behind stays
   here and is not regenerable; `includes/wporg_directory.php`),
   `_pblsh_wporg_account_username`, `_pblsh_wporg_directory` (the directory cache: the daily info API figures and the
-  check's record — the stamp `{version, last_updated, assets: filename → revision}` of the last completed check, when that
-  was and the last failure since — and the day's claim of the download history's fetch, regenerable, not declared), `_pblsh_wporg_import` (the import forecast
+  check's record — the stamp `{version, last_updated, assets: filename → revision}` of the last completed check, the
+  blueprints of `assets/blueprints/` among the assets, when that was and the last failure since —, the day's claim of
+  the download history's fetch and the last check of the Live Preview's public switch `{public, checked_at}`,
+  regenerable, not declared), `_pblsh_wporg_import` (the import forecast
   `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`,
   `_pblsh_directory_content_hash` (sha256 over the paths and file contents of the shipped
   tree, `content_hash_from_entries()` in `includes/releases.php`; `''` when the ZIP is

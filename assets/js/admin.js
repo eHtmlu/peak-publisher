@@ -100,6 +100,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [currentPluginId, setCurrentPluginId] = useState(null);
         const [initialTab, setInitialTab] = useState(null);
+        const [initialSection, setInitialSection] = useState(null);   // the assets tab's section
         const [additionInitial, setAdditionInitial] = useState(null); // deep-link seed for the addition process
         // Every start of the add-new flow — "Add New Plugin", "Import plugins…" from the settings,
         // a deep link — is a fresh run: the flow reads where it starts when it mounts.
@@ -163,6 +164,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     plugin: params.get('plugin'),
                     view: params.get('view'),
                     tab: params.get('tab'),
+                    section: params.get('section'),
                     channel: params.get('channel'),
                     import: params.get('import'),
                 };
@@ -173,7 +175,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const setQuery = (next) => {
             try {
                 const params = new URLSearchParams(window.location.search);
-                ['plugin', 'view', 'tab', 'channel', 'import'].forEach((key) => {
+                ['plugin', 'view', 'tab', 'section', 'channel', 'import'].forEach((key) => {
                     if (key in next) {
                         if (next[key]) { params.set(key, String(next[key])); } else { params.delete(key); }
                     }
@@ -206,6 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const idNum = Number(q.plugin);
                 if (!isNaN(idNum)) {
                     if (q.tab) setInitialTab(q.tab);
+                    if (q.section) setInitialSection(q.section);
                     await handleEdit(idNum);
                     return;
                 }
@@ -297,8 +300,9 @@ document.addEventListener('DOMContentLoaded', function() {
             setCurrentPluginId(null);
             setIsNew(false);
             setInitialTab(null);
+            setInitialSection(null);
             setActiveUploadContext({});
-            setQuery({ plugin: null, view: null, tab: null, channel: null, import: null });
+            setQuery({ plugin: null, view: null, tab: null, section: null, channel: null, import: null });
         };
 
         // The open plugin is gone from the list — removed elsewhere while it stood open, or a
@@ -457,7 +461,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     onTogglePluginStatus: togglePluginStatus,
                     pendingPluginStatus: pendingPluginStatus,
                     initialTab: initialTab,
-                    onTabChange: (tab) => setQuery({ tab: tab === 'releases' ? null : tab }),
+                    onTabChange: (tab) => setQuery(tab === 'releases' ? { tab: null, section: null } : { tab }),
+                    initialSection: initialSection,
+                    onSectionChange: (section) => setQuery({ section: section === 'icons' ? null : section }),
                 });
             } else {
                 if (listError) {

@@ -11,10 +11,12 @@ use function Pblsh\confirm_wporg_directory_check;
 use function Pblsh\get_wporg_directory;
 use function Pblsh\is_wporg_directory_check_due;
 use function Pblsh\record_wporg_directory_check_error;
+use function Pblsh\record_wporg_live_preview_check;
 use function Pblsh\refresh_wporg_directory;
 use function Pblsh\serialize_self_hosted_installations;
 use function Pblsh\serialize_wporg_directory;
 use function Pblsh\wporg_directory_next_check_in;
+use function Pblsh\wporg_live_preview_public_from_response;
 
 use const Pblsh\PBLSH_WPORG_DIRECTORY_CHECKED_OPTION;
 use const Pblsh\PBLSH_WPORG_DIRECTORY_META;
@@ -340,6 +342,33 @@ final class WporgDirectoryTest extends TestCase {
 
         self::assertSame([ ...$before, 'assets' => [ ...$before['assets'], 'screenshot-1.png' => 106 ] ], $open[$marker->ID] ?? null, 'an assets commit moves a revision alone: version and last_updated stay');
         self::assertSame($before, get_wporg_directory($marker->ID)['stamp'], 'the old stamp stands until the SVN refresh completed');
+    }
+
+    public function test_the_stamp_carries_the_blueprints_so_a_commit_of_the_live_preview_is_seen(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        $this->answer([ 'plugin-a' => $this->listing([ 'slug' => 'plugin-a', 'last_updated' => 'A', 'blueprints' => [
+            [ 'filename' => 'blueprint.json', 'url' => 'https://wordpress.org/plugins/wp-json/plugins/v1/plugin/plugin-a/blueprint.json?rev=7' ],
+            [ 'filename' => 'blueprint-x.json', 'url' => 'https://wordpress.org/plugins/wp-json/plugins/v1/plugin/plugin-a/blueprint.json?rev=7' ],
+        ] ]) ]);
+
+        self::assertSame([], refresh_wporg_directory());
+
+        self::assertSame([ 'blueprint-x.json' => 7, 'blueprint.json' => 7 ], get_wporg_directory($marker->ID)['stamp']['assets'], 'by filename — the URL names blueprint.json for every file');
+        self::assertStringContainsString(',blueprints,', ',' . $this->request_query()['request']['fields'] . ',', 'asked for: the field is off by default');
+    }
+
+    public function test_the_check_of_the_public_preview_reads_the_redirect_and_is_kept(): void {
+        self::assertTrue(wporg_live_preview_public_from_response(302, 'https://playground.wordpress.net/?plugin=a&blueprint-url=x'));
+        self::assertNull(wporg_live_preview_public_from_response(302, 'https://wordpress.org/plugins/a/'));
+        self::assertFalse(wporg_live_preview_public_from_response(200, ''));
+        self::assertNull(wporg_live_preview_public_from_response(503, ''));
+
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
+        self::assertNull(get_wporg_directory($marker->ID)['preview']);
+        record_wporg_live_preview_check($marker->ID, true, 1000);
+        self::assertSame([ 'public' => true, 'checked_at' => 1000 ], get_wporg_directory($marker->ID)['preview']);
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, [ ...get_wporg_directory($marker->ID), 'preview' => [ 'public' => 'yes' ] ]);
+        self::assertNull(get_wporg_directory($marker->ID)['preview'], 'a foreign shape reads as never checked');
     }
 
     public function test_a_stored_stamp_without_the_asset_revisions_reads_as_none(): void {

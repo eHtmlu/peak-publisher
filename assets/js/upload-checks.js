@@ -760,6 +760,15 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         return null;
     }
 
+    // wordpress.org: a release that becomes current brings its Requires Plugins into the Live
+    // Preview in the same commit — said, no choice: without them the preview fails.
+    function checkLivePreview(context) {
+        const { isWporg, target, currentRelease, pluginData } = context;
+        const missing = isWporg && target ? target.live_preview_missing || [] : [];
+        if (!currentRelease || !currentRelease.makeCurrent || missing.length === 0) return null;
+        return { title: Pblsh.LivePreviewUtils.getCarryTitle(), type: 'info', desc: Pblsh.LivePreviewUtils.getCarryText(missing, pluginData.Version) };
+    }
+
     function buildUploadCheckItems(context) {
         // Facts of upload × destination only — process errors (failed server
         // phases) are NOT checklist rows; they render as pinned error notices
@@ -777,6 +786,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 checkWorkspaceArtifacts(context),
                 checkReadmeTxt(context),
                 checkTestedUpTo(context),
+                checkLivePreview(context),
             ],
         ].flat(Infinity).filter(Boolean);
     }

@@ -167,10 +167,14 @@ namespace {
         if (array_key_exists('post_content', $postarr)) {
             $postarr['post_content'] = apply_filters('content_save_pre', $postarr['post_content']);
         }
+        // Like WordPress: the fields arrive slashed and are unslashed before they are stored;
+        // meta_input goes through update_post_meta(), which unslashes on its own.
+        $meta_input = (array) ($postarr['meta_input'] ?? []);
+        $postarr = wp_unslash(array_diff_key($postarr, [ 'meta_input' => true ]));
         $post = new WP_Post($postarr);
         $post->ID = FakeWordPress::$next_post_id++;
         FakeWordPress::$posts[$post->ID] = $post;
-        foreach ((array) ($postarr['meta_input'] ?? []) as $key => $value) {
+        foreach ($meta_input as $key => $value) {
             update_post_meta($post->ID, (string) $key, $value);
         }
         return $post->ID;
@@ -186,10 +190,11 @@ namespace {
         if ($post === null) {
             return 0;
         }
-        // WordPress merges the stored post into the update and saves it whole: the content
-        // passes the save filters again, even when the update only names another field.
-        $postarr['post_content'] = apply_filters('content_save_pre', $postarr['post_content'] ?? $post->post_content);
-        foreach ($postarr as $field => $value) {
+        // WordPress merges the stored post, slashed, into the update and saves it whole: the
+        // content passes the save filters again, even when the update only names another
+        // field, and every field is unslashed before it is stored.
+        $postarr['post_content'] = apply_filters('content_save_pre', $postarr['post_content'] ?? wp_slash($post->post_content));
+        foreach (wp_unslash($postarr) as $field => $value) {
             if ($field !== 'ID' && property_exists($post, $field)) {
                 $post->$field = $value;
             }
@@ -211,8 +216,9 @@ namespace {
         return $single ? $value : [ $value ];
     }
 
+    /** Like WordPress: the value is unslashed on its way in — a caller storing backslashes slashes first. */
     function update_post_meta(int $id, string $key, $value): bool {
-        FakeWordPress::$meta[$id][$key] = $value;
+        FakeWordPress::$meta[$id][$key] = wp_unslash($value);
         return true;
     }
 
@@ -322,7 +328,17 @@ namespace {
     }
 
     function wp_slash($value) {
-        return $value;
+        if (is_array($value)) {
+            return array_map('wp_slash', $value);
+        }
+        return is_string($value) ? addslashes($value) : $value;
+    }
+
+    function wp_unslash($value) {
+        if (is_array($value)) {
+            return array_map('wp_unslash', $value);
+        }
+        return is_string($value) ? stripslashes($value) : $value;
     }
 
     function wp_json_encode($data, int $flags = 0, int $depth = 512) {

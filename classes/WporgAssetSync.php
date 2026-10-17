@@ -10,8 +10,9 @@ require_once __DIR__ . '/WporgOperations.php';
 /**
  * The wordpress.org assets of a marker: keeps the mirror in step with SVN, records changes in
  * the working copy and turns it into one commit. The mirror holds the slot winners under their
- * SVN names; the other files of assets/ are counted, never copied. Every write runs under the
- * plugin's commit lock.
+ * SVN names and the Live Preview's blueprint.json in the state; the other files of assets/
+ * and assets/blueprints/ are counted, never copied. Every write runs under the plugin's commit
+ * lock.
  */
 class WporgAssetSync {
 
@@ -74,13 +75,14 @@ class WporgAssetSync {
      * mirror heals itself —, vanished slots are removed, and the banner color follows its A10
      * source. A copy entry of the working copy whose source this pull replaces becomes a put of
      * the old file first, so it keeps its meaning ("the picture that was in slot 3"); when the
-     * mirror file is gone, the SVN history still has it. The manifest records every slot
-     * that arrived; the anchor (revision) moves only when all did, so a failed download is
-     * retried by the next pull. The caller holds the lock.
+     * mirror file is gone, the SVN history still has it. assets/blueprints/ is read when its
+     * revision moved (pull_blueprints()). The manifest records every slot that arrived; the
+     * anchor (revision) moves only when all did, so a failed download is retried by the next
+     * pull. The caller holds the lock.
      *
      * @return array{listing: ?array, complete: bool, changed: bool} listing = list_assets()
-     *         as read; changed = wordpress.org's winners differ from the mirror's (a file
-     *         fetched again because the disk lost it is no change)
+     *         as read; changed = wordpress.org's winners or blueprint differ from the mirror's
+     *         (a file fetched again because the disk lost it is no change)
      */
     public function pull_unlocked(\WP_Post $marker, ?WporgPluginSvnClient $client = null): array {
         $listing = WporgOperations::list_assets($marker->post_name, $client);
@@ -88,7 +90,8 @@ class WporgAssetSync {
         $remote = array_map(static fn(array $slot): array => $slot['winner'], $classified['slots']);
         $manifest = read_asset_manifest((int) $marker->ID);
         $diff = mirror_diff($manifest, $remote);
-        $changed = $diff['fetch'] !== [] || $diff['remove'] !== [];
+        $blueprints = $this->pull_blueprints($marker, $listing, get_wporg_assets_state((int) $marker->ID)['blueprints'], $client);
+        $changed = $diff['fetch'] !== [] || $diff['remove'] !== [] || $blueprints['changed'];
 
         ensure_plugin_assets_dir($marker);
         $dir = get_plugin_assets_dir($marker);
@@ -136,10 +139,15 @@ class WporgAssetSync {
         write_asset_manifest((int) $marker->ID, $manifest);
 
         $state = get_wporg_assets_state((int) $marker->ID);
+        // The blueprints mirror has its own anchor (its directory's revision): what arrived stays.
+        if ($blueprints['complete']) {
+            $state['blueprints'] = $blueprints['mirror'];
+        }
         if (!$this->refresh_banner_color($marker, $manifest, $classified['color_source'], $state['color_source'], $client)) {
             $complete = false;
         }
-        if (!$complete) {
+        if (!$complete || !$blueprints['complete']) {
+            update_wporg_assets_state((int) $marker->ID, $state);
             return [ 'listing' => $listing, 'complete' => false, 'changed' => $changed ];
         }
         update_wporg_assets_state((int) $marker->ID, [
@@ -149,6 +157,56 @@ class WporgAssetSync {
             'color_source' => $classified['color_source'],
         ]);
         return [ 'listing' => $listing, 'complete' => true, 'changed' => $changed ];
+    }
+
+    /**
+     * The Live Preview's part of a pull: assets/blueprints/ is listed only when its revision in
+     * the assets listing moved, and blueprint.json read only when its own revision did — over
+     * wordpress.org's limit it is not read at all (the import ignores it). No directory, no
+     * blueprint. A failed read keeps the mirror as it was (complete false, logged).
+     *
+     * @return array{mirror: array, complete: bool, changed: bool}
+     */
+    private function pull_blueprints(\WP_Post $marker, ?array $listing, array $mirror, ?WporgPluginSvnClient $client): array {
+        $directory = null;
+        foreach ($listing['entries'] ?? [] as $entry) {
+            if ($entry['name'] === 'blueprints' && $entry['type'] === 'dir') {
+                $directory = $entry;
+            }
+        }
+        if ($directory === null) {
+            return [ 'mirror' => wporg_blueprints_mirror_defaults(), 'complete' => true, 'changed' => $mirror['file'] !== null ];
+        }
+        if ($mirror['revision'] === (int) $directory['revision']) {
+            return [ 'mirror' => $mirror, 'complete' => true, 'changed' => false ];
+        }
+        try {
+            $classified = classify_blueprint_listing(WporgOperations::list_blueprints($marker->post_name, $client)['entries'] ?? []);
+            $entry = $classified['blueprint'];
+            $file = $mirror['file'];
+            if ($entry === null) {
+                $file = null;
+            } elseif ($file === null || $file['revision'] !== $entry['revision']) {
+                $contents = null;
+                if ($entry['size'] <= PBLSH_BLUEPRINT_MAX_BYTES) {
+                    $contents = WporgOperations::read_blueprint($marker->post_name, $client);
+                    if ($contents === null) {
+                        // Listed a moment ago, gone when read: the mirror stays, the next pull lists anew.
+                        wporg_log_cache_error($marker, 'assets blueprints', new WporgSvnException('not_found', 'blueprint.json vanished between listing and reading it', 404));
+                        return [ 'mirror' => $mirror, 'complete' => false, 'changed' => false ];
+                    }
+                }
+                $file = [ 'revision' => $entry['revision'], 'filesize' => $entry['size'], 'contents' => $contents ];
+            }
+        } catch (\Throwable $e) {
+            wporg_log_cache_error($marker, 'assets blueprints', $e);
+            return [ 'mirror' => $mirror, 'complete' => false, 'changed' => false ];
+        }
+        return [
+            'mirror' => [ 'revision' => (int) $directory['revision'], 'blueprint_files' => $classified['blueprint_files'], 'other_files' => $classified['other_files'], 'file' => $file ],
+            'complete' => true,
+            'changed' => ($mirror['file']['revision'] ?? null) !== ($file['revision'] ?? null),
+        ];
     }
 
     /**
@@ -205,10 +263,8 @@ class WporgAssetSync {
         return $this->locked($marker, function() use ($marker, $change, $local_path): array|\WP_Error {
             $id = (int) $marker->ID;
             $state = get_wporg_assets_state($id);
-            // The working copy builds on the mirror: before the first pull every entry would
-            // record an empty base, and that pull would then report a conflict on each of them.
             if ($state['revision'] === null) {
-                return new \WP_Error('wporg_assets_not_synced', __('The assets have not been read from wordpress.org yet, so they cannot be changed. Reload to try again.', 'peak-publisher'), [ 'status' => 409 ]);
+                return $this->not_synced();
             }
             $mirror = read_asset_manifest($id);
             if ($change['action'] === 'move' && effective_asset_entry($state['pending'], $mirror, 'screenshot-' . (int) $change['from']) === null) {
@@ -248,6 +304,43 @@ class WporgAssetSync {
         });
     }
 
+    /**
+     * Records a change of the Live Preview in the working copy (apply_blueprint_change()).
+     * $decide gets the state under the lock and answers the change — built from the blueprint
+     * in effect at that moment, so two writers never lose each other's change —, a WP_Error,
+     * or null when there is nothing to change.
+     *
+     * @param callable $decide fn(array $state): array{action:string, contents?:string}|\WP_Error|null
+     * @return array{}|\WP_Error
+     */
+    public function change_blueprint(\WP_Post $marker, callable $decide): array|\WP_Error {
+        return $this->locked($marker, function() use ($marker, $decide): array|\WP_Error {
+            $id = (int) $marker->ID;
+            $state = get_wporg_assets_state($id);
+            if ($state['revision'] === null) {
+                return $this->not_synced();
+            }
+            $change = $decide($state);
+            if (is_wp_error($change)) {
+                return $change;
+            }
+            if ($change !== null) {
+                $user = wp_get_current_user();
+                $pending = apply_blueprint_change($state['pending'], $state, [ ...$change, 'at' => time(), 'user' => [ 'id' => (int) $user->ID, 'login' => (string) $user->user_login ] ]);
+                update_wporg_assets_state($id, [ ...$state, 'pending' => $pending ]);
+            }
+            return [];
+        });
+    }
+
+    /**
+     * The working copy builds on the mirror: before the first pull every entry would record an
+     * empty base, and that pull would then report a conflict on each of them.
+     */
+    private function not_synced(): \WP_Error {
+        return new \WP_Error('wporg_assets_not_synced', __('The assets have not been read from wordpress.org yet, so they cannot be changed. Reload to try again.', 'peak-publisher'), [ 'status' => 409 ]);
+    }
+
     /** Drops every pending change at once — no download: the mirror is the state on wordpress.org. */
     public function discard(\WP_Post $marker): ?\WP_Error {
         $result = $this->locked($marker, function() use ($marker): array {
@@ -271,9 +364,9 @@ class WporgAssetSync {
             if ($entry === null) {
                 return new \WP_Error('asset_not_found', __('There is no pending change for this asset any more.', 'peak-publisher'), [ 'status' => 404 ]);
             }
-            $base = wporg_asset_base(read_asset_manifest($id)[$slot_id] ?? null);
+            $base = wporg_asset_base(wporg_mirror_slots(read_asset_manifest($id), $state)[$slot_id] ?? null);
             if ($keep === 'theirs' || ($entry['action'] === 'delete' && $base === null)) {
-                if ($entry['action'] === 'put') {
+                if ($entry['action'] === 'put' && isset($entry['file'])) {
                     $this->unlink(get_plugin_assets_dir($marker, 'pending'), $entry['file']);
                 }
                 unset($state['pending'][$slot_id]);
@@ -309,10 +402,19 @@ class WporgAssetSync {
                         throw new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely, so nothing was committed. Try again.', 'peak-publisher'), 502);
                     }
                     $state = get_wporg_assets_state($id);
-                    if (asset_conflicts($state['pending'], read_asset_manifest($id)) !== []) {
+                    if (asset_conflicts($state['pending'], wporg_mirror_slots(read_asset_manifest($id), $state)) !== []) {
                         throw new WporgSvnException('wporg_assets_conflict', __('Some of these assets were changed on wordpress.org as well. Decide for each marked asset, then commit again.', 'peak-publisher'), 409);
                     }
-                    $plan = build_asset_commit_plan($marker->post_name, $state['pending'], $pulled['listing'], $base_revision, get_plugin_assets_dir($marker, 'pending'));
+                    // A deliberate last gate before the irreversible commit, beside the validation of
+                    // every change (decide_blueprint_change()): a blueprint wordpress.org's import
+                    // throws on fails that import for the whole commit, the images included.
+                    $blueprint = $state['pending']['blueprint'] ?? null;
+                    $valid = $blueprint !== null && $blueprint['action'] === 'put' ? validate_blueprint_contents($blueprint['contents']) : true;
+                    if (is_wp_error($valid)) {
+                        throw WporgSvnException::from_wp_error($valid);
+                    }
+                    // The Live Preview's put commits from a temp file with its contents; the plan's cleanup deletes it.
+                    $plan = build_asset_commit_plan($marker->post_name, $state['pending'], $pulled['listing'], $base_revision, get_plugin_assets_dir($marker, 'pending'), $blueprint !== null && $blueprint['action'] === 'put' ? WporgOperations::file_variant($blueprint['contents'])['path'] : null);
                     $outcome = [ 'listing' => $pulled['listing'], 'plan' => $plan, 'pending' => $state['pending'] ];
                     return $plan;
                 },
@@ -353,10 +455,13 @@ class WporgAssetSync {
         $pending_dir = get_plugin_assets_dir($marker, 'pending');
         $fs = get_wp_filesystem();
         $complete = true;
+        // The Live Preview's entry carries its contents; the image entries their files.
+        $blueprint_entry = $outcome['pending']['blueprint'] ?? null;
+        $image_entries = array_diff_key($outcome['pending'], [ 'blueprint' => true ]);
         try {
             $manifest = read_asset_manifest($id);
             $staged = [];
-            foreach ($outcome['pending'] as $slot_id => $entry) {
+            foreach ($image_entries as $slot_id => $entry) {
                 if ($entry['action'] === 'delete') {
                     continue;
                 }
@@ -370,7 +475,7 @@ class WporgAssetSync {
                     $complete = false;
                 }
             }
-            foreach (array_keys($outcome['pending']) as $slot_id) {
+            foreach (array_keys($image_entries) as $slot_id) {
                 if (isset($manifest[$slot_id])) {
                     $this->unlink($mirror_dir, $manifest[$slot_id]['filename']);
                     unset($manifest[$slot_id]);
@@ -401,13 +506,15 @@ class WporgAssetSync {
 
         $fs->delete($pending_dir, true);
         $state = get_wporg_assets_state($id);
+        $blueprints = blueprints_mirror_after_commit($state['blueprints'], $blueprint_entry, $revision);
         update_wporg_assets_state($id, $complete ? [
             ...$state,
             'revision' => $revision,
             'other_files' => $classified['other_files'],
             'color_source' => $classified['color_source'],
+            'blueprints' => $blueprints,
             'pending' => [],
-        ] : [ ...$state, 'pending' => [] ]);
+        ] : [ ...$state, 'blueprints' => $blueprints, 'pending' => [] ]);
     }
 
     /** Runs a change of the working copy under the commit lock: a pull, a refresh or another change is waited for, a commit — or one of those outlasting the wait — refuses it (deploy_in_progress, wporg_plugin_busy). */

@@ -42,6 +42,11 @@ lodash.set(window, 'Pblsh.PluginStatusUtils', (() => {
         if (tested) {
             items.push({ key: 'tested_up_to', variant: tested.variant, label: tested.label, text: tested.fact });
         }
+        // What visitors of the plugin page get fails: the committed Live Preview lacks a plugin
+        // the current release requires.
+        if (isWporg && plugin.live_preview && plugin.live_preview.missing.length > 0) {
+            items.push({ key: 'live_preview', variant: 'error', label: Pblsh.LivePreviewUtils.getFailsLabel(), text: Pblsh.LivePreviewUtils.getFailsFact(plugin.live_preview) });
+        }
         if (isWporg && plugin.assets_pending > 0) {
             items.push({
                 key: 'assets_pending',

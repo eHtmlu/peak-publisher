@@ -176,11 +176,13 @@ class WporgOperations {
      * Stable tag when it gets code (R2), only its Stable tag line when the pointer changes on a
      * tag-only deploy (R3), nothing otherwise. The tag gets the workspace as it is (R1 made its
      * readme name its own version); a new tag as a copy of trunk or its predecessor tag plus what
-     * differs from it (new_tag_plan()), in the same commit.
+     * differs from it (new_tag_plan()), in the same commit. A release that becomes current brings
+     * its Requires Plugins into the Live Preview in the same commit (live_preview_carry()).
      *
      * @param array{make_current:bool, relation:string, expected:?string, readme_file_name:string} $pointer
      *        The decision, the relation and the pointer the dialog showed (null = unknown), and
      *        the workspace readme's file name (finalize guarantees one).
+     * @param string[] $requires_plugins The uploaded release's Requires Plugins (requires_plugins_slugs()).
      * @param callable|null $after_commit fn(array $deploy): void — the caller's local
      *        write-through, run once the commit landed and still under the lock (see
      *        commit_files()): no refresh of the marker can read SVN between the commit and
@@ -189,12 +191,13 @@ class WporgOperations {
      * @param callable|null $progress See commit_files(); the phase read counts the folders
      *        listed in trunk, the tag and the tag's copy source.
      * @return array{revision:int|null, committed:bool, details:array, touched_trunk:bool,
-     *         stable_tag_before:?string, stable_tag_written:?string, pointer_changed:bool, trunk_readme:?array}
+     *         stable_tag_before:?string, stable_tag_written:?string, pointer_changed:bool, trunk_readme:?array, live_preview_added:string[]}
      *         stable_tag_before = the live pointer (null = unreadable), stable_tag_written = the
      *         value written to trunk (null = trunk readme untouched), trunk_readme = the cache
-     *         entry of the written trunk readme (null = none written).
+     *         entry of the written trunk readme (null = none written), live_preview_added = the
+     *         plugins the commit added to the Live Preview.
      */
-    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk, array $pointer, ?callable $after_commit = null, ?callable $progress = null): array {
+    public static function deploy_directory(\WP_Post $marker, string $root, string $version, string $username, bool $touch_trunk, array $pointer, array $requires_plugins, ?callable $after_commit = null, ?callable $progress = null): array {
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
         $version = self::safe_path_segment($version);
         $root = trailingslashit($root);
@@ -207,8 +210,9 @@ class WporgOperations {
             throw new \RuntimeException('wporg_readme_required');
         }
 
-        $outcome = [ 'stable_tag_before' => null, 'stable_tag_written' => null, 'pointer_changed' => false, 'trunk_readme' => null ];
-        $result = self::commit_files($marker, $username, 'deploy', function(WporgPluginSvnClient $client, int $base_revision, callable $report) use ($wporg_slug, $root, $version, $touch_trunk, $pointer, $readme_file_name, &$outcome): array {
+        $outcome = [ 'stable_tag_before' => null, 'stable_tag_written' => null, 'pointer_changed' => false, 'trunk_readme' => null, 'live_preview_added' => [] ];
+        $carry = null;
+        $result = self::commit_files($marker, $username, 'deploy', function(WporgPluginSvnClient $client, int $base_revision, callable $report) use ($wporg_slug, $root, $version, $touch_trunk, $pointer, $readme_file_name, $requires_plugins, &$outcome, &$carry): array {
             $local_tree = self::collect_local_tree($root);
             if (!self::tree_has_php_file($local_tree)) {
                 throw self::exception('wporg_tag_requires_php');
@@ -265,6 +269,14 @@ class WporgOperations {
                     $outcome['stable_tag_written'] = $decision['pointer_value'];
                     $outcome['trunk_readme'] = self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $file_name ]);
                 }
+                if ($decision['make_current']) {
+                    $carry = self::live_preview_carry($client, $wporg_slug, $requires_plugins);
+                    if ($carry !== null) {
+                        $cleanup[] = $carry['path'];
+                        $plans[] = [ 'deletes' => [], 'mkdirs' => [], 'copies' => [], 'puts' => [ [ 'path' => 'assets/blueprints/' . PBLSH_BLUEPRINT_FILENAME, 'local_path' => $carry['path'] ] ] ];
+                        $outcome['live_preview_added'] = $carry['added'];
+                    }
+                }
             } catch (\Throwable $e) {
                 foreach ($cleanup as $path) {
                     if (file_exists($path)) {
@@ -288,11 +300,15 @@ class WporgOperations {
                     'make_current' => $decision['make_current'],
                     'stable_tag_before' => $outcome['stable_tag_before'],
                     'stable_tag_written' => $outcome['stable_tag_written'],
+                    'live_preview_added' => $outcome['live_preview_added'],
                 ],
                 'cleanup' => $cleanup,
             ];
-        }, $after_commit === null ? null : static function(int $revision) use ($after_commit, $touch_trunk, &$outcome): void {
-            $after_commit([ 'revision' => $revision, 'committed' => true, 'touched_trunk' => $touch_trunk, ...$outcome ]);
+        }, static function(int $revision) use ($marker, $after_commit, $touch_trunk, &$outcome, &$carry): void {
+            self::record_live_preview_carry($marker, $carry, $revision);
+            if ($after_commit !== null) {
+                $after_commit([ 'revision' => $revision, 'committed' => true, 'touched_trunk' => $touch_trunk, ...$outcome ]);
+            }
         }, $progress);
 
         return [ ...$result, 'touched_trunk' => $touch_trunk, ...$outcome ];
@@ -333,21 +349,24 @@ class WporgOperations {
      * Stable tag line of trunk's readme (R2 — only existing tags, never trunk). Built under
      * the lock from the live readme and compared with the value the editor showed, so a flip
      * by someone else is refused, never overwritten; null = the editor could not read the
-     * pointer (no expectation to compare with).
+     * pointer (no expectation to compare with). The release's Requires Plugins
+     * ($requires_plugins, from its snapshot) come into the Live Preview in the same commit
+     * (live_preview_carry()).
      *
-     * @return array{revision:int, committed:bool, details:array, from:string, trunk_readme:array}
+     * @return array{revision:int, committed:bool, details:array, from:string, trunk_readme:array, live_preview_added:string[]}
      *         from = the Stable tag before, trunk_readme = the cache entry of the written readme.
      * @throws WporgSvnException current_release_target_missing (the tag does not exist),
      *         wporg_trunk_readme_unreadable, wporg_trunk_readme_missing (trunk has no readme —
      *         a release with one must be published first), current_release_changed,
      *         invalid_current_release_target (it is the current release already).
      */
-    public static function set_stable_tag(\WP_Post $marker, string $version, ?string $expected_stable_tag, string $username): array {
+    public static function set_stable_tag(\WP_Post $marker, string $version, ?string $expected_stable_tag, string $username, array $requires_plugins = []): array {
         $wporg_slug = self::normalize_slug_or_throw($marker->post_name);
         $version = self::safe_path_segment($version);
 
         $outcome = [];
-        $result = self::commit_files($marker, $username, 'stable_tag', function(WporgPluginSvnClient $client) use ($wporg_slug, $version, $expected_stable_tag, &$outcome): array {
+        $carry = null;
+        $result = self::commit_files($marker, $username, 'stable_tag', function(WporgPluginSvnClient $client) use ($wporg_slug, $version, $expected_stable_tag, $requires_plugins, &$outcome, &$carry): array {
             if (!self::tag_exists($client, $wporg_slug, $version)) {
                 throw self::exception('current_release_target_missing');
             }
@@ -366,19 +385,58 @@ class WporgOperations {
                 throw self::exception('invalid_current_release_target');
             }
 
-            // The variant is the closure's last step: nothing can throw between its creation
-            // and the plan that lists it for cleanup.
-            $variant = self::readme_variant($live['content'], $version);
-            $outcome = [ 'from' => $live['stable_tag'], 'trunk_readme' => self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $live['file_name'] ]) ];
+            // The temp files are the closure's last steps: nothing else can throw between their
+            // creation and the plan that lists them for cleanup.
+            $carry = self::live_preview_carry($client, $wporg_slug, $requires_plugins);
+            try {
+                $variant = self::readme_variant($live['content'], $version);
+            } catch (\Throwable $e) {
+                if ($carry !== null) {
+                    wp_delete_file($carry['path']);
+                }
+                throw $e;
+            }
+            $added = $carry['added'] ?? [];
+            $outcome = [ 'from' => $live['stable_tag'], 'trunk_readme' => self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $live['file_name'] ]), 'live_preview_added' => $added ];
             return [
-                'puts' => [ [ 'path' => 'trunk/' . $live['file_name'], 'local_path' => $variant['path'] ] ],
+                'puts' => [
+                    [ 'path' => 'trunk/' . $live['file_name'], 'local_path' => $variant['path'] ],
+                    ...($carry === null ? [] : [ [ 'path' => 'assets/blueprints/' . PBLSH_BLUEPRINT_FILENAME, 'local_path' => $carry['path'] ] ]),
+                ],
                 'message' => sprintf('Set stable tag to version %s of %s via Peak Publisher', $version, $wporg_slug),
-                'details' => [ 'from' => $live['stable_tag'], 'to' => $version ],
-                'cleanup' => [ $variant['path'] ],
+                'details' => [ 'from' => $live['stable_tag'], 'to' => $version, 'live_preview_added' => $added ],
+                'cleanup' => [ $variant['path'], ...($carry === null ? [] : [ $carry['path'] ]) ],
             ];
+        }, static function(int $revision) use ($marker, &$carry): void {
+            self::record_live_preview_carry($marker, $carry, $revision);
         });
 
         return [ ...$result, ...$outcome ];
+    }
+
+    /**
+     * The Live Preview's part of a commit that makes a release current: blueprint.json read fresh
+     * under the lock and, when it lacks Requires Plugins of that release, the file with them added
+     * (blueprint_dependency_carry()) as a temp file for the plan. Null without a blueprint, without
+     * Requires Plugins (then nothing is read) or when nothing is missing.
+     *
+     * @param string[] $requires_plugins
+     * @return array{contents:string, added:string[], path:string}|null
+     */
+    private static function live_preview_carry(WporgPluginSvnClient $client, string $wporg_slug, array $requires_plugins): ?array {
+        if ($requires_plugins === []) {
+            return null;
+        }
+        $contents = self::read_blueprint($wporg_slug, $client);
+        $carry = $contents === null ? null : blueprint_dependency_carry($contents, $wporg_slug, $requires_plugins);
+        return $carry === null ? null : [ ...$carry, 'path' => self::file_variant($carry['contents'])['path'] ];
+    }
+
+    /** The carried blueprint written into the marker's assets state, under the commit's lock (apply_blueprint_carry()). */
+    private static function record_live_preview_carry(\WP_Post $marker, ?array $carry, int $revision): void {
+        if ($carry !== null) {
+            update_wporg_assets_state((int) $marker->ID, apply_blueprint_carry(get_wporg_assets_state((int) $marker->ID), (string) $marker->post_name, $carry, $revision));
+        }
     }
 
     /**
@@ -625,8 +683,26 @@ class WporgOperations {
      * @return array{revision:int, entries:array<int, array{name:string, type:string, size:int|null, revision:int}>}|null
      */
     public static function list_assets(string $wporg_slug, ?WporgPluginSvnClient $client = null): ?array {
-        $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
-        $base_path = $wporg_slug . '/assets';
+        return self::list_children(self::normalize_slug_or_throw($wporg_slug) . '/assets', $client);
+    }
+
+    /**
+     * assets/blueprints/ like list_assets() reads assets/ — the Live Preview's directory. Null
+     * when there is none.
+     *
+     * @return array{revision:int, entries:array<int, array{name:string, type:string, size:int|null, revision:int}>}|null
+     */
+    public static function list_blueprints(string $wporg_slug, ?WporgPluginSvnClient $client = null): ?array {
+        return self::list_children(self::normalize_slug_or_throw($wporg_slug) . '/assets/blueprints', $client);
+    }
+
+    /** assets/blueprints/blueprint.json as text, null when there is none. */
+    public static function read_blueprint(string $wporg_slug, ?WporgPluginSvnClient $client = null): ?string {
+        return self::read_file_or_null($client ?? self::svn_client(), self::normalize_slug_or_throw($wporg_slug) . '/assets/blueprints/' . PBLSH_BLUEPRINT_FILENAME);
+    }
+
+    /** The direct children of a directory bytewise by name like svn ls, and the directory's own revision; null when it does not exist. */
+    private static function list_children(string $base_path, ?WporgPluginSvnClient $client): ?array {
         try {
             $entries = ($client ?? self::svn_client())->list_directory($base_path . '/', 1);
         } catch (WporgSvnException $e) {
@@ -901,10 +977,13 @@ class WporgOperations {
 
     /**
      * Writes content into a temp file for a PUT; the caller lists the path in the Plan's cleanup.
+     * The readme variants here and the Live Preview's put of the assets commit
+     * (WporgAssetSync::commit()) write their files through it.
      *
      * @return array{path:string, size:int, hash:string}
+     * @throws WporgSvnException wporg_commit_file_failed when the server cannot write it
      */
-    private static function file_variant(string $content): array {
+    public static function file_variant(string $content): array {
         require_once ABSPATH . 'wp-admin/includes/file.php';
         $path = wp_tempnam('pblsh-put');
         if (!is_string($path) || $path === '' || @file_put_contents($path, $content) === false) {

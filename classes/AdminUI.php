@@ -109,6 +109,7 @@ class AdminUI {
             'utils-installations.js',
             'utils-wporg-check.js',
             'utils-assets.js',
+            'utils-live-preview.js',
             'upload-checks.js',
             'api.js',
             'stores/plugins.js',
@@ -135,6 +136,8 @@ class AdminUI {
             'components/InstallationsCount.js',
             'components/WporgCheckStatus.js',
             'components/PluginList.js',
+            'components/BlueprintEditor.js',
+            'components/LivePreview.js',
             'components/PluginAssets.js',
             'components/ImportForecast.js',
             'components/PluginEditor.js',
@@ -147,12 +150,10 @@ class AdminUI {
             //'highlightjs/highlight.js',
         ];
 
-        //$settings = wp_enqueue_code_editor([ 'type' => 'php' ]);
-        /* wp_add_inline_script(
-            'code-editor',
-            'wp.codeEditor.initialize( document.getElementById("pblsh-code"), ' . wp_json_encode( $settings ) . ' );'
-        ); */
-        
+        // WordPress's code editor for the Live Preview's JSON (CodeMirror with JSON lint) — false
+        // when the user switched syntax highlighting off in their profile: a plain textarea then.
+        $code_editor = wp_enqueue_code_editor([ 'type' => 'application/json' ]);
+
 
         wp_enqueue_script(
             'pblsh-highlightjs',
@@ -220,6 +221,8 @@ class AdminUI {
                 // Tested up to is judged against (utils-tested-up-to.js).
                 'wordpressStableBranch' => wordpress_stable_branch(),
                 'assetSlots' => get_asset_slots(),
+                // wp_enqueue_code_editor()'s settings for the Live Preview's editor, or false.
+                'codeEditor' => $code_editor,
                 'channelTexts' => get_channel_texts(),
                 // Facts of the one-time schema upgrade (includes/upgrade.php), null once dismissed.
                 'upgradeNotice' => is_array($upgrade_notice = get_option('pblsh_upgrade_notice')) ? $upgrade_notice : null,

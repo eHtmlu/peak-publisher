@@ -390,15 +390,38 @@ function effective_tested_up_to(?array $plugin_data, ?array $readme_content): ar
 /**
  * The plugin headers of a main file — the one reading place: WordPress's own list
  * (get_plugin_data()) plus `Tested up to` as TestedUpTo, which core does not know but
- * wordpress.org reads. Every stored plugin_data comes through here.
+ * wordpress.org reads, and `Requires Plugins` as RequiresPlugins on every WordPress version
+ * (core reads it from 6.5 on, the same way). Every stored plugin_data comes through here.
  */
 function read_plugin_headers(string $file): array {
     if (!function_exists('get_plugin_data')) {
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
     }
     $data = get_plugin_data($file, false, false);
-    $data['TestedUpTo'] = (string) (get_file_data($file, [ 'TestedUpTo' => 'Tested up to' ])['TestedUpTo'] ?? '');
+    $extra = get_file_data($file, [ 'TestedUpTo' => 'Tested up to', 'RequiresPlugins' => 'Requires Plugins' ]);
+    $data['TestedUpTo'] = (string) ($extra['TestedUpTo'] ?? '');
+    $data['RequiresPlugins'] = (string) ($extra['RequiresPlugins'] ?? '');
     return $data;
+}
+
+
+/** A slug in wordpress.org's format: lowercase letters and digits, words joined by single hyphens. */
+function is_wordpress_org_slug(string $slug): bool {
+    return (bool) preg_match('/^[a-z0-9]+(-[a-z0-9]+)*$/', $slug);
+}
+
+
+/**
+ * The plugins a Requires Plugins header names, cleaned the way core's plugin dependencies
+ * clean them (WP_Plugin_Dependencies::sanitize_dependency_slugs(), without its filter):
+ * comma-separated, trimmed, wordpress.org slugs only, each once, sorted.
+ *
+ * @return string[]
+ */
+function requires_plugins_slugs(string $header): array {
+    $slugs = array_values(array_unique(array_filter(array_map('trim', explode(',', $header)), 'Pblsh\is_wordpress_org_slug')));
+    sort($slugs);
+    return $slugs;
 }
 
 

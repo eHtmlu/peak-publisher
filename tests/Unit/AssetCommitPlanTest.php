@@ -77,6 +77,42 @@ final class AssetCommitPlanTest extends TestCase {
         self::assertSame([ [], [], [], [] ], [ $empty['deletes'], $empty['copies'], $empty['puts'], $empty['mime_types'] ]);
     }
 
+    public function test_a_blueprint_put_writes_its_file_and_creates_the_directories_it_needs(): void {
+        $put = [ 'blueprint' => [ 'action' => 'put', 'contents' => '{}', 'base' => null ] ];
+
+        $plan = build_asset_commit_plan('my-plugin', $put, self::listing('icon.svg'), 60, '/tmp/pending', '/tmp/blueprint-x.json');
+        self::assertSame([ [ 'path' => 'assets/blueprints/blueprint.json', 'local_path' => '/tmp/blueprint-x.json' ] ], $plan['puts']);
+        self::assertSame([ 'assets/blueprints' ], $plan['mkdirs'], 'blueprints/ is missing from the listing');
+        self::assertSame([ '/tmp/blueprint-x.json' ], $plan['cleanup'], 'the temp file goes with the commit');
+        self::assertSame([], $plan['mime_types'], 'text to SVN; wordpress.org serves it from its own store');
+        self::assertSame([ 'blueprints/blueprint.json' ], $plan['details']['updated']);
+        self::assertSame('Update assets of my-plugin (1 updated) via Peak Publisher', $plan['message']);
+
+        $first = build_asset_commit_plan('my-plugin', $put, null, 60, '/tmp/pending', '/tmp/blueprint-x.json');
+        self::assertSame([ 'assets', 'assets/blueprints' ], $first['mkdirs']);
+
+        $listing = self::listing('icon.svg');
+        $listing['entries'][] = [ 'name' => 'blueprints', 'type' => 'dir', 'size' => null, 'revision' => 40 ];
+        $existing = build_asset_commit_plan('my-plugin', [ ...$put, 'icon_128' => [ 'action' => 'put', 'file' => 'icon-128x128.png', 'ext' => 'png', 'base' => null ] ], $listing, 60, '/tmp/pending', '/tmp/blueprint-x.json');
+        self::assertSame([], $existing['mkdirs']);
+        self::assertSame('Update assets of my-plugin (2 updated) via Peak Publisher', $existing['message'], 'one commit for the images and the blueprint');
+    }
+
+    public function test_a_blueprint_delete_removes_the_file_and_leaves_the_directory(): void {
+        $plan = build_asset_commit_plan('my-plugin', [ 'blueprint' => [ 'action' => 'delete', 'base' => [ 'filename' => 'blueprint.json', 'revision' => 40 ] ] ], self::listing('icon.svg'), 60, '/tmp/pending');
+        self::assertSame([ 'assets/blueprints/blueprint.json' ], $plan['deletes']);
+        self::assertSame([], $plan['mkdirs']);
+        self::assertSame([ 'blueprints/blueprint.json' ], $plan['details']['deleted']);
+        self::assertSame('Update assets of my-plugin (1 deleted) via Peak Publisher', $plan['message']);
+    }
+
+    public function test_the_listing_after_the_plan_holds_only_the_files_of_assets_itself(): void {
+        $listing = self::listing('icon.svg');
+        $plan = build_asset_commit_plan('my-plugin', [ 'blueprint' => [ 'action' => 'put', 'contents' => '{}', 'base' => null ] ], $listing, 60, '/tmp/pending', '/tmp/blueprint-x.json');
+
+        self::assertSame([ 'icon.svg' ], array_column(asset_listing_after_plan($listing['entries'], $plan, 61, []), 'name'), 'blueprints/blueprint.json is no file of assets/');
+    }
+
     public function test_the_listing_after_the_plan_needs_no_second_read(): void {
         $listing = self::listing('screenshot-1.jpg', 'screenshot-3.png');
         $plan = build_asset_commit_plan('my-plugin', [

@@ -1,12 +1,14 @@
 // LivePreview Component - the Live Preview section of a wordpress.org plugin's assets tab:
 // assets/blueprints/blueprint.json, one more entry of the same working copy as the images,
-// committed with them. Fixed zones, top down: the slot's band (AssetStatusBand) — what the
+// committed with them. Fixed zones, top down: the section's introduction with its tip, in
+// every state; then the box — a box like the images' (pblsh--assets-box), there as long as
+// the Live Preview has a state: the slot's band as its head (AssetStatusBand) — what the
 // commit will do, or where the file stands on the plugin page, with the check of the public
-// switch beneath once wordpress.org has read it; the notices; the fields, windows onto the
-// JSON, with the JSON itself beside them in expert mode; the actions; the other files of
-// assets/blueprints/. Above them all, in every state, the section's introduction with its tip.
-// Without a blueprint only the introduction, the band and Set up remain — the zones with
-// nothing to say are not there. Every change goes into the working copy at once — a
+// switch beneath once wordpress.org has read it —, then the notices; the fields, windows onto
+// the JSON, with the JSON itself beside them in expert mode; the actions on the blueprint;
+// the other files of assets/blueprints/. Set up stands outside the box, beneath it, while no
+// blueprint is in effect; with nothing here, there or on the page only the introduction and
+// Set up remain — the zones with nothing to say are not there. Every change goes into the working copy at once — a
 // field when it is left, the editor a second after the typing stops while it is valid. The
 // view is the server's (assets.blueprint, assets.wporg.slots.blueprint); the editor's draft
 // and its saving are the store's (Pblsh.Controllers.BlueprintDraft), so leaving the section
@@ -350,17 +352,18 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             ),
         );
 
-        // Zone 4: the test of the working copy, or setting up; the menu.
+        // Zone 4: the actions on the blueprint in effect — the test of the working copy, the menu.
+        // Setting up is no action on it: that button stands outside the box.
         const testBlocked = draft !== null || saving || !view.test.url;
         const testButton = createElement(Button, {
             isPrimary: true,
             ...(testBlocked ? { disabled: true } : { href: view.test.url, target: '_blank', rel: 'noreferrer' }),
         }, T.getTestLabel() + ' ↗');
+        const renderSetUp = () => createElement('div', { className: 'pblsh--live-preview__actions' },
+            createElement(Button, { isPrimary: true, isBusy: fieldBusy === 'create', disabled: readOnly || fieldBusy !== null, onClick: () => change('create', { change: 'create' }) }, T.getSetUpLabel()));
         const renderActions = () => createElement('div', { className: 'pblsh--live-preview__actions' },
-            hasBlueprint
-                ? (testBlocked ? testButton : createElement(Tooltip, { text: T.getTestTooltip(required ? required.version : null) }, testButton))
-                : createElement(Button, { isPrimary: true, isBusy: fieldBusy === 'create', disabled: readOnly || fieldBusy !== null, onClick: () => change('create', { change: 'create' }) }, T.getSetUpLabel()),
-            hasBlueprint && createElement(DropdownMenu, {
+            testBlocked ? testButton : createElement(Tooltip, { text: T.getTestTooltip(required ? required.version : null) }, testButton),
+            createElement(DropdownMenu, {
                 icon: getSvgIcon('dots_horizontal', { size: 24 }),
                 label: __('More options', 'peak-publisher'),
                 children: ({ onClose }) => createElement(MenuItem, {
@@ -376,6 +379,14 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const footer = otherCount > 0 && createElement('div', { className: 'pblsh--assets-footer' },
             T.getOtherFilesText(otherCount), ' · ', external(svnUrl, T.getBlueprintsFolderLabel() + ' ↗'));
 
+        // The box: the band as its head, what the section says beneath; there as long as the Live
+        // Preview has a state — a band, or a blueprint in effect while wordpress.org's state is shown.
+        const band = renderBand();
+        const box = (...body) => createElement('div', { className: 'pblsh--assets-box pblsh--live-preview__box' },
+            band,
+            body.some(Boolean) && createElement('div', { className: 'pblsh--live-preview__body' }, ...body),
+        );
+
         // Changed here and on wordpress.org: both states, each with the decision that takes it.
         if (slot && slot.conflict && !showingWporgState) {
             const side = (label, contents, emptyText, meta, decision) => createElement('div', { className: 'pblsh--live-preview__compare-side' },
@@ -387,25 +398,28 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             );
             return createElement('div', { className: 'pblsh--live-preview' },
                 intro,
-                renderBand(),
-                createElement('div', { className: 'pblsh--live-preview__compare' },
-                    side(__('Mine', 'peak-publisher'), slot.pending === 'delete' ? null : blueprint.contents, __('Deleted here', 'peak-publisher'), null,
-                        createElement(Button, { isPrimary: true, disabled: readOnly, onClick: () => onResolve('blueprint', 'mine') }, __('Keep mine', 'peak-publisher'))),
-                    side(__('wordpress.org', 'peak-publisher'), onWporg ? onWporg.contents : null, __('Deleted there', 'peak-publisher'),
-                        onWporg ? createElement(Fragment, null, ' ', createElement(WporgRevisionLink, { revision: onWporg.revision })) : null,
-                        createElement(Button, { isSecondary: true, disabled: readOnly, onClick: () => onResolve('blueprint', 'theirs') }, __('Take theirs', 'peak-publisher'))),
+                box(
+                    createElement('div', { className: 'pblsh--live-preview__compare' },
+                        side(__('Mine', 'peak-publisher'), slot.pending === 'delete' ? null : blueprint.contents, __('Deleted here', 'peak-publisher'), null,
+                            createElement(Button, { isPrimary: true, disabled: readOnly, onClick: () => onResolve('blueprint', 'mine') }, __('Keep mine', 'peak-publisher'))),
+                        side(__('wordpress.org', 'peak-publisher'), onWporg ? onWporg.contents : null, __('Deleted there', 'peak-publisher'),
+                            onWporg ? createElement(Fragment, null, ' ', createElement(WporgRevisionLink, { revision: onWporg.revision })) : null,
+                            createElement(Button, { isSecondary: true, disabled: readOnly, onClick: () => onResolve('blueprint', 'theirs') }, __('Take theirs', 'peak-publisher'))),
+                    ),
+                    footer,
                 ),
-                footer,
             );
         }
 
         return createElement('div', { className: 'pblsh--live-preview' },
             intro,
-            renderBand(),
-            ...renderNotices(),
-            hasBlueprint && renderMain(),
-            renderActions(),
-            footer,
+            (band || hasBlueprint) && box(
+                ...renderNotices(),
+                hasBlueprint && renderMain(),
+                hasBlueprint && renderActions(),
+                footer,
+            ),
+            !hasBlueprint && renderSetUp(),
         );
     };
 })());

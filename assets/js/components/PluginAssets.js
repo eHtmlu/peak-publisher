@@ -298,6 +298,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         } : {};
 
         const classNames = [
+            'pblsh--assets-box',
             'pblsh--asset-slot',
             'pblsh--asset-slot--box',
             isUploading ? 'pblsh--asset-slot--uploading' : '',
@@ -462,7 +463,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
 
         const newScreenshotBox = createElement('div', {
             key: newSlotKey,
-            className: ['pblsh--asset-slot', 'pblsh--asset-slot--box', 'pblsh--asset-slot--new', isUploadingNew ? 'pblsh--asset-slot--uploading' : '', isDragOverNew ? 'pblsh--asset-slot--drag-target' : ''].filter(Boolean).join(' '),
+            className: ['pblsh--assets-box', 'pblsh--asset-slot', 'pblsh--asset-slot--box', 'pblsh--asset-slot--new', isUploadingNew ? 'pblsh--asset-slot--uploading' : '', isDragOverNew ? 'pblsh--asset-slot--drag-target' : ''].filter(Boolean).join(' '),
             onDragOver: (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
@@ -579,22 +580,23 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
                 row,
                 createElement('div', { role: 'tabpanel', id: panelId(activeSection), 'aria-labelledby': tabId(activeSection) },
                     activeSection === 'icons' && createElement(Fragment, null,
-                        // Icons group
-                        createElement('div', { className: 'pblsh--assets-group' },
-                            createElement('div', { className: 'pblsh--assets-group__label' }, __('Icons', 'peak-publisher')),
-                            createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                                renderAssetBox('icon_svg', view && view.icon_svg),
-                                renderAssetBox('icon_256', view && view.icon_256),
-                                renderAssetBox('icon_128', view && view.icon_128),
+                        // The icon and the banner side by side, each a column of its boxes.
+                        createElement('div', { className: 'pblsh--assets-columns' },
+                            createElement('div', { className: 'pblsh--assets-group' },
+                                createElement('div', { className: 'pblsh--assets-group__label' }, __('Icon', 'peak-publisher')),
+                                createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                                    renderAssetBox('icon_svg', view && view.icon_svg),
+                                    renderAssetBox('icon_256', view && view.icon_256),
+                                    renderAssetBox('icon_128', view && view.icon_128),
+                                ),
                             ),
-                        ),
-                        // Banners group
-                        createElement('div', { className: 'pblsh--assets-group' },
-                            createElement('div', { className: 'pblsh--assets-group__label' }, __('Banners', 'peak-publisher')),
-                            createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
-                                renderAssetBox('banner_svg', view && view.banner_svg),
-                                renderAssetBox('banner_hd', view && view.banner_hd),
-                                renderAssetBox('banner_sd', view && view.banner_sd),
+                            createElement('div', { className: 'pblsh--assets-group' },
+                                createElement('div', { className: 'pblsh--assets-group__label' }, __('Banner', 'peak-publisher')),
+                                createElement('div', { className: 'pblsh--assets-slots pblsh--assets-slots--boxes' },
+                                    renderAssetBox('banner_svg', view && view.banner_svg),
+                                    renderAssetBox('banner_hd', view && view.banner_hd),
+                                    renderAssetBox('banner_sd', view && view.banner_sd),
+                                ),
                             ),
                         ),
                         otherFiles,

@@ -173,7 +173,7 @@
     });
     // The directory refreshes in the order they were asked for (see refreshWporg).
     var wporgRefreshes = Promise.resolve();
-    async function runWporgRefresh(pluginId) {
+    async function runWporgRefresh(pluginId, watch) {
         var dispatch = wp.data.dispatch('pblsh/plugins');
         // What this client's copies were made from — the server answers the row of every
         // plugin that moved since, whoever moved it (this refresh, another tab, a commit).
@@ -183,16 +183,26 @@
         });
         dispatch.setRefreshingWporg(true);
         try {
-            var answer = await window.Pblsh.API.refreshWporg(pluginId, known);
+            var answer = await window.Pblsh.API.refreshWporg(pluginId, known, watch);
             dispatch.applyWporgRefresh(answer, Date.now());
             return answer;
         } catch (e) {
-            // A question the server did not answer is asked again in a minute, not at once.
-            dispatch.setNextWporgCheckAt(Date.now() + 60000);
+            // A question the server did not answer is asked again in a minute, not at once —
+            // the watch keeps its own beat and leaves the clock alone.
+            if (!watch) dispatch.setNextWporgCheckAt(Date.now() + 60000);
             throw e;
         } finally {
             dispatch.setRefreshingWporg(false);
         }
+    }
+    // One at a time: a refresh asked for while another runs starts once that one has settled,
+    // so the manual Refresh is never refused and its answer, the later one, is applied last.
+    function enqueueWporgRefresh(pluginId, watch) {
+        var refresh = wporgRefreshes.then(function() {
+            return runWporgRefresh(pluginId, watch);
+        });
+        wporgRefreshes = refresh.catch(function() {});
+        return refresh;
     }
     // Controllers (async helpers). A request that fails rejects with the server's error, code
     // and message intact — the caller reports it; the store keeps no error of its own.
@@ -216,15 +226,16 @@
         // Brings the wordpress.org plugins up to date — every marker with whatever is due, or
         // one straight against SVN (the editor's Refresh) — and takes the answer into the
         // store (applyWporgRefresh). Resolves to the answer, whose `plugins` are the rows that
-        // moved, so a caller can reload what else it holds of them. One at a time: a refresh
-        // asked for while another runs starts once that one has settled, so the manual Refresh
-        // is never refused and its answer, the later one, is applied last.
+        // moved — their SVN copy or the directory stamp —, so a caller can reload what else it
+        // holds of them.
         refreshWporg: function(pluginId) {
-            var refresh = wporgRefreshes.then(function() {
-                return runWporgRefresh(pluginId || null);
-            });
-            wporgRefreshes = refresh.catch(function() {});
-            return refresh;
+            return enqueueWporgRefresh(pluginId || null, false);
+        },
+        // The import watch: this plugin's stamp compared once more, SVN read only when it moved,
+        // the site-wide clock untouched (the `watch` form of the route) — the same queue, the
+        // answer taken the same way.
+        watchWporgImport: function(pluginId) {
+            return enqueueWporgRefresh(pluginId, true);
         },
         fetchById: async function(id) {
             var dispatch = wp.data.dispatch('pblsh/plugins');

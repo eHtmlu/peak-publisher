@@ -488,20 +488,6 @@ function blueprint_ignored_reason(array $file): ?string {
 
 
 /**
- * Whether wordpress.org's import has read the blueprint.json the mirror holds: the stamp of the
- * directory check (get_wporg_directory()['stamp'], null before the first check) names the file
- * with a revision at or after the mirror file's — the import exports the whole plugin at its
- * revision then, and the info API shows the file as soon as the import ran, since the import
- * empties its cache. Until then the switch of the public preview does not exist on
- * wordpress.org, and the plugin page shows nothing of it.
- */
-function blueprint_imported(?array $stamp, array $file): bool {
-    $revision = $stamp['assets'][PBLSH_BLUEPRINT_FILENAME] ?? null;
-    return is_int($revision) && $revision >= (int) $file['revision'];
-}
-
-
-/**
  * What the Live Preview must install before the plugin: the Requires Plugins of the release
  * wordpress.org distributes — the preview installs the plugin by its slug, the current
  * release. Null without one (wordpress.org distributes trunk, or the pointer is unknown):

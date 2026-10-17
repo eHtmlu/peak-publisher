@@ -69,10 +69,13 @@ lodash.set(window, 'Pblsh.API', {
     // the editor's Refresh, straight against SVN. `known` are the tokens of the rows the client
     // holds ({ [id]: wporg_token }). Answers { stats, plugins, changes, next_check_in,
     // list_outdated }.
-    refreshWporg: async (pluginId = null, known = {}) => {
+    // The three forms of the refresh (AdminAPI::refresh_wporg_rest()): the automatic look at every
+    // plugin, the editor's Refresh of one straight against SVN, and with `watch` the import watch
+    // of one — its stamp compared, SVN only when it moved.
+    refreshWporg: async (pluginId = null, known = {}, watch = false) => {
         return await window.Pblsh.API.request('admin/wporg/refresh', {
             method: 'POST',
-            body: { plugin_id: pluginId, known },
+            body: { plugin_id: pluginId, known, watch },
         });
     },
     // Dismiss the one-time notice about the schema upgrade (includes/upgrade.php)

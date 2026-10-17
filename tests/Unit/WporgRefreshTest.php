@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pblsh\Tests\Unit;
 
+use function Pblsh\confirm_wporg_directory_check;
 use function Pblsh\mark_wporg_plugin_cache_stale;
 use function Pblsh\update_wporg_assets_state;
 use function Pblsh\wporg_assets_state_defaults;
@@ -47,17 +48,25 @@ final class WporgRefreshTest extends TestCase {
         self::assertSame([ 'assets' => true ], wporg_refresh_changes([], self::READ, self::READ, true));
     }
 
-    public function test_the_token_moves_with_the_cached_revision_and_the_mirror(): void {
+    public function test_the_token_moves_with_the_cached_revision_the_mirror_and_the_stamp(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin', 'publish', [ 'revision' => 7, 'release_count' => 2, 'trunk_readme' => self::READ, 'fetched_at' => 123 ]);
-        self::assertSame('7:-', wporg_sync_token($marker), 'the mirror was never pulled');
+        self::assertSame('7:-:-', wporg_sync_token($marker), 'the mirror was never pulled, the directory never checked');
 
         update_wporg_assets_state($marker->ID, [ ...wporg_assets_state_defaults(), 'revision' => 5 ]);
-        self::assertSame('7:5', wporg_sync_token($marker));
+        self::assertSame('7:5:-', wporg_sync_token($marker));
 
         update_wporg_assets_state($marker->ID, [ ...wporg_assets_state_defaults(), 'revision' => 0 ]);
-        self::assertSame('7:0', wporg_sync_token($marker), 'no assets directory is a state of its own');
+        self::assertSame('7:0:-', wporg_sync_token($marker), 'no assets directory is a state of its own');
 
         mark_wporg_plugin_cache_stale($marker->ID);
-        self::assertSame('-:0', wporg_sync_token(get_post($marker->ID)), 'a commit of our own moves the token for every other client');
+        self::assertSame('-:0:-', wporg_sync_token(get_post($marker->ID)), 'a commit of our own moves the token for every other client');
+
+        $stamp = [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [ 'icon.svg' => 12 ] ];
+        confirm_wporg_directory_check($marker->ID, $stamp);
+        $checked = wporg_sync_token(get_post($marker->ID));
+        self::assertStringStartsWith('-:0:', $checked);
+        self::assertNotSame('-:0:-', $checked, 'the first directory check moves the token');
+        confirm_wporg_directory_check($marker->ID, [ ...$stamp, 'assets' => [ 'icon.svg' => 13 ] ]);
+        self::assertNotSame($checked, wporg_sync_token(get_post($marker->ID)), "wordpress.org's import of an own commit moves the stamp alone — and the token with it");
     }
 }

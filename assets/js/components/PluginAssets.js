@@ -7,9 +7,10 @@
 // the plugin comes with pluginData, a changed icon reaches the header and the list through
 // refreshPlugin. A
 // wordpress.org plugin edits a working copy over its mirror of SVN's assets/: while it holds
-// changes, the right half of the sub-tab row names them and commits them as one, every box
-// shows what its change does, a conflict box lets the user decide, and wordpress.org's state
-// can be shown alone. A mirror that was never read leaves the tab showing only; its notice
+// changes, the right half of the sub-tab row names them and commits them as one, every box's
+// band says what its change does or where its file stands on the plugin page
+// (AssetStatusBand), a conflict box lets the user decide, and wordpress.org's state can be
+// shown alone. A mirror that was never read leaves the tab showing only; its notice
 // offers the editor's Refresh (refreshFromWporg, refreshingWporg). Each section carries a dot
 // while changes in it wait for the commit; the row's right half is the whole working copy's.
 lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin, refreshFromWporg, refreshingWporg, section, onSectionChange }) => {
@@ -21,9 +22,9 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText,
         getAssetSections, getAssetSection, getPendingCountText, getConflictsText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
-        getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
+        getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText,
     } = Pblsh.AssetsUtils;
-    const { TipLink, NoticeBox, WporgRevisionLink, LivePreview } = Pblsh.Components;
+    const { TipLink, NoticeBox, WporgRevisionLink, LivePreview, AssetStatusBand } = Pblsh.Components;
 
     const isWporg = !!pluginData && pluginData.hosting_type === 'wporg';
     // The working copy waits without an account; only the commit needs one.
@@ -247,12 +248,10 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const slotKey = slot === 'screenshot' ? 'screenshot-' + screenshotN : slot;
         const isUploading = uploadingSlot === slotKey;
         const hasAsset = !!(assetData && assetData.filename);
-        // What the working copy does to this slot (wordpress.org) — not while wordpress.org's state is shown.
+        // The slot's facts on wordpress.org (the working copy's change, the mirror's file, the plugin
+        // page's) — not while wordpress.org's state is shown.
         const slotInfo = wporg && !showingWporgState ? wporg.slots[slotKey] || null : null;
         const conflict = !!(slotInfo && slotInfo.conflict);
-        const pendingDelete = !!(slotInfo && slotInfo.pending === 'delete');
-        // The band names what the commit will do to the slot: add, replace or delete its file there.
-        const band = conflict ? 'conflict' : pendingDelete ? 'delete' : slotInfo && slotInfo.pending ? (slotInfo.on_wporg ? 'replace' : 'add') : null;
         const editable = !readOnly && !conflict;
         const warnings = (assetData && assetData.warnings) || [];
         const isScreenshot = slot === 'screenshot';
@@ -311,23 +310,22 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             className: classNames,
             ...dragProps,
         },
-            band && createElement('div', { className: 'pblsh--assets-band pblsh--assets-band--' + band },
-                getBandText(band),
+            // The band every slot of a wordpress.org plugin carries, the empty ones too: what the
+            // commit will do with the slot, or where its file stands on the plugin page.
+            wporg && !showingWporgState && createElement(AssetStatusBand, {
+                slot: slotInfo,
+                forecast: pluginData.wporg_import,
+                disabled: busy !== null,
                 // The slot's change is taken back here, on every band alike — in a conflict too, where
                 // this is the familiar way out and "Take theirs" in the box below does the same as the
                 // decision beside the pictures: kept both on purpose, one word learnt from every other
                 // band. An upload is lost with its change, so that one asks; a move or a delete is only
                 // taken back.
-                createElement(Button, {
-                    isSecondary: true,
-                    className: 'pblsh--assets-band__discard',
-                    disabled: busy !== null,
-                    onClick: () => {
-                        if (slotInfo.pending === 'put' && !confirm(getDiscardUploadConfirmText())) return;
-                        handleResolve(slotKey, 'theirs');
-                    },
-                }, __('Discard', 'peak-publisher')),
-            ),
+                onDiscard: () => {
+                    if (slotInfo.pending === 'put' && !confirm(getDiscardUploadConfirmText())) return;
+                    handleResolve(slotKey, 'theirs');
+                },
+            }),
             editable && createElement('input', {
                 ref: (el) => { fileInputRefs.current[slotKey] = el; },
                 type: 'file',
@@ -427,12 +425,13 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const captions = (view && view.screenshot_captions) || {};
         const screenshotMap = {};
         screenshots.forEach(s => { screenshotMap[s.screenshot_n] = s; });
-        // Positions with a pending change stay visible — a deleted screenshot keeps its box until the commit.
-        const changedNs = {};
+        // Positions with a pending change, or a file the plugin page still shows, keep their box —
+        // a deleted screenshot until the commit, a committed delete until the import: its band says so.
+        const keptNs = {};
         if (wporg && !showingWporgState) {
             Object.keys(wporg.slots).forEach((slotKey) => {
                 const match = /^screenshot-(\d+)$/.exec(slotKey);
-                if (match && wporg.slots[slotKey].pending) changedNs[parseInt(match[1], 10)] = true;
+                if (match && (wporg.slots[slotKey].pending || wporg.slots[slotKey].shown)) keptNs[parseInt(match[1], 10)] = true;
             });
         }
 
@@ -441,11 +440,11 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         const screenshotKeys = screenshots.map(s => s.screenshot_n);
         const maxCaption = captionKeys.length > 0 ? Math.max(...captionKeys) : 0;
         const maxScreenshot = screenshotKeys.length > 0 ? Math.max(...screenshotKeys) : 0;
-        const maxN = Math.max(maxCaption, maxScreenshot, ...Object.keys(changedNs).map(Number));
+        const maxN = Math.max(maxCaption, maxScreenshot, ...Object.keys(keptNs).map(Number));
 
         // Trim trailing empty slots that have no caption
         let visibleMaxN = maxN;
-        while (visibleMaxN > 0 && !screenshotMap[visibleMaxN] && !captions[visibleMaxN] && !changedNs[visibleMaxN]) {
+        while (visibleMaxN > 0 && !screenshotMap[visibleMaxN] && !captions[visibleMaxN] && !keptNs[visibleMaxN]) {
             visibleMaxN--;
         }
 
@@ -552,7 +551,7 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
             },
                 candidate.label,
                 pendingIn(candidate.key) && createElement('span', { className: 'pblsh--assets-subtabs__pending', 'aria-hidden': true }),
-                pendingIn(candidate.key) && createElement('span', { className: 'screen-reader-text' }, ' (' + __('changes not on wordpress.org yet', 'peak-publisher') + ')'),
+                pendingIn(candidate.key) && createElement('span', { className: 'screen-reader-text' }, ' (' + __('changes not committed yet', 'peak-publisher') + ')'),
             )),
         );
         // The row: the tabs, and at its right end the working copy while there is one. Its

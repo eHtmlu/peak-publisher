@@ -1,11 +1,12 @@
 // LivePreview Component - the Live Preview section of a wordpress.org plugin's assets tab:
 // assets/blueprints/blueprint.json, one more entry of the same working copy as the images,
-// committed with them. Fixed zones, top down: the band of the working copy; the state on
-// wordpress.org (committed, on the plugin page, public — checked there); the notices; the
-// fields, windows onto the JSON, with the JSON itself beside them in expert mode; the actions;
-// the other files of assets/blueprints/. Above them all, in every state, the section's
-// introduction with its tip. Without a blueprint only the introduction and Set up remain — the
-// zones with nothing to say are not there. Every change goes into the working copy at once — a
+// committed with them. Fixed zones, top down: the slot's band (AssetStatusBand) — what the
+// commit will do, or where the file stands on the plugin page, with the check of the public
+// switch beneath once wordpress.org has read it; the notices; the fields, windows onto the
+// JSON, with the JSON itself beside them in expert mode; the actions; the other files of
+// assets/blueprints/. Above them all, in every state, the section's introduction with its tip.
+// Without a blueprint only the introduction, the band and Set up remain — the zones with
+// nothing to say are not there. Every change goes into the working copy at once — a
 // field when it is left, the editor a second after the typing stops while it is valid. The
 // view is the server's (assets.blueprint, assets.wporg.slots.blueprint); the editor's draft
 // and its saving are the store's (Pblsh.Controllers.BlueprintDraft), so leaving the section
@@ -28,17 +29,17 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const { useSelect } = wp.data;
         const { Button, DropdownMenu, MenuItem, SelectControl, TextControl, ToggleControl, Tooltip } = wp.components;
         const { getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
-        const { getBandText } = Pblsh.AssetsUtils;
+        const { getShownText } = Pblsh.AssetsUtils;
         const T = Pblsh.LivePreviewUtils;
-        const { NoticeBox, BlueprintEditor, RelativeTime, TipLink, WporgRevisionLink } = Pblsh.Components;
+        const { NoticeBox, BlueprintEditor, RelativeTime, TipLink, WporgRevisionLink, AssetStatusBand } = Pblsh.Components;
 
         const id = pluginData.id;
         const slug = pluginData.slug;
         const blueprint = assets.blueprint;
-        const slot = assets.wporg.slots.blueprint || null;   // { pending, conflict, on_wporg } — null: nothing there or here
+        const slot = assets.wporg.slots.blueprint || null;   // { pending, conflict, on_wporg, shown } — null: nothing there, here or on the page
         const onWporg = blueprint.on_wporg;                   // wordpress.org's file, null: none
         const committed = !!onWporg && !onWporg.ignored;      // a file the plugin page can use
-        const imported = committed && onWporg.imported;       // wordpress.org has read it: the public switch exists there
+        const imported = committed && slot.on_wporg.imported === true;   // wordpress.org has read it: the public switch exists there
         const preview = blueprint.preview;                    // the last check of the public switch, null: never
         const required = blueprint.required;                  // { version, slugs } of the current release, null: none
         // wordpress.org's state alone (the bar's switch): the mirror's file and fields, read-only;
@@ -158,45 +159,46 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             createElement('p', null, T.getIntroText()),
             createElement(TipLink, { tipKey: 'livePreview', params: { slug } }));
 
-        // Zone 1: what the commit will do — the band of the images' boxes, with its Discard.
-        const bandKind = pending === 'delete' ? 'delete' : slot && slot.on_wporg ? 'replace' : 'add';
-        const band = pending && createElement('div', { className: 'pblsh--assets-band pblsh--assets-band--' + bandKind },
-            getBandText(bandKind),
-            createElement(Button, {
-                isSecondary: true,
-                className: 'pblsh--assets-band__discard',
-                disabled: readOnly || fieldBusy !== null || draft !== null || saving,
-                onClick: () => {
-                    if (pending === 'put' && !confirm(T.getDiscardConfirmText())) return;
-                    onResolve('blueprint', 'theirs');
-                },
-            }, __('Discard', 'peak-publisher')),
-        );
-
-        // Zone 2: the state on wordpress.org. The check's line keeps the last answer with its age
-        // while a new check runs, "Checking…" beside it — nothing jumps.
-        const renderCheckLine = () => createElement('span', { className: 'pblsh--live-preview__status-check' },
+        // Zone 1: the slot's band — what the commit will do, with its Discard, or where the file
+        // stands on the plugin page; once wordpress.org has read it, the check of the public switch
+        // beneath. The check's line keeps the last answer with its age while a new check runs,
+        // "Checking…" beside it — nothing jumps. Visitors not seeing what is on the page is the one
+        // state that asks the user to act: the warning, with the way there. Not while wordpress.org's
+        // state is shown — like the images' boxes —, and not with nothing here, there or on the page:
+        // unlike an image slot, the empty Live Preview is no slot in a grid, the empty state speaks
+        // for itself.
+        const renderCheckLine = () => createElement(Fragment, null,
             external(previewUrl, T.getOpenLabel() + ' ↗'),
             preview && createElement(Fragment, null, ' · ', createElement(RelativeTime, { value: new Date(preview.checked_at * 1000).toISOString(), tooltip: true })),
             ' · ', createElement(Button, { isLink: true, disabled: checking, onClick: check }, T.getCheckAgainLabel()),
             checking && createElement(Fragment, null, ' · ', T.getCheckingText()),
             !checking && checkFailed && createElement(Fragment, null, ' · ', T.getCheckFailedText()),
         );
-        const renderStatus = () => {
-            const line = (...children) => createElement('div', { className: 'pblsh--live-preview__status' }, ...children);
-            // Nothing here and nothing there: no state to tell — the empty state speaks for itself.
-            if (!onWporg) return blueprint.contents === null ? null : line(T.getNotCommittedText());
-            if (onWporg.ignored) return line(T.getIgnoredStatusText());
-            if (!imported) return line(T.getCommittedText(pluginData.wporg_import));
-            if (!preview) return line(T.getOnWporgText(), ' · ', renderCheckLine());
-            if (preview.public) return line(getSvgIcon('check_circle', { size: 18 }), T.getPublicText(), ' · ', renderCheckLine());
-            return createElement(NoticeBox, { variant: 'warning' },
-                createElement('p', null, T.getNotPublicText(), ' ', createInterpolateElement(T.getSwitchText(), { a: advancedLink })),
-                createElement('p', null, renderCheckLine()),
-            );
+        const renderBand = () => {
+            if (showingWporgState) return null;
+            const band = (props, detail = null) => createElement(AssetStatusBand, {
+                slot,
+                forecast: pluginData.wporg_import,
+                disabled: readOnly || fieldBusy !== null || draft !== null || saving,
+                onDiscard: () => {
+                    if (pending === 'put' && !confirm(T.getDiscardConfirmText())) return;
+                    onResolve('blueprint', 'theirs');
+                },
+                ...props,
+            }, detail);
+            if (!pending && !onWporg && !(slot && slot.shown)) return null;
+            if (pending || !onWporg) return band({});
+            if (onWporg.ignored) return band({ text: T.getIgnoredStatusText(), icon: 'alert_outline' });
+            if (!imported) return band({});
+            if (!preview) return band({}, renderCheckLine());
+            if (preview.public) return band({ text: getShownText() + ' · ' + T.getPublicText() }, renderCheckLine());
+            return band({
+                warning: true,
+                text: createElement(Fragment, null, T.getNotPublicText(), ' ', createElement('span', { className: 'pblsh--assets-band__note' }, createInterpolateElement(T.getSwitchText(), { a: advancedLink }))),
+            }, renderCheckLine());
         };
 
-        // Zone 3: the notices, at one place — fact, consequence, remedy.
+        // Zone 2: the notices, at one place — fact, consequence, remedy.
         const renderNotices = () => [
             onWporg && onWporg.ignored && !pending && createElement(NoticeBox, { key: 'ignored', variant: 'warning' },
                 createElement('p', null, onWporg.ignored === 'too_large'
@@ -207,7 +209,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             hasBlueprint && view.test.blocked === 'not_downloadable' && createElement(NoticeBox, { key: 'not-downloadable', variant: 'warning' }, createElement('p', null, T.getNotDownloadableText())),
         ].filter(Boolean);
 
-        // Zone 4: the fields — each reads its part of the JSON and writes only that; locked while
+        // Zone 3: the fields — each reads its part of the JSON and writes only that; locked while
         // the editor holds something the JSON does not have yet, the save line says why.
         const locked = readOnly || draft !== null || saving || fieldBusy !== null || !view.fields;
         const renderFieldLabel = (field, text) => createElement('div', { className: 'pblsh--live-preview__field-label' },
@@ -348,7 +350,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             ),
         );
 
-        // Zone 5: the test of the working copy, or setting up; the menu.
+        // Zone 4: the test of the working copy, or setting up; the menu.
         const testBlocked = draft !== null || saving || !view.test.url;
         const testButton = createElement(Button, {
             isPrimary: true,
@@ -369,7 +371,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             }),
         );
 
-        // Zone 6: the other files of assets/blueprints/.
+        // Zone 5: the other files of assets/blueprints/.
         const otherCount = blueprint.other_files + Math.max(0, blueprint.blueprint_files - (onWporg ? 1 : 0));
         const footer = otherCount > 0 && createElement('div', { className: 'pblsh--assets-footer' },
             T.getOtherFilesText(otherCount), ' · ', external(svnUrl, T.getBlueprintsFolderLabel() + ' ↗'));
@@ -385,9 +387,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             );
             return createElement('div', { className: 'pblsh--live-preview' },
                 intro,
-                createElement('div', { className: 'pblsh--assets-band pblsh--assets-band--conflict' }, getBandText('conflict'),
-                    createElement(Button, { isSecondary: true, className: 'pblsh--assets-band__discard', disabled: readOnly, onClick: () => onResolve('blueprint', 'theirs') }, __('Discard', 'peak-publisher'))),
-                renderStatus(),
+                renderBand(),
                 createElement('div', { className: 'pblsh--live-preview__compare' },
                     side(__('Mine', 'peak-publisher'), slot.pending === 'delete' ? null : blueprint.contents, __('Deleted here', 'peak-publisher'), null,
                         createElement(Button, { isPrimary: true, disabled: readOnly, onClick: () => onResolve('blueprint', 'mine') }, __('Keep mine', 'peak-publisher'))),
@@ -401,8 +401,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
 
         return createElement('div', { className: 'pblsh--live-preview' },
             intro,
-            band,
-            renderStatus(),
+            renderBand(),
             ...renderNotices(),
             hasBlueprint && renderMain(),
             renderActions(),

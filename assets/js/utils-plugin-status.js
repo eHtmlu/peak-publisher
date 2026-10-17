@@ -52,7 +52,7 @@ lodash.set(window, 'Pblsh.PluginStatusUtils', (() => {
                 key: 'assets_pending',
                 variant: 'info',
                 label: sprintf(_n('%d pending asset change', '%d pending asset changes', plugin.assets_pending, 'peak-publisher'), plugin.assets_pending),
-                text: __('Asset changes not on wordpress.org yet.', 'peak-publisher'),
+                text: __('Asset changes not committed to wordpress.org yet.', 'peak-publisher'),
             });
         }
         const checkFailed = checkFailedItem(plugin);

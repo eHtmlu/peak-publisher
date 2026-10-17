@@ -227,6 +227,68 @@ function apply_asset_change(array $pending, array $mirror, array $change): array
     return [ 'pending' => $pending, 'renames' => $renames, 'removes' => [], 'mode' => $to_content === null ? 'move' : 'swap' ];
 }
 
+/**
+ * Whether wordpress.org's import has read a file the mirror holds: the stamp of the directory
+ * check (get_wporg_directory()['stamp']) names the file with a revision at or after the mirror
+ * file's — the import exports the whole plugin at its revision then, and the info API shows the
+ * file as soon as the import ran, since the import empties its cache. Null before the first
+ * check: unknown, not "no". A changed filename is another file: the slot is imported only once
+ * the stamp names the new one.
+ *
+ * @param array{filename:string, revision:int} $file a mirror state (wporg_asset_base(), blueprint_mirror_base())
+ */
+function asset_imported(?array $stamp, array $file): ?bool {
+    if ($stamp === null) {
+        return null;
+    }
+    $revision = $stamp['assets'][(string) $file['filename']] ?? null;
+    return is_int($revision) && $revision >= (int) $file['revision'];
+}
+
+/**
+ * The file the plugin page shows for every slot, slot → filename, read from the stamp's files
+ * by the filename rule (classify_asset_filename(), asset_slot_id()); blueprint.json is the Live
+ * Preview's, the other blueprint files have no slot. Empty before the first check.
+ *
+ * @return array<string, string>
+ */
+function assets_shown(?array $stamp): array {
+    $shown = [];
+    foreach (array_keys($stamp['assets'] ?? []) as $filename) {
+        $filename = (string) $filename;
+        if ($filename === PBLSH_BLUEPRINT_FILENAME) {
+            $shown['blueprint'] = $filename;
+            continue;
+        }
+        $class = classify_asset_filename($filename);
+        $slot_id = $class === null ? null : asset_slot_id($class);
+        if ($slot_id !== null) {
+            $shown[$slot_id] = $filename;
+        }
+    }
+    return $shown;
+}
+
+/**
+ * Whether the plugin page is behind the mirror, an import still to come: a slot of the mirror
+ * the import has not read (asset_imported()), or a slot the page shows a file for that the
+ * mirror no longer holds — deleted, the import of the delete waiting. Unknown is no waiting:
+ * false before the first check.
+ *
+ * @param array<string, array{filename:string, revision:int}> $mirror slot → state, the Live Preview included (wporg_mirror_slots())
+ */
+function assets_import_waiting(?array $stamp, array $mirror): bool {
+    if ($stamp === null) {
+        return false;
+    }
+    foreach ($mirror as $file) {
+        if (asset_imported($stamp, $file) !== true) {
+            return true;
+        }
+    }
+    return array_diff_key(assets_shown($stamp), $mirror) !== [];
+}
+
 /** Slots whose entry builds on a mirror state the mirror no longer has — changed here and on wordpress.org. */
 function asset_conflicts(array $pending, array $mirror): array {
     $conflicts = [];

@@ -1,35 +1,25 @@
 // Pure: the vocabulary of the Live Preview (Pblsh.LivePreviewUtils) — the assets tab's section
 // for assets/blueprints/blueprint.json of a wordpress.org plugin: the facts the section, the
 // list, the editor and the upload dialog say about it. No state, like utils-assets.js. Users
-// never read "imported": "on wordpress.org" means the plugin page shows it, in the words of
-// the import forecast.
+// never read "imported": what the plugin page shows is "on the plugin page", wordpress.org is
+// where a commit goes — the words of every slot's band (Pblsh.AssetsUtils).
 lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const { __, _n, sprintf } = wp.i18n;
 
     const list = (slugs) => slugs.join(', ');
 
-    // The state on wordpress.org — the section's status line: committed, on the plugin page, public.
-    const getNotCommittedText = () => __('Not committed yet.', 'peak-publisher');
-    // Committed, but the plugin page does not show it yet: the import forecast's words and time
-    // (ImportForecast) while it lasts — a tag or a flip imports within minutes.
-    const FORECAST_SHOWN_AFTER = 180000;
-    function getCommittedText(forecast) {
-        const expected = forecast ? Date.parse(forecast.expected_at) : NaN;
-        if (isNaN(expected) || Date.now() >= expected + FORECAST_SHOWN_AFTER) return __('Committed · not on wordpress.org yet', 'peak-publisher');
-        if (forecast.reason === 'tag' || forecast.reason === 'flip') return __('Committed · on wordpress.org within a few minutes', 'peak-publisher');
-        return sprintf(__('Committed · on wordpress.org around %s', 'peak-publisher'), new Date(expected).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    }
+    // What the band says of the Live Preview beyond the slot's facts (AssetStatusBand): a file
+    // the import has read and thrown away — a fact about wordpress.org, not about the page —,
+    // and the public switch.
     const getIgnoredStatusText = () => __('Committed · wordpress.org ignores it', 'peak-publisher');
-    const getOnWporgText = () => __('On wordpress.org', 'peak-publisher');
-    const getNotPublicText = () => __("On wordpress.org, but visitors don't see it yet.", 'peak-publisher');
+    const getNotPublicText = () => __("On the plugin page, but visitors don't see it yet.", 'peak-publisher');
     // <a> is the plugin's Advanced View on wordpress.org.
-    const getSwitchText = () => __("Switch it on in your plugin's <a>Advanced View</a>: The Danger Zone › Toggle Live Preview. Until then only committers see it, as Test Preview.", 'peak-publisher');
+    const getSwitchText = () => __("Switch it on in the plugin's <a>Advanced View</a>: The Danger Zone › Toggle Live Preview. Until then only committers see it, as Test Preview.", 'peak-publisher');
     const getPublicText = () => __('Public — visitors see the Live Preview button', 'peak-publisher');
     const getOpenLabel = () => __('Open', 'peak-publisher');
     const getCheckAgainLabel = () => __('Check again', 'peak-publisher');
     const getCheckingText = () => __('Checking wordpress.org…', 'peak-publisher');
     const getCheckFailedText = () => __('Could not check wordpress.org', 'peak-publisher');
-    const getNoneOnWporgText = () => __('No Live Preview on wordpress.org.', 'peak-publisher');
 
     // wordpress.org's own blueprint.json, which its import ignores: the plugin page has no preview.
     // Over the limit the file was not read, so there is nothing to fix here — a new one replaces
@@ -130,8 +120,8 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     // status column (whose tooltip says what, never how).
     function getFailsText(livePreview) {
         return sprintf(_n(
-            'The Live Preview on wordpress.org fails: %1$s, which version %2$s requires, is not installed before the plugin.',
-            'The Live Preview on wordpress.org fails: %1$s, which version %2$s requires, are not installed before the plugin.',
+            'The Live Preview on the plugin page fails: %1$s, which version %2$s requires, is not installed before the plugin.',
+            'The Live Preview on the plugin page fails: %1$s, which version %2$s requires, are not installed before the plugin.',
             livePreview.missing.length, 'peak-publisher'
         ), list(livePreview.missing), livePreview.version);
     }
@@ -154,8 +144,8 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getFlipCarriedText = (added) => sprintf(__('The Live Preview now installs %s too.', 'peak-publisher'), list(added));
 
     return {
-        getNotCommittedText, getCommittedText, getIgnoredStatusText, getOnWporgText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
-        getCheckingText, getCheckFailedText, getNoneOnWporgText, getIgnoredText, getNotDownloadableText,
+        getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
+        getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
         getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getThemePlaceholder, getSetInJsonText,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,

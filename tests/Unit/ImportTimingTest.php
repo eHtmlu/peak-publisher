@@ -5,20 +5,28 @@ declare(strict_types=1);
 namespace Pblsh\Tests\Unit;
 
 use function Pblsh\predict_wporg_import;
+use function Pblsh\resolve_current_release;
 use function Pblsh\serialize_wporg_import;
 use function Pblsh\wporg_commits_from_log;
+use function Pblsh\wporg_import_confirmed;
+use function Pblsh\wporg_import_facts;
 use function Pblsh\wporg_import_forecast_due;
 
+use const Pblsh\PBLSH_WPORG_DIRECTORY_META;
 use const Pblsh\PBLSH_WPORG_IMPORT_META;
 
 /**
  * When the plugin page shows a commit (includes/wporg_import_timing.php): wordpress.org's import
  * queue played over the plugin's recent commits — +5 s for tags and Stable tag flips, +15 min
- * after the last trunk or assets commit, every commit before the import ran folded into it.
+ * after the last trunk or assets commit, every commit before the import ran folded into it —
+ * and when the stored forecast ends: by time, or once the directory stamp confirms the import.
  */
 final class ImportTimingTest extends TestCase {
 
     private const T = 1_800_000_000;
+    private const STAMP = [ 'version' => '1.2.0', 'last_updated' => 'A', 'assets' => [] ];
+    private const WAITING = [ 'import_waiting' => true, 'current_version' => '1.2.0' ];
+    private const LANDED = [ 'import_waiting' => false, 'current_version' => '1.2.0' ];
 
     // trunk_touched defaults to what the tags say: trunk itself, unless the commit is an assets commit (the watcher
     // lists assets/ under trunk).
@@ -98,20 +106,61 @@ final class ImportTimingTest extends TestCase {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
         update_post_meta($marker->ID, PBLSH_WPORG_IMPORT_META, [ 'expected_at' => self::T, 'reason' => 'trunk', 'computed_at' => self::T - 900 ]);
 
-        self::assertSame([ 'expected_at' => gmdate('Y-m-d\TH:i:s\Z', self::T), 'reason' => 'trunk' ], serialize_wporg_import($marker->ID, self::T + 179));
-        self::assertNull(serialize_wporg_import($marker->ID, self::T + 180));
+        self::assertSame([ 'expected_at' => gmdate('Y-m-d\TH:i:s\Z', self::T), 'reason' => 'trunk' ], serialize_wporg_import($marker->ID, self::T + 179, self::LANDED));
+        self::assertNull(serialize_wporg_import($marker->ID, self::T + 180, self::LANDED));
 
         update_post_meta($marker->ID, PBLSH_WPORG_IMPORT_META, 'garbage');
-        self::assertNull(serialize_wporg_import($marker->ID, self::T), 're-validation when reading back from persistence');
+        self::assertNull(serialize_wporg_import($marker->ID, self::T, self::LANDED), 're-validation when reading back from persistence');
     }
 
     public function test_a_shown_forecast_is_recomputed_on_load_once_it_is_older_than_the_watchers_interval(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
-        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T), 'nothing stored');
+        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T, self::WAITING), 'nothing stored');
 
         update_post_meta($marker->ID, PBLSH_WPORG_IMPORT_META, [ 'expected_at' => self::T + 600, 'reason' => 'assets', 'computed_at' => self::T ]);
-        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T + 10), 'the reload right after the own commit');
-        self::assertTrue(wporg_import_forecast_due($marker->ID, self::T + 30));
-        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T + 600 + 180), 'no longer shown');
+        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T + 10, self::WAITING), 'the reload right after the own commit');
+        self::assertTrue(wporg_import_forecast_due($marker->ID, self::T + 30, self::WAITING));
+        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T + 600 + 180, self::WAITING), 'no longer shown');
+    }
+
+    public function test_the_stamp_confirms_an_import_of_assets_or_of_the_current_release_but_never_a_trunk_commit(): void {
+        $assets = [ 'expected_at' => self::T, 'reason' => 'assets' ];
+        self::assertFalse(wporg_import_confirmed($assets, self::STAMP, self::WAITING));
+        self::assertTrue(wporg_import_confirmed($assets, self::STAMP, self::LANDED));
+        self::assertFalse(wporg_import_confirmed($assets, null, self::LANDED), 'no check yet: nothing confirms');
+
+        foreach ([ 'flip', 'tag' ] as $reason) {
+            $stored = [ 'expected_at' => self::T, 'reason' => $reason ];
+            self::assertTrue(wporg_import_confirmed($stored, self::STAMP, self::WAITING), 'the directory shows the current release');
+            self::assertFalse(wporg_import_confirmed($stored, [ ...self::STAMP, 'version' => '1.1.0' ], self::WAITING));
+            self::assertFalse(wporg_import_confirmed($stored, self::STAMP, [ ...self::WAITING, 'current_version' => null ]), 'no current release: nothing to compare with');
+            self::assertFalse(wporg_import_confirmed($stored, null, self::WAITING));
+        }
+
+        self::assertFalse(wporg_import_confirmed([ 'expected_at' => self::T, 'reason' => 'trunk' ], self::STAMP, self::LANDED), 'a trunk commit leaves no trace in the stamp');
+    }
+
+    public function test_a_confirmed_forecast_is_neither_served_nor_recomputed(): void {
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
+        update_post_meta($marker->ID, PBLSH_WPORG_IMPORT_META, [ 'expected_at' => self::T + 600, 'reason' => 'assets', 'computed_at' => self::T ]);
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, [ 'state' => 'ok', 'stamp' => self::STAMP ]);
+
+        self::assertNotNull(serialize_wporg_import($marker->ID, self::T + 60, self::WAITING));
+        self::assertTrue(wporg_import_forecast_due($marker->ID, self::T + 60, self::WAITING));
+
+        self::assertNull(serialize_wporg_import($marker->ID, self::T + 60, self::LANDED), 'the import landed early');
+        self::assertFalse(wporg_import_forecast_due($marker->ID, self::T + 60, self::LANDED));
+    }
+
+    public function test_the_facts_are_read_from_the_marker_and_its_current_release(): void {
+        $readme = [ 'stable_tag' => '1.2.0', 'file_name' => 'readme.txt', 'screenshots' => [] ];
+        $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin', 'publish', [ 'revision' => 1, 'release_count' => 1, 'trunk_readme' => $readme ]);
+        $release = $this->create_release($marker, '1.2.0');
+
+        self::assertSame([ 'import_waiting' => false, 'current_version' => '1.2.0' ], wporg_import_facts($marker, resolve_current_release($marker, [ $release ])));
+
+        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, [ 'state' => 'ok', 'stamp' => [ ...self::STAMP, 'assets' => [ 'screenshot-1.png' => 5 ] ] ]);
+        self::assertTrue(wporg_import_facts($marker, resolve_current_release($marker, []))['import_waiting'], 'the page shows a file the mirror does not hold');
+        self::assertNull(wporg_import_facts($marker, resolve_current_release($marker, []))['current_version'], 'the Stable tag names no release');
     }
 }

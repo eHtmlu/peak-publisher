@@ -126,19 +126,62 @@ function predict_wporg_import(array $commits, int $now): ?array {
 }
 
 
-/** The stored forecast while it lasts — re-validation when reading back from persistence. */
-function stored_wporg_import(int $marker_id, int $now): ?array {
+/**
+ * The facts the directory stamp is read against to tell whether the import a forecast waits
+ * for has landed (wporg_import_confirmed()): whether the plugin page is behind the assets
+ * mirror (assets_import_waiting()), and the version of the current release — what the
+ * directory's `version` shows once a flip, or a tag that became current, is imported.
+ *
+ * @param array $current resolve_current_release()
+ * @return array{import_waiting:bool, current_version:?string}
+ */
+function wporg_import_facts(\WP_Post $marker, array $current): array {
+    $id = (int) $marker->ID;
+    return [
+        'import_waiting' => assets_import_waiting(get_wporg_directory($id)['stamp'], wporg_mirror_slots(read_asset_manifest($id), get_wporg_assets_state($id))),
+        'current_version' => $current['release'] instanceof \WP_Post ? (string) $current['release']->post_title : null,
+    ];
+}
+
+
+/**
+ * Whether the stamp confirms the import the forecast waits for — the forecast ends then,
+ * whatever its time said. Assets: nothing of the mirror waits any more. A flip or a tag: the
+ * directory's version is the current release's — a tag that did not become current leaves it
+ * as it is, and the plugin page shows nothing of that commit anyway. A trunk commit: never —
+ * wordpress.org bumps last_updated only when the version changed or the stable tag's folder
+ * was touched, so a readme edit on trunk leaves no trace in the stamp; that forecast ends by
+ * time alone. Nothing confirms before the first check.
+ */
+function wporg_import_confirmed(array $stored, ?array $stamp, array $facts): bool {
+    if ($stamp === null) {
+        return false;
+    }
+    return match ((string) $stored['reason']) {
+        'assets' => !$facts['import_waiting'],
+        'flip', 'tag' => $facts['current_version'] !== null && $stamp['version'] === $facts['current_version'],
+        default => false,
+    };
+}
+
+
+/**
+ * The stored forecast while it lasts — not past its time, not confirmed by the stamp
+ * (wporg_import_confirmed()) — with the facts of wporg_import_facts(); re-validation when
+ * reading back from persistence.
+ */
+function stored_wporg_import(int $marker_id, int $now, array $facts): ?array {
     $stored = get_post_meta($marker_id, PBLSH_WPORG_IMPORT_META, true);
     if (!is_array($stored) || !isset($stored['expected_at'], $stored['reason']) || (int) $stored['expected_at'] + PBLSH_WPORG_IMPORT_SHOWN_AFTER <= $now) {
         return null;
     }
-    return $stored;
+    return wporg_import_confirmed($stored, get_wporg_directory($marker_id)['stamp'], $facts) ? null : $stored;
 }
 
 
 /** The stored forecast for the REST payload, while it lasts; expected_at as ISO 8601 UTC. */
-function serialize_wporg_import(int $marker_id, int $now): ?array {
-    $stored = stored_wporg_import($marker_id, $now);
+function serialize_wporg_import(int $marker_id, int $now, array $facts): ?array {
+    $stored = stored_wporg_import($marker_id, $now, $facts);
     return $stored === null ? null : [ 'expected_at' => gmdate('Y-m-d\TH:i:s\Z', (int) $stored['expected_at']), 'reason' => (string) $stored['reason'] ];
 }
 
@@ -146,10 +189,11 @@ function serialize_wporg_import(int $marker_id, int $now): ?array {
 /**
  * Whether the plugin's load should compute the forecast anew: one is still shown and it is
  * older than the watcher's interval. The reload right after an own commit finds one seconds
- * old, and wordpress.org cannot have acted on anything newer in that time.
+ * old, and wordpress.org cannot have acted on anything newer in that time; a forecast the
+ * stamp has confirmed is over, not recomputed.
  */
-function wporg_import_forecast_due(int $marker_id, int $now): bool {
-    $stored = stored_wporg_import($marker_id, $now);
+function wporg_import_forecast_due(int $marker_id, int $now, array $facts): bool {
+    $stored = stored_wporg_import($marker_id, $now, $facts);
     return $stored !== null && (int) ($stored['computed_at'] ?? 0) + PBLSH_WPORG_IMPORT_WATCHER_DELAY <= $now;
 }
 

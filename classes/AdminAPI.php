@@ -298,6 +298,7 @@ class AdminAPI {
             return [];
         }
 
+        $releases = fetch_releases_grouped_by_parent([ $id ])[$id] ?? [];
         if (is_wporg_plugin($post)) {
             // No check against wordpress.org here: the list's directory refresh keeps the cache
             // fresh within minutes, and every write reads fresh under the lock. Only the mirror's
@@ -309,14 +310,13 @@ class AdminAPI {
                 wporg_log_cache_error($post, 'assets', $e);
             }
             // A forecast still shown is computed anew on load, foreign commits may have moved it —
-            // not on the reload right after the own commit that computed it.
-            if (wporg_import_forecast_due($id, time())) {
+            // not on the reload right after the own commit that computed it, and not once the
+            // stamp confirms the import.
+            if (wporg_import_forecast_due($id, time(), wporg_import_facts($post, resolve_current_release($post, $releases)))) {
                 refresh_wporg_import_forecast($post);
             }
         }
-
-        $releases_by_parent = fetch_releases_grouped_by_parent([(int) $post->ID]);
-        return $this->serialize_plugin_post($post, true, $releases_by_parent[(int) $post->ID] ?? []);
+        return $this->serialize_plugin_post($post, true, $releases);
     }
 
     /**
@@ -348,8 +348,10 @@ class AdminAPI {
      * 30 complete days: self-hosted counted here, wordpress.org the directory's total with
      * the windows of the history fetched from the stats API and no today —, `wporg_stats`
      * the wordpress.org dashboard
-     * figures, `wporg_check` and `wporg_token` the state of the copy against wordpress.org
-     * (all three null self-hosted).
+     * figures, `wporg_check` and `wporg_token` the state of the copy against wordpress.org,
+     * `wporg_import` when the plugin page shows the last commit, while the forecast lasts and
+     * the stamp has not confirmed the import (includes/wporg_import_timing.php) — in the row
+     * too, since the row is what a client gets when its copy moved (all four null self-hosted).
      *
      * @param \WP_Post[] $releases The plugin's release posts.
      */
@@ -395,6 +397,7 @@ class AdminAPI {
             // Asset changes not on wordpress.org yet — deleting the plugin here would lose them.
             'assets_pending' => $is_self_hosted ? null : count($assets_state['pending']),
             'live_preview' => $is_self_hosted ? null : $this->live_preview_status($post, $current['release'], $assets_state),
+            'wporg_import' => $is_self_hosted ? null : serialize_wporg_import((int) $post->ID, time(), wporg_import_facts($post, $current)),
         ];
 
         if ($detail) {
@@ -409,8 +412,6 @@ class AdminAPI {
                 'username' => $username,
                 'can_write' => $username !== null,
             ];
-            // When the plugin page shows the last commit, while the forecast lasts (includes/wporg_import_timing.php).
-            $out['wporg_import'] = $is_self_hosted ? null : serialize_wporg_import((int) $post->ID, time());
         }
 
         return $out;
@@ -751,14 +752,18 @@ class AdminAPI {
     }
 
     /**
-     * Brings the client's wordpress.org plugins up to date, in two forms. Without `plugin_id`
+     * Brings the client's wordpress.org plugins up to date, in three forms. Without `plugin_id`
      * the automatic look: the stamp check, whose listings bring every plugin's figures along
      * (refresh_wporg_directory(); the server alone decides when it is due), and the SVN refresh
      * of every marker whose stamp moved — tags, trunk readme, assets mirror. With `plugin_id`
      * the editor's Refresh: that plugin's figures and its SVN refresh whatever the directory
-     * says, which lags SVN by wordpress.org's import. A marker's check completes with its SVN
-     * refresh; one that failed is recorded on the marker and shows through `wporg_check`, never
-     * as an error of this request — and what it changed before it failed is told all the same.
+     * says, which lags SVN by wordpress.org's import. With `plugin_id` and `watch` the import
+     * watch: that plugin's stamp compared — the site-wide clock neither consulted nor claimed —
+     * and its SVN refresh only when the stamp moved; what the client asks every minute while it
+     * waits for an own commit to land on the plugin page. A marker's check completes with its
+     * SVN refresh; one that failed is recorded on the marker and shows through `wporg_check`,
+     * never as an error of this request — and what it changed before it failed is told all the
+     * same.
      *
      * Answers what the client then holds: `stats` — figures and check of every marker in
      * scope —, `plugins` — the list row of every marker that moved underneath the client's
@@ -775,12 +780,14 @@ class AdminAPI {
         if ($plugin_id !== null && !is_wporg_plugin(get_post($plugin_id))) {
             return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
         }
+        $force = $plugin_id !== null && empty($params['watch']);
 
         // The checks the directory left open — a stamp that moved; the editor's Refresh whatever
-        // the directory answered, or failed to — complete with the plugin's SVN refresh.
-        $open = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], $plugin_id !== null);
+        // the directory answered, or failed to — complete with the plugin's SVN refresh. The
+        // tokens compared below are read after that: a stamp this request moved is in them.
+        $open = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], $force);
         $changes = [];
-        foreach ($plugin_id === null ? $open : [ $plugin_id => $open[$plugin_id] ?? null ] as $id => $stamp) {
+        foreach ($force ? [ $plugin_id => $open[$plugin_id] ?? null ] : $open as $id => $stamp) {
             $refresh = refresh_wporg_plugin_cache(get_post($id));
             if ($refresh['failure'] === null) {
                 confirm_wporg_directory_check($id, $stamp);

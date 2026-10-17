@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Pblsh\Tests\Unit;
 
 use function Pblsh\blueprint_ignored_reason;
-use function Pblsh\blueprint_imported;
 use function Pblsh\blueprint_playground_url;
 use function Pblsh\live_preview_requirements;
 use function Pblsh\wporg_theme_state_from_response;
@@ -17,17 +16,6 @@ use function Pblsh\write_release_snapshot;
  * current release requires, and whether a theme exists.
  */
 final class WporgBlueprintViewTest extends TestCase {
-
-    public function test_the_file_is_imported_once_the_stamp_names_it_at_or_after_the_mirrors_revision(): void {
-        $file = [ 'revision' => 9, 'filesize' => 2, 'contents' => '{}' ];
-        $stamp = static fn(array $assets): array => [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => $assets ];
-
-        self::assertFalse(blueprint_imported(null, $file), 'no check yet');
-        self::assertFalse(blueprint_imported($stamp([ 'icon.svg' => 12 ]), $file), 'the stamp has no blueprint');
-        self::assertFalse(blueprint_imported($stamp([ 'blueprint.json' => 7 ]), $file), 'an older import: the file changed since');
-        self::assertTrue(blueprint_imported($stamp([ 'blueprint.json' => 9 ]), $file));
-        self::assertTrue(blueprint_imported($stamp([ 'blueprint.json' => 12 ]), $file), 'the import exports the whole plugin at its revision then');
-    }
 
     public function test_the_test_link_carries_the_blueprint_in_the_fragment(): void {
         self::assertSame('https://playground.wordpress.net/#%7B%22landingPage%22%3A%22%5C%2F%22%7D', blueprint_playground_url('{"landingPage":"\/"}'));

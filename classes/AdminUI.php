@@ -137,6 +137,7 @@ class AdminUI {
             'components/WporgCheckStatus.js',
             'components/PluginList.js',
             'components/BlueprintEditor.js',
+            'components/AssetStatusBand.js',
             'components/LivePreview.js',
             'components/PluginAssets.js',
             'components/ImportForecast.js',

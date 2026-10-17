@@ -40,13 +40,14 @@ class AssetManager {
      * number as they will be — a wordpress.org plugin's working copy applied over its mirror —
      * and the captions from the readme of the release sites receive (get_screenshot_captions()).
      * A wordpress.org plugin adds where its mirror stands and, per slot, what the working copy
-     * changes there and what wordpress.org has (wporg_view()), and its Live Preview
-     * (blueprint_view()).
+     * changes there, what wordpress.org has and what the plugin page shows (wporg_view()), and
+     * its Live Preview (blueprint_view()) — both read against the directory cache, the one read.
      */
     public function describe(\WP_Post $plugin): array {
         $id = (int) $plugin->ID;
         $manifest = read_asset_manifest($id);
         $state = is_wporg_plugin($plugin) ? get_wporg_assets_state($id) : null;
+        $directory = $state === null ? null : get_wporg_directory($id);
         $pending = $state['pending'] ?? [];
         $out = [];
         foreach (array_keys(get_asset_slots()) as $slot_id) {
@@ -58,8 +59,8 @@ class AssetManager {
         $captions = get_screenshot_captions($plugin);
         $out['screenshot_captions'] = (object) $captions['captions'];
         $out['captions_source'] = $captions['source'];
-        $out['wporg'] = $state === null ? null : $this->wporg_view($plugin, $state, $manifest);
-        $out['blueprint'] = $state === null ? null : $this->blueprint_view($plugin, $state);
+        $out['wporg'] = $state === null ? null : $this->wporg_view($plugin, $state, $manifest, $directory);
+        $out['blueprint'] = $state === null ? null : $this->blueprint_view($plugin, $state, $directory);
         return $out;
     }
 
@@ -69,17 +70,17 @@ class AssetManager {
      * builds on, the fields (null when there is none to write safely — blueprint_fields_of()), the warnings, what the current
      * release requires and which of it is not installed before the plugin, the test link (the
      * blueprint as the plugin page will serve it) or why there is none, wordpress.org's file —
-     * whether its import has read it, why it ignores it, its fields and what it lacks —, the
-     * counts of assets/blueprints/, and the last check of the public preview.
+     * why it ignores it, its fields and what it lacks; whether its import has read it is the
+     * slot's fact (wporg_view()) —, the counts of assets/blueprints/, and the last check of the
+     * public preview.
      */
-    private function blueprint_view(\WP_Post $plugin, array $state): array {
+    private function blueprint_view(\WP_Post $plugin, array $state, array $directory): array {
         $own = (string) $plugin->post_name;
         $requirements = live_preview_requirements($plugin);
         $required = $requirements['slugs'] ?? [];
         $contents = effective_blueprint_contents($state);
         $served = $contents === null ? null : normalize_blueprint_like_wporg($contents, $own);
         $file = $state['blueprints']['file'];
-        $directory = get_wporg_directory((int) $plugin->ID);
         $blocked = match (true) {
             $contents === null => null,
             $served === null => 'invalid',
@@ -94,13 +95,12 @@ class AssetManager {
             'required' => $requirements,
             'missing' => $contents === null ? [] : blueprint_missing_dependencies($contents, $own, $required),
             'test' => [ 'url' => $served === null || $blocked !== null ? null : blueprint_playground_url(encode_blueprint_like_wporg($served)), 'blocked' => $blocked ],
-            // wordpress.org's file as the tab shows it alone: whether its import has read it (the
-            // public switch exists there only then), its fields and what it lacks.
+            // wordpress.org's file as the tab shows it alone: why its import ignores it, its
+            // fields and what it lacks.
             'on_wporg' => $file === null ? null : [
                 ...$file,
                 'ignored' => blueprint_ignored_reason($file),
                 'problem' => $this->blueprint_problem($file),
-                'imported' => blueprint_imported($directory['stamp'], $file),
                 'fields' => blueprint_fields_of($file['contents'], $own, $required),
                 'missing' => live_preview_missing($state, $own, $required),
             ],
@@ -198,16 +198,21 @@ class AssetManager {
     /**
      * A wordpress.org plugin's mirror and working copy for the tab: where the mirror stands (the
      * revision of assets/ it holds — null before the first pull —, the files of assets/ that are
-     * no slot here) and, for every slot with a mirror file or a pending entry, the entry's action,
-     * whether it conflicts, and wordpress.org's file (the mirror entry with its URL — the
-     * conflict box and the state view show it).
+     * no slot here), whether the plugin page is behind the mirror (`import_waiting`,
+     * assets_import_waiting()) and, for every slot with a mirror file, a pending entry or a file
+     * the plugin page shows, the entry's action, whether it conflicts, wordpress.org's file (the
+     * mirror entry with its URL — the conflict box and the state view show it — and whether the
+     * import has read it, asset_imported()) and the file the page shows (`shown`,
+     * assets_shown()): the slot's band is decided from these facts alone.
      */
-    private function wporg_view(\WP_Post $plugin, array $state, array $manifest): array {
+    private function wporg_view(\WP_Post $plugin, array $state, array $manifest, array $directory): array {
         $pending = $state['pending'];
         $mirror = wporg_mirror_slots($manifest, $state);
         $conflicts = asset_conflicts($pending, $mirror);
+        $stamp = $directory['stamp'];
+        $shown = assets_shown($stamp);
         $slots = [];
-        foreach (array_unique([ ...array_keys($mirror), ...array_keys($pending) ]) as $slot_id) {
+        foreach (array_unique([ ...array_keys($mirror), ...array_keys($pending), ...array_keys($shown) ]) as $slot_id) {
             $on_wporg = null;
             if ($slot_id === 'blueprint' && isset($mirror['blueprint'])) {
                 $on_wporg = [ ...$mirror['blueprint'], 'filesize' => (int) $state['blueprints']['file']['filesize'] ];
@@ -217,7 +222,8 @@ class AssetManager {
             $slots[$slot_id] = [
                 'pending' => $pending[$slot_id]['action'] ?? null,
                 'conflict' => in_array((string) $slot_id, $conflicts, true),
-                'on_wporg' => $on_wporg,
+                'on_wporg' => $on_wporg === null ? null : [ ...$on_wporg, 'imported' => asset_imported($stamp, $on_wporg) ],
+                'shown' => $shown[$slot_id] ?? null,
             ];
         }
         return [
@@ -225,6 +231,7 @@ class AssetManager {
             'other_files' => $state['other_files'],
             'pending_count' => count($pending),
             'conflict_count' => count($conflicts),
+            'import_waiting' => assets_import_waiting($stamp, $mirror),
             'slots' => (object) $slots,
         ];
     }

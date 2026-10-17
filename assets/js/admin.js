@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const { Button } = wp.components;
     const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog, UpgradeNotice, NoticeBox } = window.Pblsh.Components;
     const { showAlert, getDefaultConfig } = Pblsh.Utils;
+    const { getImportWatchAt } = Pblsh.AssetsUtils;
+    const IMPORT_WATCH_INTERVAL = 60000;   // ms between two looks of the import watch
 
     // The page's header place (AdminUI::render_peak_publisher()): every view renders the app's
     // name and its actions into it through a portal — the place itself sticks below the admin bar.
@@ -72,15 +74,17 @@ document.addEventListener('DOMContentLoaded', function() {
         window.Pblsh.Controllers.Assets.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
     };
 
-    // The refresh against wordpress.org of every caller — the automatic check (every plugin,
-    // whatever is due) and the editor's Refresh link (that plugin, straight against SVN). The
-    // store takes the rows the server answers; a plugin that moved also gets its tabs reloaded,
-    // so its header and its tabs show the same state. Which plugins that concerns is decided
-    // when the answer arrives: every one whose tabs the client holds or is loading by then,
-    // whichever view the request started from. A wordpress.org plugin added or removed
-    // elsewhere — another tab, another admin — is no row's news: the list is loaded anew.
-    const refreshWporg = async (pluginId = null) => {
-        const answer = await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId);
+    // What an answer from wordpress.org changes beyond the store, whoever asked — the automatic
+    // check (every plugin, whatever is due), the editor's Refresh link (that plugin, straight
+    // against SVN), the import watch (that plugin's stamp). The store took the rows the server
+    // answered — every plugin whose copy moved underneath this client, its SVN copy or the
+    // directory stamp the bands and the forecast derive from, whoever moved it; the row brings
+    // the forecast —, and such a plugin also gets its tabs reloaded, so its header and its tabs
+    // show the same state. Which plugins that concerns is decided when the answer arrives:
+    // every one whose tabs the client holds or is loading by then, whichever view the request
+    // started from. A wordpress.org plugin added or removed elsewhere — another tab, another
+    // admin — is no row's news: the list is loaded anew.
+    const takeWporgAnswer = (answer) => {
         const releases = wp.data.select('pblsh/releases');
         Object.keys(answer.plugins).map(Number)
             .filter((id) => releases.hasLoadedForPlugin(id) || releases.isLoadingForPlugin(id))
@@ -88,7 +92,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (answer.list_outdated) {
             window.Pblsh.Controllers.Plugins.fetchList().catch((e) => showAlert(e.message, 'error'));
         }
+        return answer;
     };
+    const refreshWporg = async (pluginId = null) => takeWporgAnswer(await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId));
+    const watchWporgImport = async (pluginId) => takeWporgAnswer(await window.Pblsh.Controllers.Plugins.watchWporgImport(pluginId));
 
     // Main App Component
     const PeakPublisherApp = () => {
@@ -155,6 +162,44 @@ document.addEventListener('DOMContentLoaded', function() {
         useEffect(() => () => {
             if (currentPluginId) wp.data.dispatch('pblsh/plugins').clearWporgChanges(currentPluginId);
         }, [currentPluginId]);
+
+        // The import watch: after an own commit, while the open plugin's assets wait for the
+        // import and a forecast stands, the plugin's stamp is compared every minute from the
+        // forecast's time on, for ten minutes (AssetsUtils.getImportWatchAt()) — with the editor
+        // showing this plugin and the tab visible, nothing else. The moment is a function of the
+        // state — the forecast, the waiting, the clock —, not of the session: whoever leaves the
+        // editor or the tab and comes back inside the window is in the beat at once. Before the
+        // forecast's time one timer to it; after the window nothing but the five-minute clock.
+        // A stamp that moved comes back as the plugin's row (takeWporgAnswer: the forecast and
+        // the bands follow); one that did not is asked again a minute later.
+        const importForecast = view === 'editor' && currentPlugin && currentPlugin.hosting_type === 'wporg' ? currentPlugin.wporg_import : null;
+        const importWaiting = useSelect((select) => {
+            const assets = currentPluginId ? select('pblsh/assets').getForPlugin(currentPluginId) : null;
+            return !!(assets && assets.wporg && assets.wporg.import_waiting);
+        }, [currentPluginId]);
+        const [importWatchRun, setImportWatchRun] = useState(0);
+        const lastImportWatch = useRef({ id: null, at: 0 });
+        useEffect(() => {
+            const reconsider = () => setImportWatchRun((run) => run + 1);
+            document.addEventListener('visibilitychange', reconsider);
+            window.addEventListener('focus', reconsider);
+            return () => {
+                document.removeEventListener('visibilitychange', reconsider);
+                window.removeEventListener('focus', reconsider);
+            };
+        }, []);
+        useEffect(() => {
+            if (!importForecast || document.visibilityState !== 'visible') return undefined;
+            const now = Date.now();
+            const due = getImportWatchAt(importForecast, importWaiting, now);
+            if (due === null) return undefined;
+            const last = lastImportWatch.current.id === currentPluginId ? lastImportWatch.current.at : 0;
+            const timer = setTimeout(() => {
+                lastImportWatch.current = { id: currentPluginId, at: Date.now() };
+                watchWporgImport(currentPluginId).catch(() => {}).finally(() => setImportWatchRun((run) => run + 1));
+            }, Math.max(0, Math.max(due, last + IMPORT_WATCH_INTERVAL) - now));
+            return () => clearTimeout(timer);
+        }, [currentPluginId, importForecast && importForecast.expected_at, importWaiting, importWatchRun]);
 
         // Helpers for URL state
         const parseQuery = () => {

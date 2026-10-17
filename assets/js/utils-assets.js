@@ -114,8 +114,8 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         return /^screenshot-\d+$/.test(slotKey) ? 'screenshots' : 'icons';
     }
 
-    // The working copy of a wordpress.org plugin — the sub-tab row's right half while it holds changes.
-    const getPendingChangesText = (count) => sprintf(_n('%d change not on wordpress.org yet', '%d changes not on wordpress.org yet', count, 'peak-publisher'), count);
+    // The working copy of a wordpress.org plugin — the editor's status line while it holds changes.
+    const getPendingChangesText = (count) => sprintf(_n('%d change not committed to wordpress.org yet', '%d changes not committed to wordpress.org yet', count, 'peak-publisher'), count);
     const getConflictsText = (count) => sprintf(_n('%d conflict — resolve it to commit', '%d conflicts — resolve them to commit', count, 'peak-publisher'), count);
     // The row's count beside the Commit button, which says the rest.
     const getPendingCountText = (count) => sprintf(_n('%d change', '%d changes', count, 'peak-publisher'), count);
@@ -153,8 +153,10 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         ? __('Delete this asset? It is removed from wordpress.org with the next commit.', 'peak-publisher')
         : __('Delete this asset?', 'peak-publisher');
 
-    // A box's band: what the commit will do with the slot on wordpress.org, said from the picture
-    // the box shows — or that both sides changed the slot.
+    // A slot's band (AssetStatusBand), the open change: what the commit will do with the slot on
+    // wordpress.org, said from the picture the box shows — or that both sides changed the slot.
+    // wordpress.org is where a commit goes; what visitors see is "the plugin page" (the texts
+    // beneath) — not "your": a committer need not own the plugin —, never "imported".
     function getBandText(kind) {
         return {
             add: __('Will be added on wordpress.org', 'peak-publisher'),
@@ -164,9 +166,55 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         }[kind];
     }
 
+    // The import forecast (the detail's wporg_import: expected_at, reason) ends three minutes
+    // past its time — the import's own duration, like the server's PBLSH_WPORG_IMPORT_SHOWN_AFTER
+    // —, or earlier, when the server saw the import land and dropped it. Its end as ms, null
+    // without one. Tags and flips are imported within seconds: no clock time for them, it would
+    // only read as precision.
+    const FORECAST_SHOWN_AFTER = 180000;
+    function getForecastEnd(forecast) {
+        const expected = forecast ? Date.parse(forecast.expected_at) : NaN;
+        return isNaN(expected) ? null : expected + FORECAST_SHOWN_AFTER;
+    }
+    const isForecastSoon = (forecast) => forecast.reason === 'tag' || forecast.reason === 'flip';
+    const formatForecastTime = (forecast) => new Date(Date.parse(forecast.expected_at)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // The band of a committed slot the plugin page does not show yet: the forecast's time while
+    // it lasts, after it the plain fact.
+    function getWaitingText(forecast) {
+        const end = getForecastEnd(forecast);
+        if (end === null || Date.now() >= end) return __('Committed · not on the plugin page yet', 'peak-publisher');
+        if (isForecastSoon(forecast)) return __('Committed · on the plugin page within a few minutes', 'peak-publisher');
+        return sprintf(__('Committed · on the plugin page around %s', 'peak-publisher'), formatForecastTime(forecast));
+    }
+    // The band of a slot deleted and committed while the plugin page still shows its file.
+    function getRemovedWaitingText(forecast) {
+        const end = getForecastEnd(forecast);
+        if (end === null || Date.now() >= end) return __('Removed · still on the plugin page', 'peak-publisher');
+        if (isForecastSoon(forecast)) return __('Removed · gone from the plugin page within a few minutes', 'peak-publisher');
+        return sprintf(__('Removed · on the plugin page until around %s', 'peak-publisher'), formatForecastTime(forecast));
+    }
+    const getShownText = () => __('On the plugin page', 'peak-publisher');
+    // An empty slot has no page to lag behind: the slot is what it is.
+    const getEmptyText = () => __('Empty', 'peak-publisher');
+    // Committed, and the plugin page never looked at: the first directory check is still to come.
+    const getUncheckedText = () => __('Committed · plugin page not checked yet', 'peak-publisher');
+
+    // When the import watch looks next (ms), or null: while the slots wait for an import and a
+    // forecast stands, at the forecast's time, from then on at once — the caller spaces the
+    // looks a minute apart — until ten minutes past it. Import times vary (a tag: seconds to
+    // minutes), so a beat rather than one look.
+    const IMPORT_WATCH_WINDOW = 600000;
+    function getImportWatchAt(forecast, waiting, now) {
+        if (!waiting || !forecast) return null;
+        const expected = Date.parse(forecast.expected_at);
+        if (isNaN(expected) || now >= expected + IMPORT_WATCH_WINDOW) return null;
+        return Math.max(expected, now);
+    }
+
     return {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText, getAssetSections, getAssetSection,
         getPendingChangesText, getPendingCountText, getConflictsText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
+        getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getEmptyText, getUncheckedText, getImportWatchAt,
     };
 })());

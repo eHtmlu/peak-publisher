@@ -200,14 +200,17 @@ function wporg_refresh_changes(array $sync_summary, ?array $readme_before, ?arra
 
 /**
  * What a client's copy of a marker — its row, its releases, its assets view — was made from:
- * the cached SVN revision and the revision of assets/ the mirror holds, as one opaque value
- * in the row. The client sends back the tokens it holds, and a marker whose token differs
- * has moved underneath that client, whoever moved it: this request's refresh, another tab's,
- * a commit.
+ * the cached SVN revision, the revision of assets/ the mirror holds and the directory stamp
+ * (what the bands of the assets tab and the import forecast derive from — an import of an own
+ * commit moves the stamp alone), as one opaque value in the row. The client sends back the
+ * tokens it holds, and a marker whose token differs has moved underneath that client, whoever
+ * moved it: this request's refresh, another tab's, a commit, wordpress.org's import.
  */
 function wporg_sync_token(\WP_Post $marker): string {
+    $id = (int) $marker->ID;
     $cached = wporg_decode_json_object((string) $marker->post_content);
-    return ($cached['revision'] ?? '-') . ':' . (get_wporg_assets_state((int) $marker->ID)['revision'] ?? '-');
+    $stamp = get_wporg_directory($id)['stamp'];
+    return ($cached['revision'] ?? '-') . ':' . (get_wporg_assets_state($id)['revision'] ?? '-') . ':' . ($stamp === null ? '-' : md5((string) json_encode($stamp)));
 }
 
 

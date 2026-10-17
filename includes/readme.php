@@ -412,17 +412,29 @@ function is_wordpress_org_slug(string $slug): bool {
 
 
 /**
+ * The entries of a Requires Plugins header as written — comma-separated, trimmed, each once,
+ * in the header's order —, a spelling that is no slug among them: what wordpress.org's import
+ * reads and judges (wporg_requires_plugins_resolution()).
+ *
+ * @return string[]
+ */
+function requires_plugins_entries(string $header): array {
+    return array_values(array_unique(array_filter(array_map('trim', explode(',', $header)), 'strlen')));
+}
+
+
+/**
  * The plugins a Requires Plugins header names, cleaned the way core's plugin dependencies
  * clean them (WP_Plugin_Dependencies::sanitize_dependency_slugs(), without its filter and
- * without its sort): comma-separated, trimmed, wordpress.org slugs only, each once, in the
- * header's order. The order is the author's: a blueprint installs the plugins in it, and a
- * dependency that requires another one activates only after that one — wordpress.org's own
- * generator installs them in the header's order too.
+ * without its sort): the entries that are wordpress.org slugs, each once, in the header's
+ * order. The order is the author's: a blueprint installs the plugins in it, and a dependency
+ * that requires another one activates only after that one — wordpress.org's own generator
+ * installs them in the header's order too.
  *
  * @return string[]
  */
 function requires_plugins_slugs(string $header): array {
-    return array_values(array_unique(array_filter(array_map('trim', explode(',', $header)), 'Pblsh\is_wordpress_org_slug')));
+    return array_values(array_filter(requires_plugins_entries($header), 'Pblsh\is_wordpress_org_slug'));
 }
 
 

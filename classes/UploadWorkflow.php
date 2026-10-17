@@ -1032,7 +1032,8 @@ class UploadWorkflow {
         $intended_username = (string) ($data['wporg_username_intended'] ?? '');
         $username = (string) (select_wporg_account_username($intended_username !== '' ? $intended_username : null) ?? '');
 
-        $blockers = $this->wporg_marker_independent_blockers($data);
+        $requires_plugins = $this->wporg_requires_plugins_facts($data);
+        $blockers = $this->wporg_marker_independent_blockers($data, $requires_plugins);
         // Without a resolved slug there is nothing to import — the destination screen collects the decision first.
         $slug_available = $slug !== '';
 
@@ -1069,6 +1070,7 @@ class UploadWorkflow {
             ],
             'related_releases' => false,
             'tested_up_to' => $this->tested_up_to_facts($data, false, null),
+            'requires_plugins' => $requires_plugins,
         ];
     }
 
@@ -1134,7 +1136,8 @@ class UploadWorkflow {
         // Derive deploy mode from the uploaded version and cached releases
         $version = (string) ($data['plugin_data']['Version'] ?? '');
         $related_releases = $version !== '' ? $this->find_related_releases((int) $marker->ID, $version) : false;
-        $blockers = $this->wporg_marker_independent_blockers($data);
+        $requires_plugins = $this->wporg_requires_plugins_facts($data);
+        $blockers = $this->wporg_marker_independent_blockers($data, $requires_plugins);
         $deploy_mode = null;
         if ($related_releases !== false) {
             $latest = $related_releases['latest'] ?? false;
@@ -1168,6 +1171,7 @@ class UploadWorkflow {
             'related_releases' => $related_releases,
             'current_release' => $version !== '' ? $this->build_current_release_facts($marker, $related_releases, $version, true, $deploy_mode) : null,
             'tested_up_to' => $this->tested_up_to_facts($data, $related_releases, $marker),
+            'requires_plugins' => $requires_plugins,
             // The upload's Requires Plugins the Live Preview on wordpress.org does not install —
             // added in the deploy's commit when the release becomes current (deploy_directory()).
             'live_preview_missing' => live_preview_missing(get_wporg_assets_state((int) $marker->ID), (string) $marker->post_name, $this->upload_requires_plugins($data)),
@@ -1183,8 +1187,10 @@ class UploadWorkflow {
      * Builds the wporg deploy blockers that apply regardless of marker/import state.
      * Every code returned here needs a dedicated checklist item (upload-checks.js) —
      * the client has no generic fallback renderer for unknown blocker codes.
+     *
+     * @param array $requires_plugins wporg_requires_plugins_facts()
      */
-    private function wporg_marker_independent_blockers(array $data): array {
+    private function wporg_marker_independent_blockers(array $data, array $requires_plugins): array {
         $blockers = [];
         if (!empty($data['plugin_data']['UpdateURI'])) {
             $blockers[] = [
@@ -1213,7 +1219,46 @@ class UploadWorkflow {
                 'message' => __('The readme.txt could not be converted to UTF-8, so its Stable tag cannot be managed. Convert the file to UTF-8 without a BOM and upload again.', 'peak-publisher'),
             ];
         }
+        // wordpress.org's import resolves every entry of the Requires Plugins header to a
+        // published plugin by exactly its slug and rejects the commit otherwise
+        // (wporg_requires_plugins_resolution()); an entry the API could not be asked about is
+        // no verdict — the import's own check stays.
+        $unresolved = array_column(array_filter($requires_plugins['entries'], static fn(array $entry): bool => !in_array($entry['state'], [ 'ok', 'unchecked' ], true)), 'entry');
+        if ($unresolved !== []) {
+            $blockers[] = [
+                'code' => 'wporg_requires_plugins_unresolved',
+                'message' => sprintf(
+                    /* translators: %s: the entries of the Requires Plugins header, comma-separated */
+                    __('wordpress.org does not have these required plugins: %s.', 'peak-publisher'),
+                    implode(', ', $unresolved)
+                ),
+            ];
+        }
         return $blockers;
+    }
+
+    /**
+     * The upload's Requires Plugins as wordpress.org's import resolves them
+     * (wporg_requires_plugins_resolution()): one info API request for the entries that are
+     * slugs, none when the header names no slug. The API's failure is a fact of its own (error)
+     * and decides nothing — the entries stay unchecked, and the import judges at the commit
+     * anyway.
+     *
+     * @return array{entries:array, error:?string}
+     */
+    private function wporg_requires_plugins_facts(array $data): array {
+        $header = (string) ($data['plugin_data']['RequiresPlugins'] ?? '');
+        $slugs = requires_plugins_slugs($header);
+        $states = [];
+        $error = null;
+        if ($slugs !== []) {
+            try {
+                $states = wporg_api_plugin_information($slugs, wporg_api_fields([]));
+            } catch (WporgSvnException $e) {
+                $error = $e->getMessage();
+            }
+        }
+        return [ 'entries' => wporg_requires_plugins_resolution(requires_plugins_entries($header), $states), 'error' => $error ];
     }
 
     private function resolve_finalize_target(\WP_REST_Request $request, array $data): array {

@@ -380,3 +380,38 @@ function wporg_api_plugin_state(array $listing): array {
 
     return [ 'state' => 'not_found', 'data' => [] ];
 }
+
+
+/**
+ * How wordpress.org's import resolves a Requires Plugins header — the rule it rejects a commit
+ * by (plugin-directory, cli/class-import.php): every entry must name a published plugin by
+ * exactly its slug. Each entry (requires_plugins_entries()) with its state: ok (`name` from the
+ * listing); invalid (no wordpress.org slug — the import finds no plugin by it, and the API is
+ * not asked); not_found and closed (the API's states — the import wants a published plugin);
+ * renamed (the API resolved the entry to the listing of another slug, `slug_now` — the import
+ * wants the exact one); unchecked (a slug $states has no answer for). $states:
+ * wporg_api_plugin_information() of the entries that are slugs.
+ *
+ * @param string[] $entries
+ * @param array<string, array{state:string, data:array}> $states
+ * @return array<int, array{entry:string, state:string, name:?string, slug_now?:string}>
+ */
+function wporg_requires_plugins_resolution(array $entries, array $states): array {
+    $resolution = [];
+    foreach ($entries as $entry) {
+        $resolved = [ 'entry' => $entry, 'state' => 'unchecked', 'name' => null ];
+        if (!is_wordpress_org_slug($entry)) {
+            $resolved['state'] = 'invalid';
+        } elseif (isset($states[$entry])) {
+            $data = (array) ($states[$entry]['data'] ?? []);
+            $resolved['state'] = (string) $states[$entry]['state'];
+            $resolved['name'] = wporg_api_clean_text($data['name'] ?? '');
+            if ($resolved['state'] === 'ok' && (string) ($data['slug'] ?? '') !== $entry) {
+                $resolved['state'] = 'renamed';
+                $resolved['slug_now'] = (string) ($data['slug'] ?? '');
+            }
+        }
+        $resolution[] = $resolved;
+    }
+    return $resolution;
+}

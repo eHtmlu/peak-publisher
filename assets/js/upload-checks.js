@@ -439,6 +439,50 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         ];
     }
 
+    // wordpress.org: every entry of the Requires Plugins header must name a plugin it has
+    // published under exactly that slug, or it rejects the release — silently, the commit
+    // lands in SVN. The server asked the info API about every entry (target.requires_plugins);
+    // the row names what fails. Self-hosted: nothing to check, the header is the sites' business.
+    function checkRequiresPlugins(context) {
+        const { isWporg, target } = context;
+        const facts = isWporg ? target?.requires_plugins : null;
+        if (!facts || facts.entries.length === 0) return null;
+
+        const failing = facts.entries.filter((e) => e.state !== 'ok' && e.state !== 'unchecked');
+        if (failing.length > 0) {
+            const lineOf = {
+                invalid: (e) => sprintf(__('%s is not a valid wordpress.org slug.', 'peak-publisher'), e.entry),
+                not_found: (e) => sprintf(__('%s does not exist on wordpress.org.', 'peak-publisher'), e.entry),
+                closed: (e) => sprintf(__('%s is closed on wordpress.org.', 'peak-publisher'), e.entry),
+                renamed: (e) => sprintf(__('%1$s is listed as %2$s on wordpress.org.', 'peak-publisher'), e.entry, e.slug_now),
+            };
+            return {
+                title: __('Required plugins not on wordpress.org', 'peak-publisher'),
+                type: 'error',
+                desc: joinLines([
+                    ...failing.map((e) => lineOf[e.state](e)),
+                    facts.error && __('The other required plugins could not be checked right now.', 'peak-publisher'),
+                    __('wordpress.org would not publish this release. You need to fix the Requires Plugins header in your plugin file.', 'peak-publisher'),
+                ]),
+            };
+        }
+        if (facts.error) {
+            return {
+                title: __('Required plugins cannot be checked', 'peak-publisher'),
+                type: 'warning',
+                desc: [
+                    __('You can still try publishing — wordpress.org checks the required plugins when the release is published.', 'peak-publisher'),
+                    ' ' + sprintf(__('Error message: %s', 'peak-publisher'), facts.error),
+                ],
+            };
+        }
+        return {
+            title: __('Required plugins found on wordpress.org', 'peak-publisher'),
+            type: 'ok',
+            desc: facts.entries.map((e) => e.name ? `${e.name} (${e.entry})` : e.entry).join(', '),
+        };
+    }
+
     function checkWorkspaceArtifacts(context) {
         const { meta, settings } = context;
         const artifacts = Array.isArray(meta?.cleanup_info?.found_workspace_artifacts) ? meta.cleanup_info.found_workspace_artifacts : [];
@@ -783,6 +827,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
                 checkCurrentRelease(context),
                 checkUpdateUri(context),
                 checkBootstrapCode(context),
+                checkRequiresPlugins(context),
                 checkWorkspaceArtifacts(context),
                 checkReadmeTxt(context),
                 checkTestedUpTo(context),

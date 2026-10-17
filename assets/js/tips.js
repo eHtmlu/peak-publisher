@@ -243,7 +243,7 @@ lodash.set(window, 'Pblsh.Tips', {
             content: [
                 createElement('h2', { key: 'visitors-title' }, __('What visitors will get', 'peak-publisher')),
                 createElement('p', { key: 'visitors' }, createInterpolateElement(
-                    __('<a>Your plugin page</a> gets a Live Preview button next to the Download button. It opens WordPress Playground: a full WordPress with your plugin installed and activated, running entirely in the visitor\'s browser. No server is involved: the browser itself runs PHP and the database. Nothing is installed on the visitor\'s computer, and the site is gone when the tab is closed — visitors can try everything without a second thought.', 'peak-publisher'),
+                    __('<a>The plugin page</a> gets a Live Preview button next to the Download button. It opens WordPress Playground: a full WordPress with the plugin installed and activated, running entirely in the visitor\'s browser. No server is involved: the browser itself runs PHP and the database. Nothing is installed on the visitor\'s computer, and the site is gone when the tab is closed — visitors can try everything without a second thought.', 'peak-publisher'),
                     { a: createElement('a', { href: getWporgPluginUrl(slug), target: '_blank', rel: 'noreferrer' }) },
                 )),
                 createElement('h2', { key: 'background-title' }, __('Technical background and advanced settings', 'peak-publisher')),

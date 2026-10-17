@@ -26,9 +26,9 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     // it. <a> is the start-over link.
     function getIgnoredText(onWporg) {
         if (onWporg.ignored === 'too_large') {
-            return sprintf(__('blueprint.json on wordpress.org is %s — wordpress.org ignores blueprints over 100 KB, so your plugin page has no Live Preview. Set up a new one or paste one below.', 'peak-publisher'), Pblsh.AssetsUtils.getMetaLine({ filesize: onWporg.filesize }));
+            return sprintf(__('blueprint.json on wordpress.org is %s — wordpress.org ignores blueprints over 100 KB, so the plugin page has no Live Preview. Set up a new one or paste one below.', 'peak-publisher'), Pblsh.AssetsUtils.getMetaLine({ filesize: onWporg.filesize }));
         }
-        return sprintf(__('wordpress.org cannot read the blueprint.json it has (%s), so your plugin page has no Live Preview. Fix it here or <a>start over</a>.', 'peak-publisher'), onWporg.problem);
+        return sprintf(__('wordpress.org cannot read the blueprint.json it has (%s), so the plugin page has no Live Preview. Fix it here or <a>start over</a>.', 'peak-publisher'), onWporg.problem);
     }
     const getNotDownloadableText = () => __('Testing needs your plugin to be downloadable from wordpress.org.', 'peak-publisher');
 
@@ -104,7 +104,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getRemoveLabel = () => __('Remove Live Preview', 'peak-publisher');
     // The section's introduction, in every state: what a Live Preview does for the plugin page —
     // the how (Playground, the steps, the blueprint) is the tip's (Pblsh.Tips.livePreview).
-    const getIntroText = () => __('Offers a Live Preview on your plugin page, so interested visitors can give your plugin a quick try.', 'peak-publisher');
+    const getIntroText = () => __('Offers a Live Preview on the plugin page, so interested visitors can give the plugin a quick try.', 'peak-publisher');
     const getDeleteConfirmText = (onWporg) => onWporg
         ? __('Remove the Live Preview? It is deleted from wordpress.org with the next commit.', 'peak-publisher')
         : __('Remove the Live Preview? It was never committed and is lost.', 'peak-publisher');

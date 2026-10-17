@@ -65,17 +65,14 @@ lodash.set(window, 'Pblsh.API', {
             body: { value, expected },
         });
     },
-    // Bring the wordpress.org plugins up to date: every marker with whatever is due, or one —
-    // the editor's Refresh, straight against SVN. `known` are the tokens of the rows the client
-    // holds ({ [id]: wporg_token }). Answers { stats, plugins, changes, next_check_in,
-    // list_outdated }.
-    // The three forms of the refresh (AdminAPI::refresh_wporg_rest()): the automatic look at every
-    // plugin, the editor's Refresh of one straight against SVN, and with `watch` the import watch
-    // of one — its stamp compared, SVN only when it moved.
-    refreshWporg: async (pluginId = null, known = {}, watch = false) => {
+    // Bring the wordpress.org plugins up to date, in three forms (AdminAPI::refresh_wporg_rest()):
+    // the automatic look at every plugin with whatever is due, the editor's Refresh of one straight
+    // against SVN, and with `watch` the import watch of one — its stamp compared, SVN only when it
+    // moved. Answers { plugins, changes, next_check_in }: the row of every plugin in scope.
+    refreshWporg: async (pluginId = null, watch = false) => {
         return await window.Pblsh.API.request('admin/wporg/refresh', {
             method: 'POST',
-            body: { plugin_id: pluginId, known, watch },
+            body: { plugin_id: pluginId, watch },
         });
     },
     // Dismiss the one-time notice about the schema upgrade (includes/upgrade.php)

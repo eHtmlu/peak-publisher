@@ -76,23 +76,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // What an answer from wordpress.org changes beyond the store, whoever asked — the automatic
     // check (every plugin, whatever is due), the editor's Refresh link (that plugin, straight
-    // against SVN), the import watch (that plugin's stamp). The store took the rows the server
-    // answered — every plugin whose copy moved underneath this client, its SVN copy or the
-    // directory stamp the bands and the forecast derive from, whoever moved it; the row brings
-    // the forecast —, and such a plugin also gets its tabs reloaded, so its header and its tabs
-    // show the same state. Which plugins that concerns is decided when the answer arrives:
-    // every one whose tabs the client holds or is loading by then, whichever view the request
-    // started from. A wordpress.org plugin added or removed elsewhere — another tab, another
-    // admin — is no row's news: the list is loaded anew.
-    const takeWporgAnswer = (answer) => {
+    // against SVN), the import watch (that plugin's stamp). The store took the rows; a plugin
+    // whose copy moved underneath this client (Controllers.Plugins.refreshWporg: its token
+    // differs — the SVN copy, the directory stamp, the working copy, whoever moved it; the row
+    // brings the forecast) also gets its tabs reloaded, so its header and its tabs show the
+    // same state. Which plugins that concerns is decided when the answer arrives: every one
+    // whose tabs the client holds or is loading by then, whichever view the request started
+    // from. A wordpress.org plugin added or removed elsewhere — another tab, another admin — is
+    // no row's news: the list is loaded anew.
+    const takeWporgAnswer = ({ moved, listOutdated }) => {
         const releases = wp.data.select('pblsh/releases');
-        Object.keys(answer.plugins).map(Number)
-            .filter((id) => releases.hasLoadedForPlugin(id) || releases.isLoadingForPlugin(id))
-            .forEach(loadPluginTabs);
-        if (answer.list_outdated) {
+        moved.filter((id) => releases.hasLoadedForPlugin(id) || releases.isLoadingForPlugin(id)).forEach(loadPluginTabs);
+        if (listOutdated) {
             window.Pblsh.Controllers.Plugins.fetchList().catch((e) => showAlert(e.message, 'error'));
         }
-        return answer;
     };
     const refreshWporg = async (pluginId = null) => takeWporgAnswer(await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId));
     const watchWporgImport = async (pluginId) => takeWporgAnswer(await window.Pblsh.Controllers.Plugins.watchWporgImport(pluginId));

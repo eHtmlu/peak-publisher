@@ -31,11 +31,11 @@
         setPending: function(id, flag) {
             return { type: 'SET_PENDING', id: id, flag: !!flag };
         },
-        // The answer of a directory refresh in one step: the figures and check of every marker
-        // (stats) and the fresh row of each that moved (plugins) merge into the plugins the
-        // store holds — unknown ids are ignored, an answer may name a plugin deleted
-        // meanwhile —, what the refresh found changed on wordpress.org adds to what is not
-        // told yet, and the next check is due when the server said.
+        // The answer of a directory refresh in one step: the fresh row of every marker in scope
+        // (plugins) merges into the plugins the store holds — unknown ids are ignored, an answer
+        // may name a plugin added or deleted meanwhile, which the list's reload takes care of —,
+        // what the refresh found changed on wordpress.org adds to what is not told yet, and the
+        // next check is due when the server said.
         applyWporgRefresh: function(answer, now) {
             return { type: 'APPLY_WPORG_REFRESH', answer: answer, now: now };
         },
@@ -89,10 +89,8 @@
             }
             case 'APPLY_WPORG_REFRESH': {
                 var refreshedById = assign({}, state.byId);
-                [ action.answer.stats, action.answer.plugins ].forEach(function(fieldsById) {
-                    Object.keys(fieldsById).forEach(function(pluginId) {
-                        if (refreshedById[pluginId]) refreshedById[pluginId] = assign({}, refreshedById[pluginId], fieldsById[pluginId]);
-                    });
+                Object.keys(action.answer.plugins).forEach(function(pluginId) {
+                    if (refreshedById[pluginId]) refreshedById[pluginId] = assign({}, refreshedById[pluginId], action.answer.plugins[pluginId]);
                 });
                 // Counts add up, facts stay: two refreshes before the plugin is looked at tell one story.
                 var changesById = assign({}, state.wporgChanges);
@@ -175,17 +173,23 @@
     var wporgRefreshes = Promise.resolve();
     async function runWporgRefresh(pluginId, watch) {
         var dispatch = wp.data.dispatch('pblsh/plugins');
-        // What this client's copies were made from — the server answers the row of every
-        // plugin that moved since, whoever moved it (this refresh, another tab, a commit).
-        var known = {};
-        wp.data.select('pblsh/plugins').getPlugins().forEach(function(plugin) {
-            if (plugin.hosting_type === 'wporg') known[plugin.id] = plugin.wporg_token;
-        });
         dispatch.setRefreshingWporg(true);
         try {
-            var answer = await window.Pblsh.API.refreshWporg(pluginId, known, watch);
+            var answer = await window.Pblsh.API.refreshWporg(pluginId, watch);
+            // What moved underneath this client, decided against the copies it holds before the
+            // answer replaces them: a row whose token differs from the one held — the marker moved,
+            // whoever moved it: another tab, another user, a commit, wordpress.org's import — and,
+            // on the automatic look, which answers every wordpress.org plugin there is, a list that
+            // lacks one of them or holds one the answer does not: added or removed elsewhere.
+            var held = {};
+            wp.data.select('pblsh/plugins').getPlugins().forEach(function(plugin) {
+                if (plugin.hosting_type === 'wporg') held[plugin.id] = plugin.wporg_token;
+            });
+            var answered = Object.keys(answer.plugins).map(Number);
+            var moved = answered.filter(function(id) { return id in held && held[id] !== answer.plugins[id].wporg_token; });
+            var listOutdated = pluginId === null && (answered.length !== Object.keys(held).length || answered.some(function(id) { return !(id in held); }));
             dispatch.applyWporgRefresh(answer, Date.now());
-            return answer;
+            return { moved: moved, listOutdated: listOutdated };
         } catch (e) {
             // A question the server did not answer is asked again in a minute, not at once —
             // the watch keeps its own beat and leaves the clock alone.
@@ -225,9 +229,9 @@
         },
         // Brings the wordpress.org plugins up to date — every marker with whatever is due, or
         // one straight against SVN (the editor's Refresh) — and takes the answer into the
-        // store (applyWporgRefresh). Resolves to the answer, whose `plugins` are the rows that
-        // moved — their SVN copy or the directory stamp —, so a caller can reload what else it
-        // holds of them.
+        // store (applyWporgRefresh). Resolves to what moved underneath this client: `moved`,
+        // the ids whose copy moved, so a caller can reload what else it holds of them, and
+        // `listOutdated`, whether the list is to be loaded anew.
         refreshWporg: function(pluginId) {
             return enqueueWporgRefresh(pluginId || null, false);
         },

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Pblsh\Tests\Unit;
 
 use function Pblsh\confirm_wporg_directory_check;
+use function Pblsh\get_wporg_assets_state;
 use function Pblsh\mark_wporg_plugin_cache_stale;
+use function Pblsh\record_wporg_live_preview_check;
 use function Pblsh\update_wporg_assets_state;
 use function Pblsh\wporg_assets_state_defaults;
 use function Pblsh\wporg_refresh_changes;
@@ -48,25 +50,37 @@ final class WporgRefreshTest extends TestCase {
         self::assertSame([ 'assets' => true ], wporg_refresh_changes([], self::READ, self::READ, true));
     }
 
-    public function test_the_token_moves_with_the_cached_revision_the_mirror_and_the_stamp(): void {
+    public function test_the_token_moves_with_everything_a_clients_copy_is_made_from(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin', 'publish', [ 'revision' => 7, 'release_count' => 2, 'trunk_readme' => self::READ, 'fetched_at' => 123 ]);
-        self::assertSame('7:-:-', wporg_sync_token($marker), 'the mirror was never pulled, the directory never checked');
+        $id = $marker->ID;
+        $token = static fn(): string => wporg_sync_token(get_post($id));
+        $tokens = [ 'as imported' => $token() ];
+        self::assertSame($tokens['as imported'], $token(), 'stable while nothing moved');
+        self::assertStringStartsWith('7:-:', $tokens['as imported'], 'the cached revision, the mirror never pulled');
 
-        update_wporg_assets_state($marker->ID, [ ...wporg_assets_state_defaults(), 'revision' => 5 ]);
-        self::assertSame('7:5:-', wporg_sync_token($marker));
+        update_wporg_assets_state($id, [ ...wporg_assets_state_defaults(), 'revision' => 5 ]);
+        $tokens['the mirror pulled'] = $token();
+        self::assertStringStartsWith('7:5:', $tokens['the mirror pulled']);
+        update_wporg_assets_state($id, [ ...wporg_assets_state_defaults(), 'revision' => 0 ]);
+        $tokens['no assets directory, a state of its own'] = $token();
 
-        update_wporg_assets_state($marker->ID, [ ...wporg_assets_state_defaults(), 'revision' => 0 ]);
-        self::assertSame('7:0:-', wporg_sync_token($marker), 'no assets directory is a state of its own');
-
-        mark_wporg_plugin_cache_stale($marker->ID);
-        self::assertSame('-:0:-', wporg_sync_token(get_post($marker->ID)), 'a commit of our own moves the token for every other client');
+        $entry = [ 'action' => 'put', 'file' => 'icon-128x128.png', 'base' => null, 'ext' => 'png', 'filesize' => 300, 'width' => 128, 'height' => 128, 'at' => 100, 'user' => [ 'id' => 1, 'login' => 'admin' ] ];
+        update_wporg_assets_state($id, [ ...get_wporg_assets_state($id), 'pending' => [ 'icon_128' => $entry ] ]);
+        $tokens['a change of the working copy — another tab, another user'] = $token();
 
         $stamp = [ 'version' => '1.0.0', 'last_updated' => 'A', 'assets' => [ 'icon.svg' => 12 ] ];
-        confirm_wporg_directory_check($marker->ID, $stamp);
-        $checked = wporg_sync_token(get_post($marker->ID));
-        self::assertStringStartsWith('-:0:', $checked);
-        self::assertNotSame('-:0:-', $checked, 'the first directory check moves the token');
-        confirm_wporg_directory_check($marker->ID, [ ...$stamp, 'assets' => [ 'icon.svg' => 13 ] ]);
-        self::assertNotSame($checked, wporg_sync_token(get_post($marker->ID)), "wordpress.org's import of an own commit moves the stamp alone — and the token with it");
+        confirm_wporg_directory_check($id, $stamp);
+        $tokens['the first directory check'] = $token();
+        confirm_wporg_directory_check($id, [ ...$stamp, 'assets' => [ 'icon.svg' => 13 ] ]);
+        $tokens["wordpress.org's import of an own commit: the stamp alone"] = $token();
+
+        record_wporg_live_preview_check($id, true, 1000);
+        $tokens['a check of the public preview'] = $token();
+
+        mark_wporg_plugin_cache_stale($id);
+        $tokens['a commit of our own'] = $token();
+        self::assertStringStartsWith('-:0:', $tokens['a commit of our own']);
+
+        self::assertCount(count($tokens), array_unique($tokens), 'every move leaves a token of its own: ' . implode(' · ', array_keys($tokens)));
     }
 }

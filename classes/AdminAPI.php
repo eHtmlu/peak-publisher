@@ -390,8 +390,8 @@ class AdminAPI {
                 ? summarize_plugin_downloads(get_plugin_downloads((int) $post->ID))
                 : $wporg_directory['downloads'],
             'wporg_stats' => $is_self_hosted ? null : $wporg_directory['wporg_stats'],
-            // When the plugin was last brought in step with wordpress.org, and what its copy
-            // here was made from — sent back with the next refresh (wporg_sync_token()).
+            // When the plugin was last brought in step with wordpress.org, and the version of its
+            // copy here — the client compares it with the next refresh's row (wporg_sync_token()).
             'wporg_check' => $is_self_hosted ? null : $wporg_directory['wporg_check'],
             'wporg_token' => $is_self_hosted ? null : wporg_sync_token($post),
             // Asset changes not on wordpress.org yet — deleting the plugin here would lose them.
@@ -765,13 +765,12 @@ class AdminAPI {
      * never as an error of this request — and what it changed before it failed is told all the
      * same.
      *
-     * Answers what the client then holds: `stats` — figures and check of every marker in
-     * scope —, `plugins` — the list row of every marker that moved underneath the client's
-     * copy, whoever moved it: the client sends the tokens of its rows as `known`
-     * (wporg_sync_token()) —, `changes` — what this request's SVN refreshes changed in what
-     * the editor shows —, `next_check_in`, the seconds until the stamp check is due again, and
-     * `list_outdated`: the client's list names a marker that is gone or misses one, removed or
-     * added elsewhere — no row can say that, the client reloads its list.
+     * Answers the row of every marker in scope — the client compares each with the copy it
+     * holds: a token that differs (wporg_sync_token()) means the marker moved underneath it,
+     * whoever moved it, and its tabs are read anew; a marker its list lacks, or one it holds
+     * that the answer lacks, means the list is outdated and is loaded anew —, `changes`, what
+     * this request's SVN refreshes changed in what the editor shows, and `next_check_in`, the
+     * seconds until the stamp check is due again.
      */
     public function refresh_wporg_rest(\WP_REST_Request $request) {
         $params = $request->get_json_params();
@@ -784,7 +783,7 @@ class AdminAPI {
 
         // The checks the directory left open — a stamp that moved; the editor's Refresh whatever
         // the directory answered, or failed to — complete with the plugin's SVN refresh. The
-        // tokens compared below are read after that: a stamp this request moved is in them.
+        // rows are built after that: a stamp this request moved is in their tokens.
         $open = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], $force);
         $changes = [];
         foreach ($force ? [ $plugin_id => $open[$plugin_id] ?? null ] : $open as $id => $stamp) {
@@ -804,33 +803,17 @@ class AdminAPI {
             : [ get_post($plugin_id) ];
         // The download history rides along with the look, once a day per plugin.
         refresh_wporg_download_stats($markers, time());
-        $known = is_array($params['known'] ?? null) ? $params['known'] : [];
-        $stats = [];
-        $outdated = [];
-        foreach ($markers as $marker) {
-            $stats[$marker->ID] = serialize_wporg_directory((int) $marker->ID);
-            if (isset($known[$marker->ID]) && (string) $known[$marker->ID] !== wporg_sync_token($marker)) {
-                $outdated[] = $marker;
-            }
-        }
-        $releases_by_parent = fetch_releases_grouped_by_parent(array_map('intval', wp_list_pluck($outdated, 'ID')));
+        $releases_by_parent = fetch_releases_grouped_by_parent(array_map('intval', wp_list_pluck($markers, 'ID')));
         $plugins = [];
-        foreach ($outdated as $marker) {
+        foreach ($markers as $marker) {
             $plugins[$marker->ID] = $this->serialize_plugin_post($marker, false, $releases_by_parent[(int) $marker->ID] ?? []);
         }
-        // The automatic look names every wordpress.org plugin the client holds: the two sets
-        // are compared as they are.
-        $known_ids = array_map('intval', array_keys($known));
-        $marker_ids = array_map('intval', wp_list_pluck($markers, 'ID'));
-        $list_outdated = $plugin_id === null && (array_diff($known_ids, $marker_ids) !== [] || array_diff($marker_ids, $known_ids) !== []);
         return [
             'status' => 'ok',
             // Objects even when empty, so the client can always iterate their keys.
-            'stats' => (object) $stats,
             'plugins' => (object) $plugins,
             'changes' => (object) $changes,
             'next_check_in' => wporg_directory_next_check_in(time()),
-            'list_outdated' => $list_outdated,
         ];
     }
 

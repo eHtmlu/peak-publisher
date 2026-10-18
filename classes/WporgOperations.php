@@ -298,6 +298,7 @@ class WporgOperations {
                 'message' => wporg_deploy_commit_message($kind, $wporg_slug, $version, $decision, $live['stable_tag'] ?? null, $carry !== null),
                 'details' => [
                     'version' => $version,
+                    'kind' => $kind,
                     'deploy_mode' => $touch_trunk ? 'trunk_and_tag' : 'tag_only',
                     'make_current' => $decision['make_current'],
                     'stable_tag_before' => $outcome['stable_tag_before'],

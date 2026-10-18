@@ -31,6 +31,8 @@ final class AssetCommitPlanTest extends TestCase {
         self::assertSame([], $plan['mkdirs']);
         self::assertSame([ [ 'path' => 'assets/icon-128x128.png', 'type' => 'image/png' ] ], $plan['mime_types'], 'the type the handbook asks for, from the detected content');
         self::assertSame('Add icon to my-plugin via Peak Publisher', $plan['message'], 'no base: the slot was empty');
+        self::assertSame([ 'icon-128x128.png' ], $plan['details']['added'], 'the log keeps the fact the message says');
+        self::assertSame([], $plan['details']['updated']);
 
         $svg = build_asset_commit_plan('my-plugin', [ 'icon_svg' => [ 'action' => 'put', 'file' => 'icon.svg', 'ext' => 'svg', 'base' => null ] ], self::listing(), 60, '/tmp/pending');
         self::assertSame([], $svg['mime_types'], 'an SVG stays without a property: it is text to SVN, and the origin types .svg by extension');
@@ -85,7 +87,7 @@ final class AssetCommitPlanTest extends TestCase {
         self::assertSame([ 'assets/blueprints' ], $plan['mkdirs'], 'blueprints/ is missing from the listing');
         self::assertSame([ '/tmp/blueprint-x.json' ], $plan['cleanup'], 'the temp file goes with the commit');
         self::assertSame([], $plan['mime_types'], 'text to SVN; wordpress.org serves it from its own store');
-        self::assertSame([ 'blueprints/blueprint.json' ], $plan['details']['updated']);
+        self::assertSame([ 'blueprints/blueprint.json' ], $plan['details']['added']);
         self::assertSame('Add Live Preview blueprint.json to my-plugin via Peak Publisher', $plan['message']);
 
         $first = build_asset_commit_plan('my-plugin', $put, null, 60, '/tmp/pending', '/tmp/blueprint-x.json');
@@ -133,6 +135,8 @@ final class AssetCommitPlanTest extends TestCase {
         $message = static fn(array $pending): string => build_asset_commit_plan('my-plugin', $pending, self::listing(), 60, '/tmp/pending', '/tmp/blueprint-x.json')['message'];
 
         self::assertSame('Update icon of my-plugin via Peak Publisher', $message([ 'icon_256' => $put('icon-256x256.png'), 'icon_128' => $put('icon-128x128.png', $base) ]), 'the icon is one thing, whatever its slots: a new slot beside a replaced one updates it');
+        $details = build_asset_commit_plan('my-plugin', [ 'icon_256' => $put('icon-256x256.png'), 'icon_128' => $put('icon-128x128.png', $base) ], self::listing(), 60, '/tmp/pending')['details'];
+        self::assertSame([ 'added' => [ 'icon-256x256.png' ], 'updated' => [ 'icon-128x128.png' ], 'moved' => [], 'deleted' => [] ], $details, 'the details keep each file\'s own fact');
         self::assertSame('Update icon of my-plugin via Peak Publisher', $message([ 'icon_128' => self::copy('icon_256', 'icon-256x256.png', 'png'), 'icon_256' => $delete ]), 'a move within the icon too');
         self::assertSame('Add banner to my-plugin via Peak Publisher', $message([ 'banner_sd' => $put('banner-772x250.png'), 'banner_hd' => $put('banner-1544x500.png') ]));
         self::assertSame('Add screenshot 5 to my-plugin via Peak Publisher', $message([ 'screenshot-5' => $put('screenshot-5.png') ]));

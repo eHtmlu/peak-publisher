@@ -437,7 +437,7 @@ function copy_sources_to_secure(array $pending, array $remote_winners): array {
  * blueprints/ — and assets/ — when the listing lacks them; its delete removes the file, the
  * directory stays. No mime type: to SVN it is text, and wordpress.org serves it from its own
  * store. The message says what was done (asset_commit_message()); the details list the files
- * by what happened to them.
+ * by what happened to them — added when the slot held no file before, else updated.
  *
  * @param array|null  $listing        WporgOperations::list_assets() — null: assets/ does not exist yet
  * @param string|null $blueprint_path the temp file holding the contents of a blueprint put
@@ -452,7 +452,7 @@ function build_asset_commit_plan(string $slug, array $pending, ?array $listing, 
     $mime_types = [];
     $mkdirs = $listing === null ? [ 'assets' ] : [];
     $cleanup = [];
-    $done = [ 'updated' => [], 'moved' => [], 'deleted' => [] ];
+    $done = [ 'added' => [], 'updated' => [], 'moved' => [], 'deleted' => [] ];
     $typed = static function(string $target, string $ext) use (&$mime_types): void {
         $type = asset_mime_type($ext);
         if ($type !== null) {
@@ -477,7 +477,7 @@ function build_asset_commit_plan(string $slug, array $pending, ?array $listing, 
             if (!$has_directory) {
                 $mkdirs[] = 'assets/blueprints';
             }
-            $done['updated'][] = $file;
+            $done[$entry['base'] === null ? 'added' : 'updated'][] = $file;
             continue;
         }
         $members = $slots[$slot_id]['members'] ?? [];
@@ -486,7 +486,7 @@ function build_asset_commit_plan(string $slug, array $pending, ?array $listing, 
             $puts[] = [ 'path' => 'assets/' . $target, 'local_path' => $pending_dir . '/' . $entry['file'] ];
             $deletes = [ ...$deletes, ...array_filter($members, static fn(string $member): bool => $member !== $target) ];
             $typed($target, $entry['ext']);
-            $done['updated'][] = $target;
+            $done[$entry['base'] === null ? 'added' : 'updated'][] = $target;
         } elseif ($entry['action'] === 'copy') {
             $target = asset_canonical_filename((string) $slot_id, $entry['ext']);
             $copies[] = [ 'path' => 'assets/' . $target, 'from_path' => 'assets/' . $entry['from']['filename'], 'from_revision' => $base_revision ];

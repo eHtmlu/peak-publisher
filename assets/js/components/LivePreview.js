@@ -399,8 +399,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         );
 
         // Zone 4: the actions on the blueprint in effect — the test of the working copy, the menu.
-        // Setting up is no action on it: that button stands outside the box.
-        const testBlocked = draft !== null || saving || !view.test.url;
+        // Setting up is no action on it: that button stands outside the box. Nothing unsaved is
+        // tested: not while the JSON draft or a field is being edited or saved — a click on the
+        // button while a field has the focus saves the field (its blur) and finds the button
+        // locked until the fresh test link is here; the field's label line says so meanwhile.
+        const testBlocked = draft !== null || saving || fieldBusy !== null || themeInput !== null || otherPath !== null || !view.test.url;
         const testButton = createElement(Button, {
             isPrimary: true,
             ...(testBlocked ? { disabled: true } : { href: view.test.url, target: '_blank', rel: 'noreferrer' }),

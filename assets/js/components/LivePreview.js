@@ -79,6 +79,17 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const [otherPath, setOtherPath] = useState(null);     // the "Other page" path while typed
         const [themeInput, setThemeInput] = useState(null);   // the theme slug while typed
         const savedTimer = useRef(null);
+        // The path field, focused with its text selected once the user chose "Other page…": the
+        // field appears with that choice, so the focus follows the render that mounts it.
+        const pathInput = useRef(null);
+        const focusPathInput = useRef(false);
+        useEffect(() => {
+            if (focusPathInput.current && pathInput.current) {
+                focusPathInput.current = false;
+                pathInput.current.focus();
+                pathInput.current.select();
+            }
+        });
         useEffect(() => () => clearTimeout(savedTimer.current), []);
         const showSaved = (field) => {
             setFieldState({ [field]: 'saved' });
@@ -245,12 +256,13 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                             options: T.getLandingOptions(),
                             disabled: locked,
                             onChange: (key) => {
-                                if (key === 'other') { setOtherPath(field.value || ''); return; }
+                                if (key === 'other') { focusPathInput.current = true; setOtherPath(field.value || ''); return; }
                                 setOtherPath(null);
                                 if (T.getLandingPath(key) !== field.value) change('landing_page', { change: 'landing_page', value: T.getLandingPath(key) });
                             },
                         }),
                         choice === 'other' && createElement(TextControl, {
+                            ref: pathInput,
                             __nextHasNoMarginBottom: true,
                             label: __('Path', 'peak-publisher'),
                             hideLabelFromVision: true,

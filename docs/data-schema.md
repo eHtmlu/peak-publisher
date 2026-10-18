@@ -60,7 +60,7 @@ code in this repository creates today:
   blueprints of `assets/blueprints/` among the assets, when that was and the last failure since —, the day's claim of
   the download history's fetch and the last check of the Live Preview's public switch `{public, checked_at}`,
   regenerable, not declared), `_pblsh_wporg_import` (the import forecast
-  `{expected_at, reason, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`,
+  `{expected_at, reason, assets, stable_touched_at, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`,
   `_pblsh_directory_content_hash` (sha256 over the paths and file contents of the shipped
   tree, `content_hash_from_entries()` in `includes/releases.php`; `''` when the ZIP is
   missing), `_pblsh_upload_state` (both channels: the upload state `$data` of finalize,

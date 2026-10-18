@@ -160,20 +160,17 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentPluginId) wp.data.dispatch('pblsh/plugins').clearWporgChanges(currentPluginId);
         }, [currentPluginId]);
 
-        // The import watch: after an own commit, while the open plugin's assets wait for the
-        // import and a forecast stands, the plugin's stamp is compared every minute from the
-        // forecast's time on, for ten minutes (AssetsUtils.getImportWatchAt()) — with the editor
-        // showing this plugin and the tab visible, nothing else. The moment is a function of the
-        // state — the forecast, the waiting, the clock —, not of the session: whoever leaves the
-        // editor or the tab and comes back inside the window is in the beat at once. Before the
-        // forecast's time one timer to it; after the window nothing but the five-minute clock.
-        // A stamp that moved comes back as the plugin's row (takeWporgAnswer: the forecast and
-        // the bands follow); one that did not is asked again a minute later.
+        // The import watch: after an own commit, while a forecast stands that the stamp can end
+        // (its `watch`: assets to show, the current release's folder touched), the plugin's stamp
+        // is compared every minute from the forecast's time on, for ten minutes
+        // (AssetsUtils.getImportWatchAt()) — with the editor showing this plugin and the tab
+        // visible, nothing else. The moment is a function of the state — the forecast, the clock
+        // —, not of the session: whoever leaves the editor or the tab and comes back inside the
+        // window is in the beat at once. Before the forecast's time one timer to it; after the
+        // window nothing but the five-minute clock. A stamp that moved comes back as the plugin's
+        // row (takeWporgAnswer: the forecast and the bands follow); one that did not is asked
+        // again a minute later.
         const importForecast = view === 'editor' && currentPlugin && currentPlugin.hosting_type === 'wporg' ? currentPlugin.wporg_import : null;
-        const importWaiting = useSelect((select) => {
-            const assets = currentPluginId ? select('pblsh/assets').getForPlugin(currentPluginId) : null;
-            return !!(assets && assets.wporg && assets.wporg.import_waiting);
-        }, [currentPluginId]);
         const [importWatchRun, setImportWatchRun] = useState(0);
         const lastImportWatch = useRef({ id: null, at: 0 });
         useEffect(() => {
@@ -188,7 +185,7 @@ document.addEventListener('DOMContentLoaded', function() {
         useEffect(() => {
             if (!importForecast || document.visibilityState !== 'visible') return undefined;
             const now = Date.now();
-            const due = getImportWatchAt(importForecast, importWaiting, now);
+            const due = getImportWatchAt(importForecast, now);
             if (due === null) return undefined;
             const last = lastImportWatch.current.id === currentPluginId ? lastImportWatch.current.at : 0;
             const timer = setTimeout(() => {
@@ -196,7 +193,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 watchWporgImport(currentPluginId).catch(() => {}).finally(() => setImportWatchRun((run) => run + 1));
             }, Math.max(0, Math.max(due, last + IMPORT_WATCH_INTERVAL) - now));
             return () => clearTimeout(timer);
-        }, [currentPluginId, importForecast && importForecast.expected_at, importWaiting, importWatchRun]);
+        }, [currentPluginId, importForecast && importForecast.expected_at, importForecast && importForecast.watch, importWatchRun]);
 
         // Helpers for URL state
         const parseQuery = () => {

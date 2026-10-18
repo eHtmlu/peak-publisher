@@ -178,6 +178,16 @@ function wporg_directory_stamp(array $result): ?array {
 
 
 /**
+ * The stamp's `last_updated` as a timestamp — the directory's spelling ("2026-10-01 9:15am GMT",
+ * to the minute), read strictly: anything else is null, never a guess.
+ */
+function wporg_stamp_last_updated_time(array $stamp): ?int {
+    $time = \DateTimeImmutable::createFromFormat('!Y-m-d g:ia T', (string) ($stamp['last_updated'] ?? ''), new \DateTimeZone('UTC'));
+    return $time === false ? null : $time->getTimestamp();
+}
+
+
+/**
  * One batched request per 100 slugs. Site-wide ($plugin_ids null): every marker, when the
  * stamp check is due. For the given markers alone — the editor's refresh of one, the markers
  * an import just created —: those, always; such a look neither consults nor claims the

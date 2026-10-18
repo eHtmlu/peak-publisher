@@ -350,8 +350,9 @@ class AdminAPI {
      * the wordpress.org dashboard
      * figures, `wporg_check` and `wporg_token` the state of the copy against wordpress.org,
      * `wporg_import` when the plugin page shows the last commit, while the forecast lasts and
-     * the stamp has not confirmed the import (includes/wporg_import_timing.php) — in the row
-     * too, since the row is what a client gets when its copy moved (all four null self-hosted).
+     * the stamp has not confirmed the import, with `watch` when the stamp can
+     * (includes/wporg_import_timing.php) — in the row too, since the row is what a client gets
+     * when its copy moved (all four null self-hosted).
      *
      * @param \WP_Post[] $releases The plugin's release posts.
      */

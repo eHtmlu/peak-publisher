@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Pblsh\Tests\Unit;
 
-use function Pblsh\operation_revisions;
+use function Pblsh\pointer_move_revisions;
 use function Pblsh\record_operation;
 
 use const Pblsh\PBLSH_OPERATIONS_META;
@@ -42,15 +42,17 @@ final class OperationsLogTest extends TestCase {
         self::assertCount(1, get_post_meta($marker->ID, PBLSH_OPERATIONS_META, true));
     }
 
-    public function test_the_revisions_of_one_operation_are_read_newest_first(): void {
+    public function test_the_pointer_moves_are_read_newest_first(): void {
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'my-plugin');
-        record_operation($marker->ID, 'stable_tag', 'wporguser', 5, []);
-        record_operation($marker->ID, 'deploy', 'wporguser', 6, []);
-        record_operation($marker->ID, 'stable_tag', 'wporguser', 7, []);
+        record_operation($marker->ID, 'stable_tag', 'wporguser', 5, [ 'from' => '1.0.0', 'to' => '1.1.0' ]);
+        record_operation($marker->ID, 'deploy', 'wporguser', 6, [ 'stable_tag_before' => '1.1.0', 'stable_tag_written' => '1.1.0' ]);
+        record_operation($marker->ID, 'deploy', 'wporguser', 7, [ 'stable_tag_before' => '1.1.0', 'stable_tag_written' => '1.2.0' ]);
+        record_operation($marker->ID, 'deploy', 'wporguser', 8, [ 'stable_tag_before' => '1.2.0', 'stable_tag_written' => null ]);
+        record_operation($marker->ID, 'deploy', 'wporguser', 9, [ 'stable_tag_before' => null, 'stable_tag_written' => '1.3.0' ]);
+        record_operation($marker->ID, 'assets', 'wporguser', 10, []);
 
-        self::assertSame([ 7, 5 ], operation_revisions($marker->ID, 'stable_tag'));
-        self::assertSame([], operation_revisions($marker->ID, 'assets'));
-        self::assertSame([], operation_revisions($this->create_plugin('pblsh_wporg_plugin', 'other')->ID, 'stable_tag'));
+        self::assertSame([ 9, 7, 5 ], pointer_move_revisions($marker->ID), 'the flips, and the deploys whose written pointer differs from the live one before — an unreadable one before included');
+        self::assertSame([], pointer_move_revisions($this->create_plugin('pblsh_wporg_plugin', 'other')->ID));
     }
 
     public function test_a_self_hosted_plugin_keeps_its_own_log_without_account_or_revision(): void {
@@ -63,6 +65,6 @@ final class OperationsLogTest extends TestCase {
         self::assertSame('tested_up_to', $log[0]['operation']);
         self::assertNull($log[0]['username']);
         self::assertNull($log[0]['revision']);
-        self::assertSame([], operation_revisions($plugin->ID, 'tested_up_to'), 'no revision, nothing for the forecast');
+        self::assertSame([], pointer_move_revisions($plugin->ID), 'no commit, nothing for the forecast');
     }
 }

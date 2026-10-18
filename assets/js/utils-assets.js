@@ -199,13 +199,14 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     // Committed, and the plugin page never looked at: the first directory check is still to come.
     const getUncheckedText = () => __('Committed · plugin page not checked yet', 'peak-publisher');
 
-    // When the import watch looks next (ms), or null: while the slots wait for an import and a
-    // forecast stands, at the forecast's time, from then on at once — the caller spaces the
-    // looks a minute apart — until ten minutes past it. Import times vary (a tag: seconds to
-    // minutes), so a beat rather than one look.
+    // When the import watch looks next (ms), or null: while a forecast stands that the stamp
+    // can end (its `watch`: assets to show, the current release's folder touched), at the
+    // forecast's time, from then on at once — the caller spaces the looks a minute apart — until
+    // ten minutes past it. Import times vary (a tag: seconds to minutes), so a beat rather than
+    // one look.
     const IMPORT_WATCH_WINDOW = 600000;
-    function getImportWatchAt(forecast, waiting, now) {
-        if (!waiting || !forecast) return null;
+    function getImportWatchAt(forecast, now) {
+        if (!forecast || !forecast.watch) return null;
         const expected = Date.parse(forecast.expected_at);
         if (isNaN(expected) || now >= expected + IMPORT_WATCH_WINDOW) return null;
         return Math.max(expected, now);

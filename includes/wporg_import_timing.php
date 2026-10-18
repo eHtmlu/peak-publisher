@@ -11,13 +11,16 @@ defined('ABSPATH') || exit;
  * the commits of a plugin since its last run; queue() folds that into an import still waiting;
  * queue_run_time() schedules a touched or deleted tag and a Stable tag flip to an existing tag
  * 5 s after the commit, any other trunk change — assets/ included — 15 minutes after it, so
- * every further trunk commit restarts the wait and a tag pulls it forward. Flips are known for
- * Peak Publisher's own commits only (the operations log); a foreign readme commit counts as a
- * trunk change. A running import is invisible from outside: a commit landing during one is
- * forecast like a fresh commit — the pessimistic side, which never promises what then fails to
- * appear. Pure functions; refresh_wporg_import_forecast() does the one request and the cache.
+ * every further trunk commit restarts the wait and a tag pulls it forward. Pointer moves —
+ * flips, deploys that make their release current — are known for Peak Publisher's own commits
+ * only (the operations log); a foreign readme commit counts as a trunk change. A running import
+ * is invisible from outside: a commit landing during one is forecast like a fresh commit — the
+ * pessimistic side, which never promises what then fails to appear. A forecast also carries
+ * what the import must leave in the directory stamp, and ends early once the stamp shows it
+ * (wporg_import_confirmed()). Pure functions; refresh_wporg_import_forecast() does the one
+ * request and the cache.
  */
-const PBLSH_WPORG_IMPORT_META = '_pblsh_wporg_import';   // { expected_at, reason, computed_at } — a cache, regenerable
+const PBLSH_WPORG_IMPORT_META = '_pblsh_wporg_import';   // { expected_at, reason, assets, stable_touched_at, computed_at } — a cache, regenerable
 const PBLSH_WPORG_IMPORT_WATCHER_DELAY = 30;              // the watcher's interval: the latest a commit is seen
 const PBLSH_WPORG_IMPORT_SHOWN_AFTER = 180;               // the forecast stays this long past the expected time — the import's own duration
 const PBLSH_WPORG_IMPORT_LOG_LIMIT = 20;                  // commits the forecast replays
@@ -31,7 +34,7 @@ const PBLSH_WPORG_IMPORT_LOG_LIMIT = 20;                  // commits the forecas
  * wording). Paths of other plugins in the same commit are not ours. Ascending by revision.
  *
  * @param array<int, array{revision:int, time:int, paths:array<string, string>}> $log_entries
- * @param int[] $flip_revisions revisions of Peak Publisher's own Stable tag flips
+ * @param int[] $flip_revisions revisions of Peak Publisher's own pointer moves (pointer_move_revisions())
  * @return array<int, array{revision:int, time:int, tags_touched:string[], tags_deleted:string[], readme_touched:bool, assets_touched:bool, trunk_touched:bool, flip:bool}>
  */
 function wporg_commits_from_log(array $log_entries, string $slug, array $flip_revisions): array {
@@ -90,14 +93,24 @@ function wporg_import_delay(array $args): int {
  * merged picture decides the time, counted from the latest commit. The watcher's interval is
  * added as the upper bound of when the commit is seen.
  *
- * @return array{expected_at:int, reason:'tag'|'flip'|'assets'|'trunk'}|null
+ * Beside the time, what the import must leave in the directory stamp, for the stamp to end the
+ * forecast early (wporg_import_confirmed()): `assets` — assets were committed, the page will
+ * show them —, `stable_touched_at` — the time of the latest commit that moved the pointer or
+ * touched the folder of the current release ($stable_folder: a tag, 'trunk', null unknown),
+ * after which wordpress.org bumps `last_updated` (plugin-directory: class-import.php, "Bump
+ * last updated if") —, null when no commit did: a trunk commit beside the stable folder or an
+ * edit of another tag leaves the stamp alone.
+ *
+ * @return array{expected_at:int, reason:'tag'|'flip'|'assets'|'trunk', assets:bool, stable_touched_at:?int}|null
  */
-function predict_wporg_import(array $commits, int $now): ?array {
+function predict_wporg_import(array $commits, int $now, ?string $stable_folder): ?array {
     $event = null;
     foreach ($commits as $commit) {
         $time = (int) $commit['time'];
-        $args = array_intersect_key($commit, array_flip([ 'tags_touched', 'tags_deleted', 'readme_touched', 'assets_touched', 'trunk_touched', 'flip' ]));
+        $stable_touched = $commit['flip'] || ($stable_folder === 'trunk' ? $commit['trunk_touched'] : ($stable_folder !== null && $stable_folder !== '' && in_array($stable_folder, $commit['tags_touched'], true)));
+        $args = [ ...array_intersect_key($commit, array_flip([ 'tags_touched', 'tags_deleted', 'readme_touched', 'assets_touched', 'trunk_touched', 'flip' ])), 'stable_touched_at' => $stable_touched ? $time : null ];
         if ($event !== null && $event['nextrun'] > $time) {
+            $touched = array_filter([ $event['args']['stable_touched_at'], $args['stable_touched_at'] ], 'is_int');
             $args = [
                 'tags_touched' => array_values(array_unique([ ...$event['args']['tags_touched'], ...$args['tags_touched'] ])),
                 'tags_deleted' => array_values(array_unique([ ...$event['args']['tags_deleted'], ...$args['tags_deleted'] ])),
@@ -105,6 +118,7 @@ function predict_wporg_import(array $commits, int $now): ?array {
                 'assets_touched' => $event['args']['assets_touched'] || $args['assets_touched'],
                 'trunk_touched' => $event['args']['trunk_touched'] || $args['trunk_touched'],
                 'flip' => $event['args']['flip'] || $args['flip'],
+                'stable_touched_at' => $touched === [] ? null : max($touched),
             ];
         }
         $event = [ 'nextrun' => $time + wporg_import_delay($args), 'args' => $args ];
@@ -122,7 +136,7 @@ function predict_wporg_import(array $commits, int $now): ?array {
     $reason = wporg_import_delay([ ...$args, 'flip' => false ]) === 5 ? 'tag'
         : ($args['readme_touched'] && $args['flip'] ? 'flip'
         : ($args['assets_touched'] && !$args['trunk_touched'] ? 'assets' : 'trunk'));
-    return [ 'expected_at' => $expected_at, 'reason' => $reason ];
+    return [ 'expected_at' => $expected_at, 'reason' => $reason, 'assets' => (bool) $args['assets_touched'], 'stable_touched_at' => $args['stable_touched_at'] ];
 }
 
 
@@ -145,23 +159,36 @@ function wporg_import_facts(\WP_Post $marker, array $current): array {
 
 
 /**
- * Whether the stamp confirms the import the forecast waits for — the forecast ends then,
- * whatever its time said. Assets: nothing of the mirror waits any more. A flip or a tag: the
- * directory's version is the current release's — a tag that did not become current leaves it
- * as it is, and the plugin page shows nothing of that commit anyway. A trunk commit: never —
- * wordpress.org bumps last_updated only when the version changed or the stable tag's folder
- * was touched, so a readme edit on trunk leaves no trace in the stamp; that forecast ends by
+ * Whether the stamp shows what the forecast expects of it — the forecast ends then, whatever
+ * its time said. Every expectation must hold. Assets: nothing of the mirror waits any more. The
+ * stable folder touched, or the pointer moved: the directory's version is the current release's
+ * and its `last_updated` is not before that commit, to the minute the directory gives —
+ * wordpress.org bumps it exactly then, for a changed version or a commit to the current stable's
+ * folder; an edit of the version that is current already changes no version, so the version
+ * alone would confirm it at the first look. A forecast expecting nothing of the stamp — a trunk
+ * commit beside the stable folder, an edit of another tag — leaves no trace in it and ends by
  * time alone. Nothing confirms before the first check.
  */
 function wporg_import_confirmed(array $stored, ?array $stamp, array $facts): bool {
     if ($stamp === null) {
         return false;
     }
-    return match ((string) $stored['reason']) {
-        'assets' => !$facts['import_waiting'],
-        'flip', 'tag' => $facts['current_version'] !== null && $stamp['version'] === $facts['current_version'],
-        default => false,
-    };
+    $expects_assets = !empty($stored['assets']);
+    $stable_touched_at = $stored['stable_touched_at'] ?? null;
+    if (!$expects_assets && $stable_touched_at === null) {
+        return false;
+    }
+    if ($expects_assets && $facts['import_waiting']) {
+        return false;
+    }
+    if ($stable_touched_at !== null) {
+        $updated = wporg_stamp_last_updated_time($stamp);
+        if ($facts['current_version'] === null || $stamp['version'] !== $facts['current_version']
+            || $updated === null || $updated < (int) $stable_touched_at - (int) $stable_touched_at % MINUTE_IN_SECONDS) {
+            return false;
+        }
+    }
+    return true;
 }
 
 
@@ -172,17 +199,26 @@ function wporg_import_confirmed(array $stored, ?array $stamp, array $facts): boo
  */
 function stored_wporg_import(int $marker_id, int $now, array $facts): ?array {
     $stored = get_post_meta($marker_id, PBLSH_WPORG_IMPORT_META, true);
-    if (!is_array($stored) || !isset($stored['expected_at'], $stored['reason']) || (int) $stored['expected_at'] + PBLSH_WPORG_IMPORT_SHOWN_AFTER <= $now) {
+    if (!is_array($stored) || !isset($stored['expected_at'], $stored['reason']) || !array_key_exists('assets', $stored) || !array_key_exists('stable_touched_at', $stored)
+        || (int) $stored['expected_at'] + PBLSH_WPORG_IMPORT_SHOWN_AFTER <= $now) {
         return null;
     }
     return wporg_import_confirmed($stored, get_wporg_directory($marker_id)['stamp'], $facts) ? null : $stored;
 }
 
 
-/** The stored forecast for the REST payload, while it lasts; expected_at as ISO 8601 UTC. */
+/**
+ * The stored forecast for the REST payload, while it lasts: expected_at as ISO 8601 UTC, the
+ * reason, and `watch` — whether the stamp can end it (it expects something of the stamp), so
+ * the client watches the stamp from the forecast's time on.
+ */
 function serialize_wporg_import(int $marker_id, int $now, array $facts): ?array {
     $stored = stored_wporg_import($marker_id, $now, $facts);
-    return $stored === null ? null : [ 'expected_at' => gmdate('Y-m-d\TH:i:s\Z', (int) $stored['expected_at']), 'reason' => (string) $stored['reason'] ];
+    return $stored === null ? null : [
+        'expected_at' => gmdate('Y-m-d\TH:i:s\Z', (int) $stored['expected_at']),
+        'reason' => (string) $stored['reason'],
+        'watch' => !empty($stored['assets']) || $stored['stable_touched_at'] !== null,
+    ];
 }
 
 
@@ -212,8 +248,10 @@ function refresh_wporg_import_forecast(\WP_Post $marker, ?WporgPluginSvnClient $
         delete_post_meta((int) $marker->ID, PBLSH_WPORG_IMPORT_META);
         return;
     }
-    $flips = operation_revisions((int) $marker->ID, 'stable_tag');
-    $forecast = predict_wporg_import(wporg_commits_from_log($entries, $marker->post_name, $flips), time());
+    // The folder of the current release as the pointer reads now; the commit that moves it is
+    // known by the log, so a pointer the marker cache has not caught up with yet does no harm.
+    $commits = wporg_commits_from_log($entries, $marker->post_name, pointer_move_revisions((int) $marker->ID));
+    $forecast = predict_wporg_import($commits, time(), resolve_current_release($marker)['pointer']);
     if ($forecast === null) {
         delete_post_meta((int) $marker->ID, PBLSH_WPORG_IMPORT_META);
         return;

@@ -4817,8 +4817,9 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     color: #8c96a0;
 }
 
-/* The JSON beside the fields: a column whose box the editor fills — the box's own height is the
-   one min-height, never its content's, so beside the fields it stretches to their height and
+/* The JSON beside the fields: a column whose box the editor fills — a framed box with a gray
+   head naming the file by its path, the editor in its body; the body's own height is the one
+   min-height, never its content's, so beside the fields the box stretches to their height and
    beneath them it keeps the min-height and scrolls — with its foot under it: the save line at
    the left, wordpress.org's guide at the right. */
 .pblsh--live-preview__editor {
@@ -4826,6 +4827,27 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     flex-direction: column;
 }
 .pblsh--live-preview__editor-box {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    border: 1px solid #dcdcde;
+    border-radius: 0.25rem;
+}
+.pblsh--live-preview__editor-head {
+    padding: 0.25rem 0.75rem;
+    border-bottom: 1px solid var(--border-color-light);
+    background: #f6f7f7;
+    color: #646970;
+    font-size: 0.8125rem;
+}
+.pblsh--live-preview__editor-head code {
+    padding: 0;
+    background: transparent;
+    font-size: inherit;
+    color: inherit;
+}
+.pblsh--live-preview__editor-body {
     position: relative;
     flex: 1;
     min-height: 20rem;
@@ -4844,21 +4866,22 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     color: var(--color-red);
 }
 
-/* The editor fills the box it is given: WordPress's code editor, or the plain textarea. */
+/* The editor fills the box it is given — the frame is the box's: WordPress's code editor, or
+   the plain textarea, both without a border of their own. */
 .pblsh--blueprint-editor {
     position: absolute;
     inset: 0;
 }
 .pblsh--blueprint-editor .CodeMirror {
     height: 100%;
-    border: 1px solid #dcdcde;
-    border-radius: 0.25rem;
     font-size: 0.8125rem;
 }
 .pblsh--blueprint-editor__textarea {
     width: 100%;
     height: 100%;
     box-sizing: border-box;
+    border: 0;
+    border-radius: 0;
     resize: none;
     font-family: Menlo, Consolas, monospace;
     font-size: 0.8125rem;

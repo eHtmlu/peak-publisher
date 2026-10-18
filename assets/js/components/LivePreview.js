@@ -334,10 +334,14 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             : onWporg ? 'mirror' : 'working';
         const saveDetail = saveLine ? saveLine.detail : (onWporg ? onWporg.revision : null);
         const saveError = saveState === 'invalid' || saveState === 'refused' || saveState === 'elsewhere';
-        // Under the box: the save line at the left, and at the right wordpress.org's guide — the one the tip links to.
+        // The box: its head names the file by its path in SVN, the editor fills the body. Under the
+        // box the save line at the left, and at the right wordpress.org's guide — the one the tip links to.
         const renderEditor = () => createElement('div', { className: 'pblsh--live-preview__editor' },
             createElement('div', { className: 'pblsh--live-preview__editor-box' },
-                createElement(BlueprintEditor, { value: editorValue, onChange: onEditorChange, readOnly: readOnly || fieldBusy !== null, placeholder: T.getPastePlaceholder(), label: __('Blueprint JSON', 'peak-publisher') })),
+                createElement('div', { className: 'pblsh--live-preview__editor-head' }, createElement('code', null, T.getBlueprintPath())),
+                createElement('div', { className: 'pblsh--live-preview__editor-body' },
+                    createElement(BlueprintEditor, { value: editorValue, onChange: onEditorChange, readOnly: readOnly || fieldBusy !== null, placeholder: T.getPastePlaceholder(), label: __('Blueprint JSON', 'peak-publisher') })),
+            ),
             createElement('div', { className: 'pblsh--live-preview__editor-foot' },
                 createElement('div', { className: 'pblsh--live-preview__save' + (saveError ? ' pblsh--live-preview__save--error' : '') },
                     T.getSaveLineText(saveState, saveDetail),

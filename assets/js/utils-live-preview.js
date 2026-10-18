@@ -115,6 +115,8 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getDiscardConfirmText = () => __('Discard your changes to the Live Preview? It returns to its state on wordpress.org.', 'peak-publisher');
     const getUnsavedWorkingCopyText = () => __('Live Preview not saved yet', 'peak-publisher');
 
+    // The file the JSON is, as its path in the plugin's SVN: the editor's head names it.
+    const getBlueprintPath = () => 'assets/blueprints/blueprint.json';
     // The other files of assets/blueprints/ — counted, never managed.
     const getOtherFilesText = (count) => sprintf(_n('%d other file in assets/blueprints/ is not used for the preview', '%d other files in assets/blueprints/ are not used for the preview', count, 'peak-publisher'), count);
     const getBlueprintsFolderLabel = () => __('assets/blueprints/ on wordpress.org', 'peak-publisher');
@@ -153,7 +155,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,
         getTestLabel, getTestTooltip, getSetUpLabel, getRemoveLabel, getIntroText, getGuideUrl, getGuideLabel, getDeleteConfirmText, getStartOverConfirmText, getDiscardConfirmText, getUnsavedWorkingCopyText,
-        getOtherFilesText, getBlueprintsFolderLabel,
+        getBlueprintPath, getOtherFilesText, getBlueprintsFolderLabel,
         getFailsText, getFailsLabel, getFailsFact, getCarryTitle, getCarryText, getFlipCarryText, getFlipCarriedText,
     };
 })());

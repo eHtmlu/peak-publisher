@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace Pblsh\Tests\Unit;
 
+use function Pblsh\wporg_commit_message;
 use function Pblsh\wporg_commit_operations;
+use function Pblsh\wporg_deploy_commit_message;
+use function Pblsh\wporg_deploy_kind;
 use function Pblsh\wporg_reconcile_plan;
+use function Pblsh\wporg_stable_tag_commit_message;
 use function Pblsh\wporg_tag_copy_candidates;
 
 /**
  * The decisions of a wordpress.org deploy without I/O (includes/wporg_deploy.php): which tree a
- * new tag is copied from, what a base needs against the tree it is compared with, and the
- * order the commit runs its operations in.
+ * new tag is copied from, what a base needs against the tree it is compared with, the order
+ * the commit runs its operations in, and the messages the commits carry.
  */
 final class WporgDeployPlanTest extends TestCase {
 
@@ -171,5 +175,56 @@ final class WporgDeployPlanTest extends TestCase {
 
     public function test_an_empty_plan_has_no_operations(): void {
         self::assertSame([], wporg_commit_operations([ 'deletes' => [], 'mkdirs' => [], 'copies' => [], 'puts' => [], 'mime_types' => [] ]));
+    }
+
+    // ---- The commit's message
+
+    public function test_every_message_ends_with_the_attribution_and_keeps_its_notes_in_brackets(): void {
+        self::assertSame('Delete version 1.2.0 of my-plugin via Peak Publisher', wporg_commit_message('Delete version 1.2.0 of my-plugin'));
+        self::assertSame('Publish version 1.2.0 of my-plugin (stable tag set to 1.2.0, Live Preview adjusted) via Peak Publisher',
+            wporg_commit_message('Publish version 1.2.0 of my-plugin', [ 'stable tag set to 1.2.0', null, '', 'Live Preview adjusted' ]), 'empty notes vanish');
+    }
+
+    public function test_what_a_deploy_means_follows_what_changes_in_the_tag(): void {
+        $plan = static fn(array $puts = [], array $deletes = []): array => [ 'deletes' => $deletes, 'mkdirs' => [], 'copies' => [], 'puts' => array_map(static fn(string $path): array => [ 'path' => $path, 'local_path' => '/work/' . basename($path) ], $puts) ];
+        $none = $plan();
+        $readme = $plan([ 'tags/1.2.0/readme.txt' ]);
+        $files = $plan([ 'tags/1.2.0/readme.txt', 'tags/1.2.0/my-plugin.php' ]);
+
+        self::assertSame('publish', wporg_deploy_kind(false, $files, null, true, false), 'a new tag, whatever else changes');
+        self::assertSame('replace', wporg_deploy_kind(true, $files, $none, false, false));
+        self::assertSame('replace', wporg_deploy_kind(true, $plan([], [ 'tags/1.2.0/old.php' ]), null, false, false), 'a delete alone replaces too');
+        self::assertSame('readme', wporg_deploy_kind(true, $readme, $plan([ 'trunk/readme.txt', 'trunk/my-plugin.php' ]), false, true), 'the tag decides; trunk and the Live Preview follow in the diff');
+        self::assertSame('readme', wporg_deploy_kind(true, $plan([ 'tags/1.2.0/README.md' ]), null, false, false), 'wordpress.org\'s readme names');
+        self::assertSame('trunk', wporg_deploy_kind(true, $none, $plan([ 'trunk/readme.txt', 'trunk/my-plugin.php' ]), true, false), 'the tag is unchanged, trunk gets the version');
+        self::assertSame('trunk', wporg_deploy_kind(true, $none, $plan([ 'trunk/readme.txt' ]), false, false), 'trunk\'s readme differs beyond the pointer');
+        self::assertSame('stable_tag', wporg_deploy_kind(true, $none, $plan([ 'trunk/readme.txt' ]), true, false), 'nothing but the pointer: the commit is a flip');
+        self::assertSame('stable_tag', wporg_deploy_kind(true, $none, [ ...$plan([ 'trunk/readme.txt' ]), 'mkdirs' => [ 'trunk' ] ], true, false), 'a trunk created for the pointer alone');
+        self::assertSame('live_preview', wporg_deploy_kind(true, $none, $none, false, true), 'nothing but the carry');
+        self::assertNull(wporg_deploy_kind(true, $none, $none, false, false), 'nothing changes: no commit');
+        self::assertNull(wporg_deploy_kind(true, $none, null, false, false));
+    }
+
+    public function test_the_deploy_message_names_the_deed_and_whether_the_release_went_live(): void {
+        $set = [ 'pointer_changed' => true, 'pointer_value' => '1.2.0' ];
+        $stays = [ 'pointer_changed' => false, 'pointer_value' => '1.1.0' ];
+        $same = [ 'pointer_changed' => false, 'pointer_value' => '1.2.0' ];
+
+        self::assertSame('Publish version 1.2.0 of my-plugin (stable tag set to 1.2.0) via Peak Publisher', wporg_deploy_commit_message('publish', 'my-plugin', '1.2.0', $set, '1.1.0', false));
+        self::assertSame('Publish version 1.2.0 of my-plugin (stable tag stays 1.1.0) via Peak Publisher', wporg_deploy_commit_message('publish', 'my-plugin', '1.2.0', $stays, '1.1.0', false));
+        self::assertSame('Publish version 1.2.0 of my-plugin (stable tag unchanged) via Peak Publisher', wporg_deploy_commit_message('publish', 'my-plugin', '1.2.0', $stays, null, false), 'trunk\'s readme could not be read');
+        self::assertSame('Publish version 1.2.0 of my-plugin (stable tag unchanged) via Peak Publisher', wporg_deploy_commit_message('publish', 'my-plugin', '1.2.0', $stays, '', false), 'trunk has no pointer');
+        self::assertSame('Replace version 1.2.0 of my-plugin (stable tag stays 1.2.0) via Peak Publisher', wporg_deploy_commit_message('replace', 'my-plugin', '1.2.0', $same, '1.2.0', false));
+        self::assertSame('Update readme of version 1.2.0 of my-plugin (stable tag stays 1.2.0) via Peak Publisher', wporg_deploy_commit_message('readme', 'my-plugin', '1.2.0', $same, '1.2.0', false));
+        self::assertSame('Update trunk to version 1.2.0 of my-plugin (stable tag set to 1.2.0, Live Preview adjusted) via Peak Publisher', wporg_deploy_commit_message('trunk', 'my-plugin', '1.2.0', $set, '1.1.0', true));
+        self::assertSame('Set stable tag to version 1.2.0 of my-plugin (was 1.1.0) via Peak Publisher', wporg_deploy_commit_message('stable_tag', 'my-plugin', '1.2.0', $set, '1.1.0', false), 'a flip reads as one');
+        self::assertSame('Adjust Live Preview of my-plugin via Peak Publisher', wporg_deploy_commit_message('live_preview', 'my-plugin', '1.2.0', $same, '1.2.0', true));
+        self::assertSame('', wporg_deploy_commit_message(null, 'my-plugin', '1.2.0', $same, '1.2.0', false), 'no commit, no message');
+    }
+
+    public function test_the_flip_message_names_the_pointer_before_and_the_live_preview_it_adjusted(): void {
+        self::assertSame('Set stable tag to version 1.2.0 of my-plugin (was 1.1.0) via Peak Publisher', wporg_stable_tag_commit_message('my-plugin', '1.2.0', '1.1.0', false));
+        self::assertSame('Set stable tag to version 1.2.0 of my-plugin (was 1.1.0, Live Preview adjusted) via Peak Publisher', wporg_stable_tag_commit_message('my-plugin', '1.2.0', '1.1.0', true));
+        self::assertSame('Set stable tag to version 1.2.0 of my-plugin via Peak Publisher', wporg_stable_tag_commit_message('my-plugin', '1.2.0', '', false), 'trunk had no pointer');
     }
 }

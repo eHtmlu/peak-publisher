@@ -436,7 +436,8 @@ function copy_sources_to_secure(array $pending, array $remote_winners): array {
  * the temp file the caller wrote with its contents (cleaned up with the commit), creating
  * blueprints/ — and assets/ — when the listing lacks them; its delete removes the file, the
  * directory stays. No mime type: to SVN it is text, and wordpress.org serves it from its own
- * store. Message and details in the pattern of every Peak Publisher commit.
+ * store. The message says what was done (asset_commit_message()); the details list the files
+ * by what happened to them.
  *
  * @param array|null  $listing        WporgOperations::list_assets() — null: assets/ does not exist yet
  * @param string|null $blueprint_path the temp file holding the contents of a blueprint put
@@ -498,21 +499,66 @@ function build_asset_commit_plan(string $slug, array $pending, ?array $listing, 
         }
     }
 
-    $parts = array_filter([
-        $done['updated'] ? count($done['updated']) . ' updated' : null,
-        $done['moved'] ? count($done['moved']) . ' moved' : null,
-        $done['deleted'] ? count($done['deleted']) . ' deleted' : null,
-    ]);
     return [
         'deletes' => array_values(array_map(static fn(string $name): string => 'assets/' . $name, array_unique($deletes))),
         'mkdirs' => $mkdirs,
         'copies' => $copies,
         'puts' => $puts,
         'mime_types' => $mime_types,
-        'message' => sprintf('Update assets of %s (%s) via Peak Publisher', $slug, implode(', ', $parts)),
+        'message' => asset_commit_message($slug, $pending),
         'details' => $done,
         'cleanup' => $cleanup,
     ];
+}
+
+/**
+ * The commit message of the working copy, in the words of the log reader: one verb when every
+ * change means the same — Add, Update or Remove — and the things by their kind: the icon and
+ * the banner as one thing each, whatever their slots, screenshots by number, the Live Preview
+ * by its file. Mixed intents become "Update assets" with each thing's own word in brackets. A
+ * thing is added when no slot of it held a file before, removed when none keeps one, else
+ * updated — a move within the icon updates the icon.
+ */
+function asset_commit_message(string $slug, array $pending): string {
+    // Every slot's word, folded into its thing's: icon, banner, screenshot-N, blueprint.
+    $words = [];
+    foreach ($pending as $slot_id => $entry) {
+        $definition = asset_slot_definition((string) $slot_id);
+        $thing = $slot_id === 'blueprint' ? 'blueprint' : (isset($definition['number']) ? 'screenshot-' . $definition['number'] : (string) $definition['type']);
+        $words[$thing][] = $entry['action'] === 'delete' ? 'removed' : ($entry['base'] === null ? 'added' : 'updated');
+    }
+    $things = array_map(static fn(array $slot_words): string => count(array_unique($slot_words)) === 1 ? $slot_words[0] : 'updated', $words);
+
+    $join = static fn(array $parts): string => count($parts) > 1 ? implode(', ', array_slice($parts, 0, -1)) . ' and ' . $parts[count($parts) - 1] : implode('', $parts);
+    // In a fixed order: icon, banner, the screenshots — those of one word as one thing — the Live Preview.
+    $items = [];
+    foreach ([ 'icon', 'banner' ] as $thing) {
+        if (isset($things[$thing])) {
+            $items[] = [ $thing, $things[$thing] ];
+        }
+    }
+    foreach ([ 'updated', 'added', 'removed' ] as $word) {
+        $numbers = [];
+        foreach ($things as $thing => $thing_word) {
+            if ($thing_word === $word && str_starts_with($thing, 'screenshot-')) {
+                $numbers[] = (int) substr($thing, strlen('screenshot-'));
+            }
+        }
+        if ($numbers !== []) {
+            sort($numbers);
+            $items[] = [ (count($numbers) === 1 ? 'screenshot ' : 'screenshots ') . $join(array_map('strval', $numbers)), $word ];
+        }
+    }
+    if (isset($things['blueprint'])) {
+        $items[] = [ 'Live Preview ' . PBLSH_BLUEPRINT_FILENAME, $things['blueprint'] ];
+    }
+
+    $shared = array_values(array_unique(array_column($items, 1)));
+    if (count($shared) === 1) {
+        [ $verb, $preposition ] = [ 'added' => [ 'Add', 'to' ], 'updated' => [ 'Update', 'of' ], 'removed' => [ 'Remove', 'from' ] ][$shared[0]];
+        return wporg_commit_message(sprintf('%s %s %s %s', $verb, $join(array_column($items, 0)), $preposition, $slug));
+    }
+    return wporg_commit_message(sprintf('Update assets of %s', $slug), array_map(static fn(array $item): string => $item[1] === 'updated' ? $item[0] : $item[0] . ' ' . $item[1], $items));
 }
 
 /**

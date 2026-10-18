@@ -7,8 +7,9 @@ defined('ABSPATH') || exit;
 
 /**
  * The decisions of a wordpress.org deploy, without I/O: which tree a new tag is copied from,
- * what a base needs against the tree it is compared with, and the order a commit runs its
- * operations in. WporgOperations reads the trees and runs the commit (commit_files()).
+ * what a base needs against the tree it is compared with, the order a commit runs its
+ * operations in, and the messages the commits carry — every write's, in one form
+ * (wporg_commit_message()). WporgOperations reads the trees and runs the commit (commit_files()).
  */
 
 
@@ -152,6 +153,101 @@ function wporg_commit_operations(array $plan): array {
         ...array_map(static fn(array $put): array => [ 'op' => 'put', ...$put ], $puts),
         ...array_map(static fn(array $typed): array => [ 'op' => 'mime_type', ...$typed ], $mime_types),
     ];
+}
+
+
+/**
+ * The message of every commit Peak Publisher makes: the deed, a note in brackets when there is
+ * one, and the attribution last — without exception, so whoever reads a log sees the sender at
+ * the end of every line. Trac's log overview cuts a message longer than 75 characters from the
+ * end: the attribution goes first, then a note, never the deed — which is why the deed comes
+ * first and says what was meant, not what the diff shows.
+ *
+ * @param string[] $notes The notes for the brackets; empty ones vanish.
+ */
+function wporg_commit_message(string $deed, array $notes = []): string {
+    $notes = array_values(array_filter($notes, static fn(?string $note): bool => $note !== null && $note !== ''));
+    return $deed . ($notes === [] ? '' : ' (' . implode(', ', $notes) . ')') . ' via Peak Publisher';
+}
+
+
+/**
+ * What a deploy's commit means, from what changes in the tag: publish (the tag is new),
+ * replace (an existing tag gets other files), readme (only its readme) — trunk and the Live
+ * Preview follow in the diff. With the tag unchanged, the rest speaks: trunk (it gets the
+ * version), stable_tag (nothing but the pointer moves — the commit is a flip), live_preview
+ * (nothing but the carry of the release's Requires Plugins), null (nothing changes;
+ * commit_files() commits nothing).
+ *
+ * @param array      $tag_plan   The plan of tags/{version} (wporg_reconcile_plan()).
+ * @param array|null $trunk_plan trunk's plan — the reconcile when trunk goes along, the Stable
+ *                               tag line's put when only the pointer moves — or null.
+ */
+function wporg_deploy_kind(bool $tag_exists, array $tag_plan, ?array $trunk_plan, bool $pointer_changed, bool $live_preview_adjusted): ?string {
+    if (!$tag_exists) {
+        return 'publish';
+    }
+    if (!wporg_plan_is_empty($tag_plan)) {
+        return wporg_plan_puts_only_a_readme($tag_plan) ? 'readme' : 'replace';
+    }
+    if ($trunk_plan === null || wporg_plan_is_empty($trunk_plan)) {
+        return $live_preview_adjusted ? 'live_preview' : null;
+    }
+    return $pointer_changed && wporg_plan_puts_only_a_readme($trunk_plan) ? 'stable_tag' : 'trunk';
+}
+
+/** A plan without deletes, folders, copies and puts — an existing base as it is. */
+function wporg_plan_is_empty(array $plan): bool {
+    return $plan['deletes'] === [] && $plan['mkdirs'] === [] && $plan['copies'] === [] && $plan['puts'] === [];
+}
+
+/** A plan whose only content change is the put of one readme (wordpress.org's readme names); folders aside. */
+function wporg_plan_puts_only_a_readme(array $plan): bool {
+    return $plan['deletes'] === [] && $plan['copies'] === [] && count($plan['puts']) === 1
+        && find_wporg_readme_file_name([ basename((string) $plan['puts'][0]['path']) ]) !== null;
+}
+
+/**
+ * The commit message of a deploy, by its kind (wporg_deploy_kind()): the deed, then whether the
+ * release went live — the stable tag set, staying, or unchanged when trunk has no readable
+ * pointer — and that the Live Preview was adjusted when the commit carried the release's
+ * Requires Plugins into it. A flip reads as one (wporg_stable_tag_commit_message()), a carry
+ * alone as its own deed. No kind, no message.
+ *
+ * @param array{pointer_changed:bool, pointer_value:string} $decision The settled pointer decision.
+ * @param string|null $stable_tag_before trunk's live Stable tag ('' without one, null unreadable).
+ */
+function wporg_deploy_commit_message(?string $kind, string $wporg_slug, string $version, array $decision, ?string $stable_tag_before, bool $live_preview_adjusted): string {
+    if ($kind === null) {
+        return '';
+    }
+    if ($kind === 'stable_tag') {
+        return wporg_stable_tag_commit_message($wporg_slug, $version, $stable_tag_before, $live_preview_adjusted);
+    }
+    if ($kind === 'live_preview') {
+        return wporg_commit_message(sprintf('Adjust Live Preview of %s', $wporg_slug));
+    }
+    $deed = match ($kind) {
+        'publish' => 'Publish version %s of %s',
+        'replace' => 'Replace version %s of %s',
+        'readme' => 'Update readme of version %s of %s',
+        'trunk' => 'Update trunk to version %s of %s',
+    };
+    $stable_tag = $decision['pointer_changed']
+        ? sprintf('stable tag set to %s', $decision['pointer_value'])
+        : ($stable_tag_before !== null && $stable_tag_before !== '' ? sprintf('stable tag stays %s', $stable_tag_before) : 'stable tag unchanged');
+    return wporg_commit_message(sprintf($deed, $version, $wporg_slug), [ $stable_tag, $live_preview_adjusted ? 'Live Preview adjusted' : null ]);
+}
+
+/**
+ * The commit message of a Stable tag flip: the pointer before, when trunk had one, and that the
+ * Live Preview was adjusted when the commit carried the release's Requires Plugins into it.
+ */
+function wporg_stable_tag_commit_message(string $wporg_slug, string $version, ?string $from, bool $live_preview_adjusted): string {
+    return wporg_commit_message(sprintf('Set stable tag to version %s of %s', $version, $wporg_slug), [
+        $from !== null && $from !== '' ? sprintf('was %s', $from) : null,
+        $live_preview_adjusted ? 'Live Preview adjusted' : null,
+    ]);
 }
 
 

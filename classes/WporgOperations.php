@@ -239,9 +239,11 @@ class WporgOperations {
 
             $tag_base = 'tags/' . $version;
             $remote_tag = self::read_remote_tree($client, $wporg_slug, $tag_base, $on_folder);
-            $plans = [ $remote_tag !== null
+            $tag_plan = $remote_tag !== null
                 ? wporg_reconcile_plan($tag_base, $local_tree, $remote_tag)
-                : self::new_tag_plan($client, $wporg_slug, $tag_base, $version, $local_tree, $touch_trunk, $remote_trunk, $base_revision, $on_folder) ];
+                : self::new_tag_plan($client, $wporg_slug, $tag_base, $version, $local_tree, $touch_trunk, $remote_trunk, $base_revision, $on_folder);
+            $plans = [ $tag_plan ];
+            $trunk_plan = null;
 
             // The readme variant is a temp file: until the plan is returned only this closure
             // knows it, so a failure after its creation cleans it up here.
@@ -253,7 +255,8 @@ class WporgOperations {
                     $cleanup[] = $variant['path'];
                     $trunk_tree = $local_tree;
                     $trunk_tree[$readme_file_name] = [ 'type' => 'file', 'path' => $variant['path'], 'size' => $variant['size'], 'hash' => $variant['hash'] ];
-                    $plans[] = wporg_reconcile_plan('trunk', $trunk_tree, $remote_trunk ?? []);
+                    $trunk_plan = wporg_reconcile_plan('trunk', $trunk_tree, $remote_trunk ?? []);
+                    $plans[] = $trunk_plan;
                     $outcome['stable_tag_written'] = $decision['pointer_value'];
                     $outcome['trunk_readme'] = self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $readme_file_name ]);
                 } elseif ($decision['pointer_changed']) {
@@ -265,7 +268,8 @@ class WporgOperations {
                     $cleanup[] = $variant['path'];
                     $file_name = $trunk_has_readme ? $live['file_name'] : $readme_file_name;
                     // trunk may not exist at all when it has no readme; an existing trunk is no change.
-                    $plans[] = [ 'deletes' => [], 'mkdirs' => $trunk_has_readme ? [] : [ 'trunk' ], 'copies' => [], 'puts' => [ [ 'path' => 'trunk/' . $file_name, 'local_path' => $variant['path'] ] ] ];
+                    $trunk_plan = [ 'deletes' => [], 'mkdirs' => $trunk_has_readme ? [] : [ 'trunk' ], 'copies' => [], 'puts' => [ [ 'path' => 'trunk/' . $file_name, 'local_path' => $variant['path'] ] ] ];
+                    $plans[] = $trunk_plan;
                     $outcome['stable_tag_written'] = $decision['pointer_value'];
                     $outcome['trunk_readme'] = self::trunk_readme_cache_entry([ ...$variant, 'file_name' => $file_name ]);
                 }
@@ -286,14 +290,12 @@ class WporgOperations {
                 throw $e;
             }
 
-            // The commit message tells the log reader at once whether the release went live.
-            $stable_tag_note = $decision['pointer_changed']
-                ? sprintf('stable tag set to %s', $decision['pointer_value'])
-                : ($live !== null && $live['stable_tag'] !== '' ? sprintf('stable tag stays %s', $live['stable_tag']) : 'stable tag unchanged');
+            // The message says what the commit meant — the log reader sees it without the diff.
+            $kind = wporg_deploy_kind($remote_tag !== null, $tag_plan, $trunk_plan, $decision['pointer_changed'], $carry !== null);
 
             return [
                 ...self::merge_reconcile_plans($plans),
-                'message' => sprintf('Publish version %s of %s (%s) via Peak Publisher', $version, $wporg_slug, $stable_tag_note),
+                'message' => wporg_deploy_commit_message($kind, $wporg_slug, $version, $decision, $live['stable_tag'] ?? null, $carry !== null),
                 'details' => [
                     'version' => $version,
                     'deploy_mode' => $touch_trunk ? 'trunk_and_tag' : 'tag_only',
@@ -403,7 +405,7 @@ class WporgOperations {
                     [ 'path' => 'trunk/' . $live['file_name'], 'local_path' => $variant['path'] ],
                     ...($carry === null ? [] : [ [ 'path' => 'assets/blueprints/' . PBLSH_BLUEPRINT_FILENAME, 'local_path' => $carry['path'] ] ]),
                 ],
-                'message' => sprintf('Set stable tag to version %s of %s via Peak Publisher', $version, $wporg_slug),
+                'message' => wporg_stable_tag_commit_message($wporg_slug, $version, $live['stable_tag'], $carry !== null),
                 'details' => [ 'from' => $live['stable_tag'], 'to' => $version, 'live_preview_added' => $added ],
                 'cleanup' => [ $variant['path'], ...($carry === null ? [] : [ $carry['path'] ]) ],
             ];
@@ -532,7 +534,7 @@ class WporgOperations {
             $outcome = [ 'from' => $effective['value'], 'trunk' => $trunk, 'trunk_readme' => $trunk_readme_entry ];
             return [
                 'puts' => $puts,
-                'message' => sprintf('Set Tested up to %s for version %s of %s via Peak Publisher', $value, $version, $wporg_slug),
+                'message' => wporg_commit_message(sprintf('Set Tested up to %s for version %s of %s', $value, $version, $wporg_slug), [ $effective['value'] !== '' ? sprintf('was %s', $effective['value']) : null ]),
                 'details' => [ 'version' => $version, 'from' => $effective['value'], 'to' => $value, 'source_before' => $effective['source'], 'files' => array_keys($files), 'trunk' => $trunk ],
                 'cleanup' => $cleanup,
             ];
@@ -952,7 +954,7 @@ class WporgOperations {
             }
             return [
                 'deletes' => [ 'tags/' . $version ],
-                'message' => sprintf('Delete version %s of %s via Peak Publisher', $version, $wporg_slug),
+                'message' => wporg_commit_message(sprintf('Delete version %s of %s', $version, $wporg_slug)),
                 'details' => [ 'version' => $version ],
             ];
         });

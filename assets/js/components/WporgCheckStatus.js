@@ -1,8 +1,8 @@
 // WporgCheckStatus Component - how fresh the wordpress.org data on screen is: when the
 // plugins it speaks for were last brought in step with wordpress.org (the oldest of them),
 // "Checking wordpress.org…" while a refresh runs, and the last failed check with its reason
-// in the tooltip. In the editor header for its plugin, with the links the caller passes as
-// children (Refresh), each a fragment of its own; above the plugin
+// in the tooltip. At the right end of the editor's tab bar for its plugin, with the links the
+// caller passes as children (Refresh), each a fragment of its own; above the plugin
 // list for every wordpress.org plugin, where the list shows it only while a check failed.
 // Muted fragments, ' · ' separated, no period. Wording from Pblsh.WporgCheckUtils.
 const WporgCheckStatus = ({ plugins, children = null }) => {

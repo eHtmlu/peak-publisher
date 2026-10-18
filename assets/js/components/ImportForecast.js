@@ -1,6 +1,6 @@
 // ImportForecast Component - when the plugin page shows the last commit: the server's forecast
-// (the detail's wporg_import) at the right end of the editor's tab bar, plugin-wide, with the
-// plugin page linked. It disappears when the forecast ends (Pblsh.AssetsUtils.getForecastEnd());
+// (the detail's wporg_import) as a line of the wordpress.org stack at the right end of the
+// editor's tab bar, plugin-wide, with the plugin page linked. It disappears when the forecast ends (Pblsh.AssetsUtils.getForecastEnd());
 // the import watch (admin.js) reloads the plugin once the import landed, and the forecast with it.
 lodash.set(window, 'Pblsh.Components.ImportForecast', ({ forecast, slug }) => {
     const { __, sprintf } = wp.i18n;

@@ -135,10 +135,6 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                             ),
                         ),
                     ),
-                    // The status button above, and at the header's foot the wordpress.org line:
-                    // how fresh the plugin's data is, with Refresh — locked only while its own
-                    // refresh runs: a click during the automatic check is taken, the store runs
-                    // it next.
                     createElement('div', { className: 'pblsh--plugin-header__actions' },
                         createElement(Button, {
                             isTertiary: true,
@@ -155,16 +151,6 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
                                 }
                             },
                         }, getPluginStatus(pluginData?.status).label),
-                        isWporg && createElement('div', { className: 'pblsh--plugin-header__check' },
-                            createElement(WporgCheckStatus, { plugins: [ pluginData ] },
-                                createElement(Button, {
-                                    isLink: true,
-                                    isBusy: refreshingWporg,
-                                    disabled: refreshingWporg,
-                                    onClick: refreshFromWporg,
-                                }, __('Refresh', 'peak-publisher')),
-                            ),
-                        ),
                     ),
                 ),
                 createElement('div', { className: 'pblsh--plugin-grid' },
@@ -644,8 +630,16 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
             );
             return pending ? createElement(Tooltip, { text: pending }, tab) : tab;
         })(),
-        // wordpress.org: when the plugin page shows the last commit — plugin-wide, so beside the tabs.
-        isWporg && pluginData && createElement(Pblsh.Components.ImportForecast, { forecast: pluginData.wporg_import, slug: pluginData.slug }),
+        // wordpress.org, plugin-wide, so beside the tabs, each a line of its own: when the plugin
+        // page shows the last commit, and how fresh the plugin's data is, with Refresh — locked
+        // only while its own refresh runs: a click during the automatic check is taken, the
+        // store runs it next.
+        isWporg && pluginData && createElement('div', { className: 'pblsh--tab-nav__wporg' },
+            createElement(Pblsh.Components.ImportForecast, { forecast: pluginData.wporg_import, slug: pluginData.slug }),
+            createElement(WporgCheckStatus, { plugins: [ pluginData ] },
+                createElement(Button, { isLink: true, isBusy: refreshingWporg, disabled: refreshingWporg, onClick: refreshFromWporg }, __('Refresh', 'peak-publisher')),
+            ),
+        ),
     );
 
     const livePreviewFails = isWporg && !!(pluginData && pluginData.live_preview && pluginData.live_preview.missing.length > 0);

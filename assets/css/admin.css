@@ -3311,24 +3311,14 @@ ol.pblsh--content-list {
     gap: var(--plugin-icon-gap);
     min-width: 0;
 }
-/* The status button at the top, the wordpress.org line at the foot — stretched to the
-   header's height, so the line stands right above the rule of the figures below. */
+/* The status button, at the header's top right. */
 .pblsh--plugin-header__actions {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: space-between;
-    align-self: stretch;
-    gap: 1rem;
-}
-
-/* The freshness of the plugin's wordpress.org data with Refresh */
-.pblsh--plugin-header__check {
-    text-align: right;
+    flex-shrink: 0;
 }
 
 /* How fresh the wordpress.org data on screen is (WporgCheckStatus): one muted line of
-   fragments; a link among them — the editor's Refresh — reads like its neighbours */
+   fragments; a link among them — the editor's Refresh — reads like its neighbours. In the
+   editor it is a line of the tab bar's wordpress.org stack (pblsh--tab-nav__wporg). */
 .pblsh--wporg-check {
     color: #666;
     font-size: 0.8125rem;
@@ -3477,24 +3467,37 @@ ol.pblsh--content-list {
     margin-top: 1.25rem;
 }
 
+/* The tabs sit on the bar's bottom edge whatever stands beside them: the wordpress.org stack
+   at the right end is centered in the bar's height and never stretches a tab. */
 .pblsh--tab-nav {
     display: flex;
+    align-items: flex-end;
     gap: 0;
     padding: 0;
     margin-bottom: 0;
 }
 
-/* wordpress.org: when the plugin page shows the last commit — the editor's one plugin-wide
-   fact, muted, at the right end of the tab bar. */
-.pblsh--import-forecast {
+/* wordpress.org at the right end of the tab bar, plugin-wide: when the plugin page shows the
+   last commit, and how fresh the plugin's data is with Refresh — each a line of its own,
+   right-aligned, one gray, the stack centered in the bar's height. Two lines fit in a tab's
+   height, so the bar keeps its height when the forecast comes and goes; where the width runs
+   out, the lines wrap and the bar grows, the tabs staying on its bottom edge. */
+.pblsh--tab-nav__wporg {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
     align-self: center;
     margin-left: auto;
+    min-width: 0;
     padding: 0 0.75rem;
-    color: #8c96a0;
-    white-space: nowrap;
+    color: #666;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    text-align: right;
 }
 
 .pblsh--tab-nav__tab {
+    flex-shrink: 0;   /* the wordpress.org stack beside the tabs gives way, never a tab's name */
     background: #f3f4f6;
     border: 1px solid var(--border-color-light);
     border-bottom-color: var(--border-color-light);

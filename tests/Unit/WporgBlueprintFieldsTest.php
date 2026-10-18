@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Pblsh\Tests\Unit;
 
 use function Pblsh\add_blueprint_dependencies;
+use function Pblsh\add_blueprint_redirect_skip;
 use function Pblsh\blueprint_fields;
 use function Pblsh\blueprint_missing_dependencies;
+use function Pblsh\blueprint_redirect_skip_step;
 use function Pblsh\blueprint_warnings;
 use function Pblsh\decode_blueprint;
 use function Pblsh\encode_blueprint;
@@ -23,6 +25,10 @@ final class WporgBlueprintFieldsTest extends TestCase {
 
     private static function plugin(string $slug, ?bool $activate = true): array {
         return [ 'step' => 'installPlugin', 'pluginData' => [ 'resource' => 'wordpress.org/plugins', 'slug' => $slug ], ...($activate === null ? [] : [ 'options' => [ 'activate' => $activate ] ]) ];
+    }
+
+    private static function skip(string $slug): array {
+        return json_decode((string) json_encode(blueprint_redirect_skip_step($slug)), true);
     }
 
     private static function theme(string $slug): array {
@@ -48,7 +54,7 @@ final class WporgBlueprintFieldsTest extends TestCase {
 
         self::assertSame([ 'value' => '/wp-admin/admin.php?page=x', 'editable' => true ], $fields['landing_page']);
         self::assertSame([ 'slug' => 'twentytwentyfive', 'editable' => true ], $fields['theme']);
-        self::assertSame([ [ 'slug' => 'query-monitor', 'required' => false, 'own' => false ], [ 'slug' => 'woocommerce', 'required' => true, 'own' => false ], [ 'slug' => 'my-plugin', 'required' => false, 'own' => true ], [ 'slug' => 'akismet', 'required' => false, 'own' => false ] ], $fields['plugins'], 'the shorthand first — it runs before the steps —, the own plugin left out');
+        self::assertSame([ [ 'slug' => 'query-monitor', 'required' => false, 'own' => false, 'redirect' => null ], [ 'slug' => 'woocommerce', 'required' => true, 'own' => false, 'redirect' => 'open' ], [ 'slug' => 'my-plugin', 'required' => false, 'own' => true, 'redirect' => null ], [ 'slug' => 'akismet', 'required' => false, 'own' => false, 'redirect' => null ] ], $fields['plugins'], 'the shorthand list first, then the steps in order, the plugin itself at its place; WooCommerce\'s redirect open: no step drops it');
         self::assertSame([ [ 'name' => 'runPHP', 'count' => 1 ], [ 'name' => 'siteOptions', 'count' => 1 ] ], $fields['more'], 'the runPHP step and siteOptions');
     }
 
@@ -70,7 +76,7 @@ final class WporgBlueprintFieldsTest extends TestCase {
     public function test_a_theme_the_field_cannot_hold_is_read_only(): void {
         $none = blueprint_fields(self::blueprint([ 'steps' => [] ]), 'my-plugin', []);
         self::assertSame([ 'slug' => null, 'editable' => true ], $none['theme']);
-        self::assertSame([ [ 'slug' => 'my-plugin', 'required' => false, 'own' => true ] ], $none['plugins'], 'no step of its own: wordpress.org appends it, so it stands last');
+        self::assertSame([ [ 'slug' => 'my-plugin', 'required' => false, 'own' => true, 'redirect' => null ] ], $none['plugins'], 'no step of its own: wordpress.org appends it, so it stands last');
 
         $two = blueprint_fields(self::blueprint([ 'steps' => [ self::theme('a'), self::theme('b') ] ]), 'my-plugin', []);
         self::assertSame([ 'slug' => 'a', 'editable' => false ], $two['theme']);
@@ -84,7 +90,7 @@ final class WporgBlueprintFieldsTest extends TestCase {
 
     public function test_a_broken_foreign_blueprint_reads_without_throwing(): void {
         $fields = blueprint_fields(decode_blueprint('{"plugins":"x","steps":["abc",5,{"step":"installPlugin","pluginData":"x","options":"y"},{"step":"installTheme","themeData":7}]}'), 'my-plugin', [ 'woocommerce' ]);
-        self::assertSame([ [ 'slug' => 'my-plugin', 'required' => false, 'own' => true ] ], $fields['plugins'], 'nothing readable installs a plugin; the plugin itself, appended');
+        self::assertSame([ [ 'slug' => 'my-plugin', 'required' => false, 'own' => true, 'redirect' => null ] ], $fields['plugins'], 'nothing readable installs a plugin; the plugin itself, appended');
         self::assertSame([ 'slug' => null, 'editable' => false ], $fields['theme']);
         self::assertSame([ [ 'name' => 'installPlugin', 'count' => 1 ] ], $fields['more'], 'the plugin step without a wordpress.org slug');
         self::assertSame([ 'woocommerce' ], blueprint_missing_dependencies('{"plugins":"x","steps":[{"step":"installPlugin","pluginData":"x"}]}', 'my-plugin', [ 'woocommerce' ]));
@@ -136,20 +142,45 @@ final class WporgBlueprintFieldsTest extends TestCase {
     public function test_dependencies_are_added_before_the_plugin_and_nothing_goes(): void {
         $own = self::plugin('my-plugin');
         $added = add_blueprint_dependencies(self::blueprint([ 'steps' => [ self::plugin('query-monitor'), $own, [ 'step' => 'login' ] ] ]), 'my-plugin', [ 'buddypress', 'woocommerce' ]);
-        self::assertSame([ self::plugin('query-monitor'), self::plugin('buddypress'), self::plugin('woocommerce'), $own, [ 'step' => 'login' ] ], self::steps($added));
+        self::assertSame([ self::plugin('query-monitor'), self::plugin('buddypress'), self::plugin('woocommerce'), self::skip('woocommerce'), $own, [ 'step' => 'login' ] ], self::steps($added), 'a known activation redirect dropped right after its install');
 
         $appended = add_blueprint_dependencies(self::blueprint([ 'steps' => [ [ 'step' => 'login' ] ] ]), 'my-plugin', [ 'woocommerce' ]);
-        self::assertSame([ [ 'step' => 'login' ], self::plugin('woocommerce') ], self::steps($appended));
+        self::assertSame([ [ 'step' => 'login' ], self::plugin('woocommerce'), self::skip('woocommerce') ], self::steps($appended));
     }
 
     public function test_a_new_blueprint_lands_on_the_plugins_screen_with_the_dependencies_before_the_plugin(): void {
         self::assertSame(
             "{\n    \"landingPage\": \"/wp-admin/plugins.php\",\n    \"login\": true,\n    \"steps\": [\n"
             . "        {\n            \"step\": \"installPlugin\",\n            \"pluginData\": {\n                \"resource\": \"wordpress.org/plugins\",\n                \"slug\": \"woocommerce\"\n            },\n            \"options\": {\n                \"activate\": true\n            }\n        },\n"
+            . "        {\n            \"step\": \"runPHP\",\n            \"code\": \"<?php require_once '/wordpress/wp-load.php'; delete_transient('_wc_activation_redirect');\"\n        },\n"
             . "        {\n            \"step\": \"installPlugin\",\n            \"pluginData\": {\n                \"resource\": \"wordpress.org/plugins\",\n                \"slug\": \"my-plugin\"\n            },\n            \"options\": {\n                \"activate\": true\n            }\n        }\n"
             . "    ]\n}\n",
-            encode_blueprint(new_blueprint('my-plugin', [ 'woocommerce' ]))
+            encode_blueprint(new_blueprint('my-plugin', [ 'woocommerce' ])),
+            'WooCommerce\'s activation redirect dropped right after its install, as wordpress.org\'s own blueprints do'
         );
+    }
+
+    public function test_a_known_activation_redirect_reads_as_skipped_only_when_a_later_step_drops_it(): void {
+        $woo = self::plugin('woocommerce');
+        $redirect = static fn(array $data): ?string => blueprint_fields(self::blueprint($data), 'my-plugin', [ 'woocommerce' ])['plugins'][0]['redirect'];
+        $official = [ 'step' => 'runPHP', 'code' => "<?php include '/wordpress/wp-load.php'; delete_transient( '_wc_activation_redirect' ); wp_insert_post([ 'post_title' => 'Sample' ]);" ];
+
+        self::assertSame('open', $redirect([ 'steps' => [ $woo, self::plugin('my-plugin') ] ]));
+        self::assertSame('skipped', $redirect([ 'steps' => [ $woo, self::skip('woocommerce'), self::plugin('my-plugin') ] ]));
+        self::assertSame('skipped', $redirect([ 'steps' => [ $woo, $official ] ]), 'however the step is written');
+        self::assertSame('open', $redirect([ 'steps' => [ self::skip('woocommerce'), $woo ] ]), 'dropped before the install, the redirect is set after it');
+        self::assertSame('skipped', $redirect([ 'plugins' => [ 'woocommerce' ], 'steps' => [ self::skip('woocommerce') ] ]), 'the shorthand list runs before every step');
+
+        $fields = blueprint_fields(self::blueprint([ 'steps' => [ $woo, self::skip('woocommerce'), $official, self::plugin('my-plugin') ] ]), 'my-plugin', [ 'woocommerce' ]);
+        self::assertSame([ [ 'name' => 'runPHP', 'count' => 1 ] ], $fields['more'], 'the step as Peak Publisher writes it is known; a step doing more is listed');
+        self::assertNull(blueprint_fields(self::blueprint([ 'steps' => [ self::plugin('akismet') ] ]), 'my-plugin', [])['plugins'][0]['redirect'], 'no known redirect: nothing to say');
+    }
+
+    public function test_the_redirect_skip_is_inserted_right_after_the_install(): void {
+        $woo = self::plugin('woocommerce');
+        $own = self::plugin('my-plugin');
+        self::assertSame([ $woo, self::skip('woocommerce'), $own ], self::steps(add_blueprint_redirect_skip(self::blueprint([ 'steps' => [ $woo, $own ] ]), 'woocommerce')));
+        self::assertSame([ self::skip('woocommerce'), $own ], self::steps(add_blueprint_redirect_skip(self::blueprint([ 'plugins' => [ 'woocommerce' ], 'steps' => [ $own ] ]), 'woocommerce')), 'installed by the shorthand list: first of the steps');
     }
 
     public function test_the_warnings_name_what_wordpress_org_would_break(): void {

@@ -306,21 +306,31 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // it lacks altogether stands right before the plugin's own row as not installed — where
         // Add would put it —, another plugin the directory lacks as that, whatever else is true
         // of it; the plugin itself keeps its fact (the test button says when its page is not
-        // there yet).
+        // there yet). A plugin with a known activation redirect says whether a step drops it —
+        // open, it keeps an admin landing page from showing: the warning with the step's link,
+        // only while the landing page is one.
         const renderPlugins = () => {
             const missing = view.missing;
             const entries = view.fields.plugins;
             const absent = missing.filter((name) => !entries.some((plugin) => plugin.slug === name));
+            const adminLanding = typeof view.fields.landing_page.value === 'string' && view.fields.landing_page.value.startsWith('/wp-admin');
             const fact = (plugin, index) => plugin.own
                 ? T.getOwnPluginNote(index === entries.length - 1)
                 : missing.includes(plugin.slug) ? T.getNotActiveBeforeNote(required) : T.getPluginNote(plugin, required);
             const listings = view.listings || {};
-            const row = (key, name, fact, stops, own) => {
+            const row = (key, name, fact, stops, own, redirect = null) => {
                 const listing = listings[name] || null;
                 const absent = !own && listing !== null && listing.state !== 'ok';
                 return createElement('tr', { key },
                     createElement('td', null, createElement(PluginIdentity, { icon: listing ? listing.icon : null, name: listing ? listing.name || '' : '', slug: name, href: listing && listing.state === 'ok' ? getWporgPluginUrl(name) : null })),
-                    createElement('td', { className: 'pblsh--live-preview__plugin-fact' + (stops || absent ? ' pblsh--live-preview__plugin-fact--missing' : '') }, absent ? T.getNotOnWporgText() : fact),
+                    createElement('td', { className: 'pblsh--live-preview__plugin-fact' + (stops || absent ? ' pblsh--live-preview__plugin-fact--missing' : '') },
+                        absent ? T.getNotOnWporgText() : fact,
+                        !absent && redirect === 'skipped' && createElement(Fragment, null, ' · ', T.getRedirectSkippedNote()),
+                        !absent && redirect === 'open' && adminLanding && createElement('div', { className: 'pblsh--live-preview__plugin-fact-warning' },
+                            T.getRedirectOpenNote(), ' ',
+                            createElement(Button, { isLink: true, isBusy: fieldBusy === 'redirect_skip', disabled: locked, onClick: () => change('redirect_skip', { change: 'redirect_skip', value: name }) }, T.getSkipRedirectLabel()),
+                        ),
+                    ),
                 );
             };
             return createElement('div', { className: 'pblsh--live-preview__field' },
@@ -330,7 +340,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                         createElement('tbody', null,
                             ...entries.flatMap((plugin, i) => [
                                 ...(plugin.own ? absent.map((name) => row('missing-' + name, name, T.getNotInstalledNote(required), true, false)) : []),
-                                row(plugin.slug + i, plugin.slug, fact(plugin, i), !plugin.own && missing.includes(plugin.slug), plugin.own),
+                                row(plugin.slug + i, plugin.slug, fact(plugin, i), !plugin.own && missing.includes(plugin.slug), plugin.own, plugin.redirect),
                             ]),
                         ),
                     ),

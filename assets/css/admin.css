@@ -4826,6 +4826,11 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--live-preview__plugin-fact--missing {
     color: var(--color-red);
 }
+/* An activation redirect still open under an admin landing page: the warning under the fact, with the step's link. */
+.pblsh--live-preview__plugin-fact-warning {
+    margin-top: 0.25rem;
+    color: var(--color-orange);
+}
 .pblsh--live-preview__plugins-add {
     margin: 0 0 0.5rem;
 }

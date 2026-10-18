@@ -60,6 +60,15 @@ final class WporgBlueprintDecideTest extends TestCase {
         self::assertStringContainsString('"woocommerce"', $added['contents']);
     }
 
+    public function test_the_redirect_skip_is_added_only_where_the_fields_read_it_as_open(): void {
+        $woo = '{"steps":[{"step":"installPlugin","pluginData":{"resource":"wordpress.org/plugins","slug":"woocommerce"},"options":{"activate":true}}]}';
+        $added = decide_blueprint_change('redirect_skip', $woo, [ 'value' => 'woocommerce' ], 'my-plugin', [ 'woocommerce' ]);
+        self::assertSame('put', $added['action']);
+        self::assertStringContainsString("delete_transient('_wc_activation_redirect')", $added['contents']);
+        self::assertNull(decide_blueprint_change('redirect_skip', $added['contents'], [ 'value' => 'woocommerce' ], 'my-plugin', [ 'woocommerce' ]), 'skipped already');
+        self::assertNull(decide_blueprint_change('redirect_skip', $woo, [ 'value' => 'akismet' ], 'my-plugin', []), 'no such plugin in the blueprint, no known redirect');
+    }
+
     public function test_the_carry_leaves_a_file_alone_that_it_would_push_over_the_limit(): void {
         self::assertNull(blueprint_dependency_carry(self::compact_but_long(), 'my-plugin', [ 'woocommerce' ]), 'detection reports the gap instead');
     }

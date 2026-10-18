@@ -4116,7 +4116,8 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 /* The assets tab's box — the one base of its look, shared by the slot boxes and the Live
    Preview's box: a band sits flush at its top as the head, the content beneath. */
 .pblsh--assets-box {
-    border: 1.5px solid var(--border-color-medium);
+    --pblsh-assets-box-border: 1.5px;
+    border: var(--pblsh-assets-box-border) solid var(--border-color-medium);
     border-radius: 8px;
     background: #fff;
 }
@@ -4675,7 +4676,11 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 /* The Live Preview section: fixed zones in a column — the introduction, the box, Set up; in
    the box the notices, the fields with the JSON beside them, the actions, the other files — as
    flowing content: each block brings its spacing below, the last one none. The box clips the
-   band's corners, like a slot's box; its body has the card's padding. */
+   band's corners, like a slot's box; its body has the card's padding. The section is the
+   container the box's widths are measured in. */
+.pblsh--live-preview {
+    container-type: inline-size;
+}
 .pblsh--live-preview > *,
 .pblsh--live-preview__body > * {
     margin-top: 0;
@@ -4685,8 +4690,21 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--live-preview__body > :last-child {
     margin-bottom: 0;
 }
+/* The box takes half the section while it shows one column — the fields, or the band alone —
+   and the whole section with two: the JSON beside the fields, or the conflict's two files. A
+   column keeps its width when the box doubles: the gap between the two columns is twice the
+   body's padding, so half the section less two paddings is what the whole section less two
+   paddings and the gap gives each of two columns; and the half box is half the section plus one
+   border, since it carries both of its borders on its one column while the whole box carries
+   one on each. */
 .pblsh--live-preview__box {
+    --pblsh-live-preview-gap: calc(2 * var(--pblsh-assets-card-padding));
+    box-sizing: border-box;
+    width: calc(50% + var(--pblsh-assets-box-border));
     overflow: hidden;
+}
+.pblsh--live-preview__box--wide {
+    width: 100%;
 }
 .pblsh--live-preview__body {
     padding: var(--pblsh-assets-card-padding);
@@ -4701,25 +4719,37 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     color: #8c96a0;
 }
 
-/* The main row: the switch above it at the right edge; beneath, the fields and, in expert
-   mode, the JSON beside them. Both columns prefer the same width and wrap when the row cannot
-   give it to both; the fields take their height from their controls, the editor stretches to
-   it. */
+/* The main row: the fields' column, headed by the switch at its right end, and in expert mode
+   the JSON in a second column of the same width, from the switch's line down; the fields take
+   their height from their controls, the editor stretches to it. The container query above
+   folds the two columns into one where they do not fit. */
 .pblsh--live-preview__main-head {
     display: flex;
     justify-content: flex-end;
     margin-bottom: 0.75rem;
 }
 .pblsh--live-preview__main {
-    --pblsh-live-preview-column: 24rem;   /* the preferred width of a column — the row wraps when it cannot give it to both */
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-    gap: 1.5rem 2rem;
+    gap: 1.5rem var(--pblsh-live-preview-gap);
+}
+.pblsh--live-preview__main--two-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* Below the width that gives two columns of 24rem each (two columns, the gap of 3rem, the
+   body's padding of 1.5rem on both sides), the JSON goes beneath the fields — and the box takes
+   the whole section in either mode, so switching the mode moves nothing. After the rules it overrides. */
+@container (max-width: 54rem) {
+    .pblsh--live-preview__box {
+        width: 100%;
+    }
+    .pblsh--live-preview__main--two-columns {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 .pblsh--live-preview__fields,
 .pblsh--live-preview__editor {
-    flex: 1 1 var(--pblsh-live-preview-column);
     min-width: 0;
 }
 /* The section's introduction with its tip beneath — one block at the top, spaced by the flow rule. */
@@ -4817,10 +4847,12 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     font-size: 0.8125rem;
 }
 
-/* The actions in one row: the test, the menu. */
+/* The actions on the blueprint in one row at the box's right edge: the test, the menu — they
+   move with the edge when the box widens. */
 .pblsh--live-preview__actions {
     display: flex;
     flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: 0.5rem;
 }

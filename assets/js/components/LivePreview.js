@@ -343,13 +343,16 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 (saveState === 'invalid' || saveState === 'refused') && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.drop(id) }, T.getUndoLabel())),
             ),
         );
-        const renderMain = () => createElement(Fragment, null,
-            createElement('div', { className: 'pblsh--live-preview__main-head' },
-                createElement(ToggleControl, { __nextHasNoMarginBottom: true, label: T.getExpertLabel(), checked: showEditor, disabled: forcedExpert, onChange: toggleExpert })),
-            createElement('div', { className: 'pblsh--live-preview__main' },
-                !forcedExpert && createElement('div', { className: 'pblsh--live-preview__fields' }, renderFields()),
-                showEditor && renderEditor(),
+        // The main row: the fields' column, headed by the switch at its right end, and in expert
+        // mode the JSON in a second column of the same width, from the switch's line down. Without
+        // fields (no JSON object) the editor stands alone beneath the switch.
+        const renderMain = () => createElement('div', { className: 'pblsh--live-preview__main' + (showEditor && !forcedExpert ? ' pblsh--live-preview__main--two-columns' : '') },
+            createElement('div', { className: 'pblsh--live-preview__fields' },
+                createElement('div', { className: 'pblsh--live-preview__main-head' },
+                    createElement(ToggleControl, { __nextHasNoMarginBottom: true, label: T.getExpertLabel(), checked: showEditor, disabled: forcedExpert, onChange: toggleExpert })),
+                !forcedExpert && renderFields(),
             ),
+            showEditor && renderEditor(),
         );
 
         // Zone 4: the actions on the blueprint in effect — the test of the working copy, the menu.
@@ -359,7 +362,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             isPrimary: true,
             ...(testBlocked ? { disabled: true } : { href: view.test.url, target: '_blank', rel: 'noreferrer' }),
         }, T.getTestLabel() + ' ↗');
-        const renderSetUp = () => createElement('div', { className: 'pblsh--live-preview__actions' },
+        const renderSetUp = () => createElement('div', { className: 'pblsh--live-preview__setup' },
             createElement(Button, { isPrimary: true, isBusy: fieldBusy === 'create', disabled: readOnly || fieldBusy !== null, onClick: () => change('create', { change: 'create' }) }, T.getSetUpLabel()));
         const renderActions = () => createElement('div', { className: 'pblsh--live-preview__actions' },
             testBlocked ? testButton : createElement(Tooltip, { text: T.getTestTooltip(required ? required.version : null) }, testButton),
@@ -380,9 +383,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             T.getOtherFilesText(otherCount), ' · ', external(svnUrl, T.getBlueprintsFolderLabel() + ' ↗'));
 
         // The box: the band as its head, what the section says beneath; there as long as the Live
-        // Preview has a state — a band, or a blueprint in effect while wordpress.org's state is shown.
+        // Preview has a state — a band, or a blueprint in effect while wordpress.org's state is
+        // shown. Half the section's width with one column, the whole width with two: the JSON
+        // beside the fields, or the conflict's two files.
         const band = renderBand();
-        const box = (...body) => createElement('div', { className: 'pblsh--assets-box pblsh--live-preview__box' },
+        const box = (wide, ...body) => createElement('div', { className: 'pblsh--assets-box pblsh--live-preview__box' + (wide ? ' pblsh--live-preview__box--wide' : '') },
             band,
             body.some(Boolean) && createElement('div', { className: 'pblsh--live-preview__body' }, ...body),
         );
@@ -398,7 +403,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             );
             return createElement('div', { className: 'pblsh--live-preview' },
                 intro,
-                box(
+                box(true,
                     createElement('div', { className: 'pblsh--live-preview__compare' },
                         side(__('Mine', 'peak-publisher'), slot.pending === 'delete' ? null : blueprint.contents, __('Deleted here', 'peak-publisher'), null,
                             createElement(Button, { isPrimary: true, disabled: readOnly, onClick: () => onResolve('blueprint', 'mine') }, __('Keep mine', 'peak-publisher'))),
@@ -413,7 +418,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
 
         return createElement('div', { className: 'pblsh--live-preview' },
             intro,
-            (band || hasBlueprint) && box(
+            (band || hasBlueprint) && box(hasBlueprint && showEditor,
                 ...renderNotices(),
                 hasBlueprint && renderMain(),
                 hasBlueprint && renderActions(),

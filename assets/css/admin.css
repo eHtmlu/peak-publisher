@@ -3005,6 +3005,20 @@ ol.pblsh--content-list {
     flex-shrink: 0;
 }
 
+/* The way to the plugin's page on its channel, at the line's end: the line's gray, blue when
+   pointed at. */
+.pblsh--channel-path__link {
+    display: inline-flex;
+    line-height: 1;
+    flex-shrink: 0;
+    color: inherit;
+    text-decoration: none;
+}
+.pblsh--channel-path__link:hover,
+.pblsh--channel-path__link:focus-visible {
+    color: var(--color-blue);
+}
+
 /* Bare like the upload overlay's publish path — no chip background. Always one
    line: overlong slugs get an ellipsis, the tooltip carries the full slug. */
 .pblsh--channel-path code {
@@ -3308,17 +3322,9 @@ ol.pblsh--content-list {
     gap: 1rem;
 }
 
-/* The freshness of the plugin's wordpress.org data with Refresh and the link to its page */
+/* The freshness of the plugin's wordpress.org data with Refresh */
 .pblsh--plugin-header__check {
     text-align: right;
-}
-.pblsh--plugin-header__wporg-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.125rem;
-}
-.pblsh--plugin-header__wporg-link-icon {
-    display: inline-flex;
 }
 
 /* How fresh the wordpress.org data on screen is (WporgCheckStatus): one muted line of

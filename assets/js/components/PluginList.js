@@ -4,7 +4,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
-    const { showAlert, getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
+    const { showAlert, getSvgIcon } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus, RelativeTime } = Pblsh.Components;
     const { getCheck } = Pblsh.WporgCheckUtils;
     const { getPluginStatusItems } = Pblsh.PluginStatusUtils;
@@ -144,7 +144,8 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                             label: __('Edit', 'peak-publisher'),
                                             icon: getSvgIcon('pencil', { size: 24 })
                                         }),
-                                        createElement(DropdownMenu, {
+                                        // The row's menu holds the removal alone — not for the plugin running this site, which has no menu then.
+                                        plugin.slug !== PblshData.currentPlugin && createElement(DropdownMenu, {
                                             icon: getSvgIcon('dots_horizontal', { size: 24 }),
                                             label: __('More options', 'peak-publisher'),
                                             children: ({ onClose }) => [
@@ -156,17 +157,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
                                                     getSvgIcon('download', { size: 24 }),
                                                     __('Download Installable', 'peak-publisher')
                                                 ), */
-                                                plugin.hosting_type === 'wporg' && createElement(MenuItem, {
-                                                    key: 'wporg-page',
-                                                    href: getWporgPluginUrl(plugin.slug),
-                                                    target: '_blank',
-                                                    rel: 'noreferrer',
-                                                    onClick: onClose,
-                                                },
-                                                    getSvgIcon('open_in_new', { size: 24 }),
-                                                    __('View on wordpress.org', 'peak-publisher')
-                                                ),
-                                                plugin.slug !== PblshData.currentPlugin && createElement(MenuItem, {
+                                                createElement(MenuItem, {
                                                     key: 'delete',
                                                     isDestructive: true,
                                                     onClick: () => { handleDelete(plugin); onClose(); }

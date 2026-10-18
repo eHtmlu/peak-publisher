@@ -6,7 +6,9 @@
    into the plugin's entry (assets_pending), so the editor's Assets tab and the list stay
    current without a request for the plugin. Beside it the Live Preview's draft per plugin — JSON typed in its editor
    and not saved yet —, kept and saved by Pblsh.Controllers.BlueprintDraft whether the section
-   is shown or not, and dropped with the blueprint it edits. */
+   is shown or not, and dropped with the blueprint it edits; and whether a field of the Live
+   Preview is being edited or saved, which the section tells while it is shown — what the
+   commit waits for, beside the draft. */
 (function() {
     'use strict';
     var registerStore = wp.data.registerStore;
@@ -15,6 +17,7 @@
         byPluginId: {},
         loadingIds: [],
         blueprintDrafts: {},
+        blueprintFieldStates: {},   // per plugin, while a field of the Live Preview is being edited or saved: 'editing' | 'saving'
     };
     var actions = {
         setLoading: function(pluginId, flag) {
@@ -26,6 +29,10 @@
         // null drops the draft
         setBlueprintDraft: function(pluginId, draft) {
             return { type: 'SET_BLUEPRINT_DRAFT', pluginId: pluginId, draft: draft };
+        },
+        // 'editing' | 'saving' while a field of the Live Preview is one; null when none is
+        setBlueprintFieldState: function(pluginId, fieldState) {
+            return { type: 'SET_BLUEPRINT_FIELD_STATE', pluginId: pluginId, fieldState: fieldState };
         },
     };
     function reducer(state, action) {
@@ -46,6 +53,12 @@
                 if (action.draft) { drafts[action.pluginId] = action.draft; } else { delete drafts[action.pluginId]; }
                 return assign({}, state, { blueprintDrafts: drafts });
             }
+            case 'SET_BLUEPRINT_FIELD_STATE': {
+                if ((state.blueprintFieldStates[action.pluginId] || null) === (action.fieldState || null)) return state;
+                var fieldStates = assign({}, state.blueprintFieldStates);
+                if (action.fieldState) { fieldStates[action.pluginId] = action.fieldState; } else { delete fieldStates[action.pluginId]; }
+                return assign({}, state, { blueprintFieldStates: fieldStates });
+            }
             default:
                 return state;
         }
@@ -64,6 +77,10 @@
         },
         hasUnsavedBlueprintDraft: function(state) {
             return Object.values(state.blueprintDrafts).some(isUnsaved);
+        },
+        // 'editing' | 'saving' while a field of the plugin's Live Preview is one, else null
+        getBlueprintFieldState: function(state, pluginId) {
+            return state.blueprintFieldStates[pluginId] || null;
         },
     };
     registerStore('pblsh/assets', {

@@ -90,6 +90,12 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 pathInput.current.select();
             }
         });
+        // A field being edited or saved, told to the store: the commit waits for it like for the
+        // draft (PluginAssets). Gone with the section — an edit left behind is no edit.
+        useEffect(() => {
+            wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, fieldBusy !== null ? 'saving' : (themeInput !== null || otherPath !== null ? 'editing' : null));
+        }, [id, fieldBusy, themeInput, otherPath]);
+        useEffect(() => () => wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, null), [id]);
         useEffect(() => () => clearTimeout(savedTimer.current), []);
         const showSaved = (field) => {
             setFieldState({ [field]: 'saved' });

@@ -44,12 +44,14 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     const [draggingN, setDraggingN] = useState(null);     // screenshot_n being dragged
     const [dragOverN, setDragOverN] = useState(null);     // slot N being hovered during drag
     const dragOverTimeout = useRef(null);                   // auto-clear drag-over when cursor leaves
-    // The Live Preview's draft (Pblsh.Controllers.BlueprintDraft): while it holds something not
-    // saved yet, the commit waits for it; while a save is in flight, nothing takes it back. A
-    // discard, a commit or a decided blueprint starts it over.
+    // The Live Preview's draft (Pblsh.Controllers.BlueprintDraft) and a field of it being edited
+    // or saved (the section tells the store): while something is not saved yet, the commit waits
+    // for it; while a save is in flight, nothing takes it back. A discard, a commit or a decided
+    // blueprint starts the draft over.
     const blueprintDraft = useSelect((select) => pluginId ? select('pblsh/assets').getBlueprintDraft(pluginId) : null, [pluginId]);
-    const livePreviewUnsaved = Pblsh.Controllers.BlueprintDraft.isUnsaved(blueprintDraft);
-    const livePreviewSaving = !!(blueprintDraft && blueprintDraft.saving);
+    const blueprintFieldState = useSelect((select) => pluginId ? select('pblsh/assets').getBlueprintFieldState(pluginId) : null, [pluginId]);
+    const livePreviewUnsaved = Pblsh.Controllers.BlueprintDraft.isUnsaved(blueprintDraft) || blueprintFieldState !== null;
+    const livePreviewSaving = !!(blueprintDraft && blueprintDraft.saving) || blueprintFieldState === 'saving';
 
     // The editor loads the view when it opens; the tab finds it in the store. Only when that
     // load failed and nothing is in flight does the tab try again.

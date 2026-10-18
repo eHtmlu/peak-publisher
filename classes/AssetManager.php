@@ -68,7 +68,9 @@ class AssetManager {
      * The Live Preview as the tab shows it, the working copy applied: the blueprint in effect
      * (contents null: none, or wordpress.org's is over the limit) with the hash a JSON edit
      * builds on, the fields (null when there is none to write safely — blueprint_fields_of()), the warnings, what the current
-     * release requires and which of it is not installed before the plugin, the test link (the
+     * release requires and which of it is not installed before the plugin, the directory's
+     * listings of the plugins named (wporg_plugin_listings(); the plugin's own from its marker
+     * and the directory check), the test link (the
      * blueprint as the plugin page will serve it) or why there is none, wordpress.org's file —
      * why it ignores it, its fields and what it lacks; whether its import has read it is the
      * slot's fact (wporg_view()) —, the counts of assets/blueprints/, and the last check of the
@@ -87,13 +89,26 @@ class AssetManager {
             in_array($directory['state'], [ 'closed', 'not_found' ], true) => 'not_downloadable',
             default => null,
         };
+        $fields = blueprint_fields_of($contents, $own, $required);
+        $missing = $contents === null ? [] : blueprint_missing_dependencies($contents, $own, $required);
+        $file_fields = $file === null ? null : blueprint_fields_of($file['contents'], $own, $required);
+        $file_missing = $file === null ? [] : live_preview_missing($state, $own, $required);
+        // The plugins the section names, by slug — what the directory lists for them; the plugin
+        // itself from its marker and the directory check (its state: ok, closed, not_found,
+        // never), no request.
+        $named = [ ...array_column($fields['plugins'] ?? [], 'slug'), ...array_column($file_fields['plugins'] ?? [], 'slug'), ...$required, ...$missing, ...$file_missing ];
+        $listings = [
+            ...wporg_plugin_listings(array_diff($named, [ $own ])),
+            $own => [ 'name' => (string) $plugin->post_title, 'icon' => $this->get_best_icon_url($plugin), 'state' => (string) $directory['state'] ],
+        ];
         return [
             'contents' => $contents,
             'hash' => md5($contents ?? ''),
-            'fields' => blueprint_fields_of($contents, $own, $required),
+            'fields' => $fields,
             'warnings' => blueprint_warnings($contents, $state['blueprints']['blueprint_files']),
             'required' => $requirements,
-            'missing' => $contents === null ? [] : blueprint_missing_dependencies($contents, $own, $required),
+            'missing' => $missing,
+            'listings' => $listings,
             'test' => [ 'url' => $served === null || $blocked !== null ? null : blueprint_playground_url(encode_blueprint_like_wporg($served)), 'blocked' => $blocked ],
             // wordpress.org's file as the tab shows it alone: why its import ignores it, its
             // fields and what it lacks.
@@ -101,8 +116,8 @@ class AssetManager {
                 ...$file,
                 'ignored' => blueprint_ignored_reason($file),
                 'problem' => $this->blueprint_problem($file),
-                'fields' => blueprint_fields_of($file['contents'], $own, $required),
-                'missing' => live_preview_missing($state, $own, $required),
+                'fields' => $file_fields,
+                'missing' => $file_missing,
             ],
             'blueprint_files' => $state['blueprints']['blueprint_files'],
             'other_files' => $state['blueprints']['other_files'],

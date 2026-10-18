@@ -21,13 +21,19 @@ require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
  * a day, rebuilt at a different time for every plugin (plugin-directory:
  * class-plugins-info-api.php), so new figures appear at any hour; taking them with every check
  * costs no request of its own. The API is built for that traffic, the SVN server is not.
- * Regenerable, not part of the declared schema (docs/data-schema.md).
+ * Regenerable, not part of the declared schema (docs/data-schema.md). The listings of the other
+ * plugins the Live Preview names live here too (wporg_plugin_listings()), a site-wide cache.
  */
 
 const PBLSH_WPORG_DIRECTORY_META = '_pblsh_wporg_directory';
 
 /** The site-wide claim of the last stamp check — the list compares the stamps at most this often. */
 const PBLSH_WPORG_DIRECTORY_CHECKED_OPTION = 'pblsh_wporg_directory_checked_at';
+
+/** The listings of the other plugins the Live Preview names, by slug — a cache, regenerable (docs/data-schema.md). */
+const PBLSH_WPORG_PLUGIN_LISTINGS_OPTION = 'pblsh_wporg_plugin_listings';
+const PBLSH_WPORG_PLUGIN_LISTING_FRESH = DAY_IN_SECONDS;        // a listing serves this long before the next asking renews it
+const PBLSH_WPORG_PLUGIN_LISTING_KEPT = 7 * DAY_IN_SECONDS;     // a listing not renewed for this long goes with the next write
 const PBLSH_WPORG_DIRECTORY_CHECK_INTERVAL = 5 * MINUTE_IN_SECONDS;
 
 
@@ -451,3 +457,61 @@ function serialize_wporg_directory(int $plugin_id): array {
         ],
     ];
 }
+
+
+/**
+ * The directory listings of the other plugins the Live Preview names — name, icon and the API's
+ * state (ok, closed, not_found; wporg_api_plugin_information()) by slug —, from a site-wide
+ * cache: a listing serves for a day, then the next asking renews it, and what the cache lacks is
+ * asked along, all in one request with icons. Warn-only: without an answer a stale listing
+ * serves on and a slug never answered stays without one — the section shows the slug alone —,
+ * never an error. Listings not renewed for a week go with the next write. Only slugs as
+ * wordpress.org spells them are asked (is_wordpress_org_slug()); anything else gets nothing.
+ *
+ * @param string[] $slugs
+ * @return array<string, array{name:?string, icon:?string, state:string}>
+ */
+function wporg_plugin_listings(array $slugs): array {
+    $slugs = array_values(array_unique(array_filter(array_map('strval', $slugs), static fn(string $slug): bool => is_wordpress_org_slug($slug))));
+    if ($slugs === []) {
+        return [];
+    }
+    $now = time();
+    $cache = stored_wporg_plugin_listings();
+    $stale = array_values(array_filter($slugs, static fn(string $slug): bool => !isset($cache[$slug]) || $cache[$slug]['checked_at'] + PBLSH_WPORG_PLUGIN_LISTING_FRESH <= $now));
+    if ($stale !== []) {
+        try {
+            foreach (wporg_api_plugin_information($stale, wporg_api_fields([ 'icons' ])) as $slug => $answer) {
+                $data = (array) ($answer['data'] ?? []);
+                $cache[(string) $slug] = [ 'name' => wporg_api_clean_text($data['name'] ?? ''), 'icon' => wporg_api_pick_icon_url($data['icons'] ?? null), 'state' => (string) $answer['state'], 'checked_at' => $now ];
+            }
+            update_option(PBLSH_WPORG_PLUGIN_LISTINGS_OPTION, array_filter($cache, static fn(array $entry): bool => $entry['checked_at'] + PBLSH_WPORG_PLUGIN_LISTING_KEPT > $now), false);
+        } catch (WporgSvnException $e) {
+            // Nothing to write: the stale listings serve on, the unknown stay unknown.
+        }
+    }
+    $listings = [];
+    foreach ($slugs as $slug) {
+        if (isset($cache[$slug])) {
+            $listings[$slug] = [ 'name' => $cache[$slug]['name'], 'icon' => $cache[$slug]['icon'], 'state' => $cache[$slug]['state'] ];
+        }
+    }
+    return $listings;
+}
+
+/** The cache as stored, with `checked_at`; re-validation when reading back from persistence: a foreign shape, or entry, is none. */
+function stored_wporg_plugin_listings(): array {
+    $stored = get_option(PBLSH_WPORG_PLUGIN_LISTINGS_OPTION, []);
+    $listings = [];
+    foreach (is_array($stored) ? $stored : [] as $slug => $entry) {
+        $slug = (string) $slug;
+        $name = is_array($entry) ? ($entry['name'] ?? null) : false;
+        $icon = is_array($entry) ? ($entry['icon'] ?? null) : false;
+        if (is_wordpress_org_slug($slug) && is_array($entry) && is_int($entry['checked_at'] ?? null) && is_string($entry['state'] ?? null)
+            && ($name === null || is_string($name)) && ($icon === null || is_string($icon))) {
+            $listings[$slug] = [ 'name' => $name, 'icon' => $icon, 'state' => $entry['state'], 'checked_at' => $entry['checked_at'] ];
+        }
+    }
+    return $listings;
+}
+

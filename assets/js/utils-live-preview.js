@@ -59,8 +59,11 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
         : __('added in the JSON', 'peak-publisher');
     const getOwnPluginNote = () => __('your plugin, installed last', 'peak-publisher');
     // A required plugin the blueprint does not install before the plugin: WordPress activates no
-    // plugin without its active dependencies, and the whole preview stops there.
-    const getNotInstalledNote = (required) => sprintf(__('required by version %s · not installed', 'peak-publisher'), required.version);
+    // plugin without its active dependencies, and the whole preview stops there. The dot stays
+    // with the version (no-break space): a line never starts with it.
+    const getNotInstalledNote = (required) => sprintf(__('required by version %s · not installed', 'peak-publisher'), required.version);
+    // A plugin the directory lacks (closed, or no such slug): Playground cannot install it, whatever else is true of it.
+    const getNotOnWporgText = () => __('not on wordpress.org', 'peak-publisher');
     const getAddMissingLabel = (missing) => missing.length === 1 ? sprintf(__('Add %s', 'peak-publisher'), missing[0]) : __('Add them', 'peak-publisher');
     const getPluginsSourceText = (required) => required
         ? sprintf(__('From the Requires Plugins header of version %s.', 'peak-publisher'), required.version)
@@ -152,7 +155,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
         getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
         getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getThemePlaceholder, getSetInJsonText,
-        getPluginNote, getOwnPluginNote, getNotInstalledNote, getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
+        getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotOnWporgText, getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,
         getTestLabel, getTestTooltip, getSetUpLabel, getRemoveLabel, getIntroText, getGuideUrl, getGuideLabel, getDeleteConfirmText, getStartOverConfirmText, getDiscardConfirmText, getUnsavedWorkingCopyText,
         getBlueprintPath, getOtherFilesText, getBlueprintsFolderLabel,

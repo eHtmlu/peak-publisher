@@ -33,7 +33,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const { getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
         const { getShownText } = Pblsh.AssetsUtils;
         const T = Pblsh.LivePreviewUtils;
-        const { NoticeBox, BlueprintEditor, RelativeTime, TipLink, WporgRevisionLink, AssetStatusBand } = Pblsh.Components;
+        const { NoticeBox, BlueprintEditor, RelativeTime, TipLink, WporgRevisionLink, AssetStatusBand, PluginIdentity } = Pblsh.Components;
 
         const id = pluginData.id;
         const slug = pluginData.slug;
@@ -299,16 +299,32 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 fieldError.theme && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.theme),
             );
         };
+        // The plugins as rows: icon, name and slug as the directory lists them (view.listings; the
+        // slug alone without a listing), linked to the page where there is one, the fact beside
+        // them — another plugin the directory lacks reads as that, whatever else is true of it;
+        // the plugin itself, last, keeps its fact (the test button says when its page is not
+        // there yet).
         const renderPlugins = () => {
             const missing = view.missing;
+            const listings = view.listings || {};
+            const row = (key, name, fact, stops, own) => {
+                const listing = listings[name] || null;
+                const absent = !own && listing !== null && listing.state !== 'ok';
+                return createElement('tr', { key },
+                    createElement('td', null, createElement(PluginIdentity, { icon: listing ? listing.icon : null, name: listing ? listing.name || '' : '', slug: name, href: listing && listing.state === 'ok' ? getWporgPluginUrl(name) : null })),
+                    createElement('td', { className: 'pblsh--live-preview__plugin-fact' + (stops || absent ? ' pblsh--live-preview__plugin-fact--missing' : '') }, absent ? T.getNotOnWporgText() : fact),
+                );
+            };
             return createElement('div', { className: 'pblsh--live-preview__field' },
                 renderFieldLabel('plugins', __('Plugins', 'peak-publisher')),
-                createElement('ul', { className: 'pblsh--live-preview__plugins' },
-                    view.fields.plugins.map((plugin, i) => createElement('li', { key: plugin.slug + i },
-                        createElement('code', null, plugin.slug), ' ', createElement('span', { className: 'pblsh--live-preview__muted' }, T.getPluginNote(plugin, required)))),
-                    missing.map((name) => createElement('li', { key: 'missing-' + name, className: 'pblsh--live-preview__plugin--missing' },
-                        createElement('code', null, name), ' ', createElement('span', null, T.getNotInstalledNote(required)))),
-                    createElement('li', null, createElement('code', null, slug), ' ', createElement('span', { className: 'pblsh--live-preview__muted' }, T.getOwnPluginNote())),
+                createElement('div', { className: 'pblsh--framed-table-wrap pblsh--live-preview__plugins' },
+                    createElement('table', { className: 'pblsh--framed-table pblsh--live-preview__plugins-table' },
+                        createElement('tbody', null,
+                            ...view.fields.plugins.map((plugin, i) => row(plugin.slug + i, plugin.slug, T.getPluginNote(plugin, required), false, false)),
+                            ...missing.map((name) => row('missing-' + name, name, T.getNotInstalledNote(required), true, false)),
+                            row('own', slug, T.getOwnPluginNote(), false, true),
+                        ),
+                    ),
                 ),
                 missing.length > 0 && required && createElement('div', { className: 'pblsh--live-preview__plugins-add' },
                     createElement(Button, { isLink: true, isBusy: fieldBusy === 'dependencies', disabled: locked, onClick: () => change('dependencies', { change: 'dependencies' }) }, T.getAddMissingLabel(missing))),

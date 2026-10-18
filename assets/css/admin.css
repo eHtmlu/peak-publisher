@@ -863,60 +863,6 @@
     min-height: 0;
 }
 
-/* Identity cell — icon + name/slug, previewing the plugin list's row anatomy;
-   the channel is a given here, so ChannelPath renders the slug only. */
-.pblsh--wporg-import__plugin-identity {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.pblsh--wporg-import__plugin-identity-icon {
-    width: 3rem; /* 48px */
-    height: 3rem;
-    flex-shrink: 0;
-}
-
-.pblsh--wporg-import__plugin-identity-text {
-    display: grid;
-    gap: 0.125rem;
-    min-width: 0;
-}
-
-/* The row's anchor — matches the plugin list's row anchor size. */
-.pblsh--wporg-import__plugin-identity-text strong {
-    font-size: 0.9375rem; /* 15px */
-}
-
-/* The identity links to the live plugin page in the directory — quiet by
-   default, the affordance (underline + external marker) appears on hover and
-   keyboard focus. Rows without a directory page (fresh or unresolved manual
-   slugs) render the same anatomy as a plain div. */
-a.pblsh--wporg-import__plugin-identity {
-    color: inherit;
-    text-decoration: none;
-}
-
-a.pblsh--wporg-import__plugin-identity:hover strong,
-a.pblsh--wporg-import__plugin-identity:focus-visible strong {
-    text-decoration: underline;
-}
-
-/* Atomic inline: keeps the name's underline off the marker; opacity instead of
-   display, so the reserved space never shifts the layout on hover. */
-.pblsh--wporg-import__plugin-identity-external {
-    display: inline-flex;
-    vertical-align: middle;
-    line-height: 1;
-    margin-left: 0.375rem;
-    opacity: 0;
-}
-
-a.pblsh--wporg-import__plugin-identity:hover .pblsh--wporg-import__plugin-identity-external,
-a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugin-identity-external {
-    opacity: 1;
-}
-
 .pblsh--wporg-import__header {
     display: flex;
     align-items: flex-end;
@@ -941,19 +887,12 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     margin-bottom: 0.75rem;
 }
 
-.pblsh--wporg-import__table-wrap {
-    overflow: auto;
-    border: 1px solid var(--border-color-light);
-    border-radius: 0.5rem;
-}
-
 /* Fixed layout: column widths are a layout decision (taken from the header
    row), not a content negotiation — the cells' contents change constantly
-   (lookup results, hints, the row action) and must never move the columns. */
+   (lookup results, hints, the row action) and must never move the columns.
+   The frame and the cells are the framed table's (pblsh--framed-table). */
 .pblsh--wporg-import__table {
     table-layout: fixed;
-    width: 100%;
-    border-collapse: collapse;
     background: #fff;
 }
 
@@ -973,16 +912,9 @@ a.pblsh--wporg-import__plugin-identity:focus-visible .pblsh--wporg-import__plugi
     text-align: right;
 }
 
-.pblsh--wporg-import__table th,
-.pblsh--wporg-import__table td {
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--border-color-light);
-    text-align: left;
-    vertical-align: middle;
-}
-
-/* The foot's own border-bottom would double the table-wrap edge; the last
-   body row keeps its border as the separator toward the add row. */
+/* The foot's own border-bottom would double the frame's edge; the last body
+   row keeps its border as the separator toward the add row (the frame drops
+   it only where the body ends the table). */
 .pblsh--wporg-import__table tfoot td {
     border-bottom: 0;
     background: #f6f7f7;
@@ -2997,6 +2929,7 @@ ol.pblsh--content-list {
        lighten further. */
     color: #737373;
     max-width: 100%;
+    min-width: 0;   /* a grid or flex item too: shrinks below the slug, which then ellipsizes */
 }
 
 .pblsh--channel-path__icon {
@@ -3020,14 +2953,90 @@ ol.pblsh--content-list {
 }
 
 /* Bare like the upload overlay's publish path — no chip background. Always one
-   line: overlong slugs get an ellipsis, the tooltip carries the full slug. */
+   line: overlong slugs get an ellipsis, the tooltip carries the full slug — a flex
+   item shrinks below its content only with min-width 0. */
 .pblsh--channel-path code {
+    min-width: 0;
     padding: 0;
     background: transparent;
     font-size: 0.75rem; /* 12px */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* PluginIdentity — a plugin as a row names it: icon, name, slug (ChannelPath) — the one anatomy
+   of the wporg import table's rows and the Live Preview's plugins. */
+.pblsh--plugin-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.pblsh--plugin-identity__icon {
+    width: 3rem; /* 48px */
+    height: 3rem;
+    flex-shrink: 0;
+}
+.pblsh--plugin-identity__text {
+    display: grid;
+    gap: 0.125rem;
+    min-width: 0;
+}
+/* The row's anchor — the plugin list's row anchor size. */
+.pblsh--plugin-identity__name {
+    font-size: 0.9375rem; /* 15px */
+}
+/* With a page to link to: quiet by default, the affordance (underline + external marker)
+   appears on hover and keyboard focus; without one, the same anatomy as a plain block. */
+a.pblsh--plugin-identity {
+    color: inherit;
+    text-decoration: none;
+}
+a.pblsh--plugin-identity:hover .pblsh--plugin-identity__name,
+a.pblsh--plugin-identity:focus-visible .pblsh--plugin-identity__name {
+    text-decoration: underline;
+}
+/* The name's last word and the marker never part: a line breaks before an atomic inline unless
+   its line forbids it. */
+.pblsh--plugin-identity__tail {
+    white-space: nowrap;
+}
+/* Atomic inline: keeps the name's underline off the marker; opacity instead of display, so
+   the reserved space never shifts the layout on hover. */
+.pblsh--plugin-identity__external {
+    display: inline-flex;
+    vertical-align: middle;
+    line-height: 1;
+    margin-left: 0.375rem;
+    opacity: 0;
+}
+a.pblsh--plugin-identity:hover .pblsh--plugin-identity__external,
+a.pblsh--plugin-identity:focus-visible .pblsh--plugin-identity__external {
+    opacity: 1;
+}
+
+/* The framed table — a hairline frame with rounded corners on the wrap, a hairline between the
+   rows, the cells padded — shared by the wporg import table and the Live Preview's plugins. The
+   last row of a body that ends the table has no hairline, the frame is its edge; a body a foot
+   follows keeps it as the separator. */
+.pblsh--framed-table-wrap {
+    overflow: auto;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+}
+.pblsh--framed-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.pblsh--framed-table th,
+.pblsh--framed-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color-light);
+    text-align: left;
+    vertical-align: middle;
+}
+.pblsh--framed-table tbody:last-child tr:last-child td {
+    border-bottom: 0;
 }
 
 /* Version Column */
@@ -4800,13 +4809,21 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     margin-top: 0.375rem;
     color: var(--color-red);
 }
+/* The plugins as rows in a framed table (pblsh--framed-table): the identity, the fact beside
+   it — muted, red where the preview would stop (a required plugin not installed, a plugin the
+   directory lacks). Fixed layout: the fact column has its width, the identity the rest, and an
+   overlong slug ellipsizes instead of widening the table past its frame. */
 .pblsh--live-preview__plugins {
     margin: 0 0 0.5rem;
 }
-.pblsh--live-preview__plugins li {
-    margin: 0 0 0.25rem;
+.pblsh--live-preview__plugins-table {
+    table-layout: fixed;
 }
-.pblsh--live-preview__plugin--missing {
+.pblsh--live-preview__plugin-fact {
+    width: 11rem;
+    color: #8c96a0;
+}
+.pblsh--live-preview__plugin-fact--missing {
     color: var(--color-red);
 }
 .pblsh--live-preview__plugins-add {

@@ -123,6 +123,7 @@ class AdminUI {
             'components/TipLink.js',
             'components/WporgRevisionLink.js',
             'components/ChannelPath.js',
+            'components/PluginIdentity.js',
             'components/NoticeBox.js',
             'components/WporgAccountSpellingNotice.js',
             'components/Figure.js',

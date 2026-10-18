@@ -10,9 +10,9 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
     const { useState, useEffect, useRef, createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, TextControl, Spinner } = wp.components;
-    const { getGeopatternIconUrl, getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
+    const { getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
     const { formatWporgActiveInstalls } = Pblsh.InstallationsUtils;
-    const { ChannelPath, Figure } = Pblsh.Components;
+    const { Figure, PluginIdentity } = Pblsh.Components;
 
     const [discoverStatus, setDiscoverStatus] = useState('idle');
     const [discoverError, setDiscoverError] = useState('');
@@ -559,40 +559,15 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
         return null;
     };
 
-    // Identity cell — icon + name/slug, previewing the plugin list's row anatomy;
-    // the channel is a given here, so ChannelPath renders the slug only. Like the
-    // overlay's identity card, the block links to the live directory page (the
-    // place to verify "is this really my plugin?") — but only where that page
-    // exists: discover rows are published by definition, manual slugs link once
-    // the lookup confirms a page state (a fresh repository has no page yet).
+    // Identity cell — icon + name/slug (PluginIdentity); the channel is a given here, so the
+    // slug stands alone. Like the overlay's identity card, the block links to the live directory
+    // page (the place to verify "is this really my plugin?") — but only where that page exists:
+    // discover rows are published by definition, manual slugs link once the lookup confirms a
+    // page state (a fresh repository has no page yet).
     const renderRowIdentity = (row) => {
         const hint = row.directory_hint && typeof row.directory_hint === 'object' ? row.directory_hint : null;
         const hasDirectoryPage = row.source === 'discover' || (hint && ['published', 'closed', 'unknown'].includes(hint.state));
-        const identity = [
-            createElement('img', {
-                src: row.icon || (hint && hint.icon) || getGeopatternIconUrl(row.slug),
-                alt: '',
-                className: 'pblsh--wporg-import__plugin-identity-icon',
-                width: 48,
-                height: 48,
-            }),
-            createElement('div', { className: 'pblsh--wporg-import__plugin-identity-text' },
-                createElement('strong', null,
-                    row.name || row.slug,
-                    hasDirectoryPage ? createElement('span', { className: 'pblsh--wporg-import__plugin-identity-external', 'aria-hidden': 'true' },
-                        getSvgIcon('open_in_new', { size: 14 })) : null,
-                ),
-                createElement(ChannelPath, { slug: row.slug }),
-            ),
-        ];
-        return hasDirectoryPage
-            ? createElement('a', {
-                className: 'pblsh--wporg-import__plugin-identity',
-                href: getWporgPluginUrl(row.slug),
-                target: '_blank',
-                rel: 'noreferrer',
-            }, ...identity)
-            : createElement('div', { className: 'pblsh--wporg-import__plugin-identity' }, ...identity);
+        return createElement(PluginIdentity, { icon: row.icon || (hint && hint.icon) || null, name: row.name, slug: row.slug, href: hasDirectoryPage ? getWporgPluginUrl(row.slug) : null });
     };
 
     // The list's states (loading, discover failed, nothing found) render as one
@@ -672,8 +647,8 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
                 createElement(Spinner),
                 createElement('span', null, __('Loading wordpress.org plugins…', 'peak-publisher')),
             ) : null,
-            createElement('div', { className: 'pblsh--wporg-import__table-wrap' },
-                createElement('table', { className: 'pblsh--wporg-import__table' },
+            createElement('div', { className: 'pblsh--framed-table-wrap' },
+                createElement('table', { className: 'pblsh--framed-table pblsh--wporg-import__table' },
                     createElement('thead', null,
                         createElement('tr', null,
                             createElement('th', { className: 'pblsh--wporg-import__select-header' },

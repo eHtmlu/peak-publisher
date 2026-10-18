@@ -368,10 +368,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 createElement('div', { className: 'pblsh--live-preview__muted' }, T.getPluginsSourceText(required)),
             );
         };
+        // What the preview installs first — the theme, the plugins —, then where visitors start.
         const renderFields = () => createElement(Fragment, null,
-            renderLanding(),
             renderTheme(),
             renderPlugins(),
+            renderLanding(),
             view.fields.more.length > 0 && createElement('div', { className: 'pblsh--live-preview__more' }, T.getMoreText(view.fields.more)),
         );
 

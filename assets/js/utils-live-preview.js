@@ -105,6 +105,9 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     // The section's introduction, in every state: what a Live Preview does for the plugin page —
     // the how (Playground, the steps, the blueprint) is the tip's (Pblsh.Tips.livePreview).
     const getIntroText = () => __('Offers a Live Preview on the plugin page, so interested visitors can give the plugin a quick try.', 'peak-publisher');
+    // wordpress.org's guide to plugin previews: the tip's "guide", and the link under the JSON.
+    const getGuideUrl = () => 'https://developer.wordpress.org/plugins/wordpress-org/previews-and-blueprints/';
+    const getGuideLabel = () => __('Guide to plugin previews', 'peak-publisher');
     const getDeleteConfirmText = (onWporg) => onWporg
         ? __('Remove the Live Preview? It is deleted from wordpress.org with the next commit.', 'peak-publisher')
         : __('Remove the Live Preview? It was never committed and is lost.', 'peak-publisher');
@@ -149,7 +152,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
         getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getThemePlaceholder, getSetInJsonText,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,
-        getTestLabel, getTestTooltip, getSetUpLabel, getRemoveLabel, getIntroText, getDeleteConfirmText, getStartOverConfirmText, getDiscardConfirmText, getUnsavedWorkingCopyText,
+        getTestLabel, getTestTooltip, getSetUpLabel, getRemoveLabel, getIntroText, getGuideUrl, getGuideLabel, getDeleteConfirmText, getStartOverConfirmText, getDiscardConfirmText, getUnsavedWorkingCopyText,
         getOtherFilesText, getBlueprintsFolderLabel,
         getFailsText, getFailsLabel, getFailsFact, getCarryTitle, getCarryText, getFlipCarryText, getFlipCarriedText,
     };

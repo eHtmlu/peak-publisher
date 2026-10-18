@@ -4227,13 +4227,14 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--pblsh-asset-box-width)), var(--pblsh-asset-box-width)));
 }
 
-/* Icon & Banner: the two groups side by side, each a column as wide as a box, with the card's
-   padding between them and to the footer — the same distance as to the card's edge; the
-   columns keep the box's width and go one under the other where two do not fit. */
+/* Icon & Banner: the two groups side by side, each a column as wide as a box, twice the card's
+   padding between them — clearly two things — and the padding to the footer and, stacked, between
+   them — the same distance as to the card's edge; the columns keep the box's width and go one
+   under the other where two do not fit. */
 .pblsh--assets-columns {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--pblsh-asset-box-width)), var(--pblsh-asset-box-width)));
-    gap: var(--pblsh-assets-card-padding);
+    gap: var(--pblsh-assets-card-padding) calc(2 * var(--pblsh-assets-card-padding));
 }
 .pblsh--assets-columns > .pblsh--assets-group {
     margin-bottom: 0;
@@ -4752,9 +4753,9 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--live-preview__editor {
     min-width: 0;
 }
-/* The section's introduction with its tip beneath — one block at the top, spaced by the flow rule. */
-.pblsh--live-preview__intro p {
-    margin: 0 0 0.5rem;
+/* The section's introduction: one muted line with its tip, like a group's hints line — spaced by the flow rule. */
+.pblsh--live-preview__intro {
+    color: #8c96a0;
 }
 
 /* The fields, label above control, one after the other; the label line carries the field's
@@ -4809,7 +4810,8 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 
 /* The JSON beside the fields: a column whose box the editor fills — the box's own height is the
    one min-height, never its content's, so beside the fields it stretches to their height and
-   beneath them it keeps the min-height and scrolls — with the save line under it. */
+   beneath them it keeps the min-height and scrolls — with its foot under it: the save line at
+   the left, wordpress.org's guide at the right. */
 .pblsh--live-preview__editor {
     display: flex;
     flex-direction: column;
@@ -4819,8 +4821,14 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     flex: 1;
     min-height: 20rem;
 }
-.pblsh--live-preview__save {
+.pblsh--live-preview__editor-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.25rem 1rem;
     margin-top: 0.5rem;
+}
+.pblsh--live-preview__save {
     color: #8c96a0;
 }
 .pblsh--live-preview__save--error {

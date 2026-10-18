@@ -155,11 +155,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const svnUrl = 'https://plugins.svn.wordpress.org/' + encodeURIComponent(slug) + '/assets/blueprints/';
         const advancedLink = createElement('a', { href: advancedUrl, target: '_blank', rel: 'noreferrer', onClick: () => { advancedViewClicks[id] = Date.now(); } });
 
-        // The introduction, above the zones in every state: what the Live Preview does for the
-        // plugin page, with the tip that explains the how — built for this plugin.
+        // The introduction, above the zones in every state: one muted line, like the screenshots'
+        // captions line — what the Live Preview does for the plugin page, and the tip that explains
+        // the how, built for this plugin.
         const intro = createElement('div', { className: 'pblsh--live-preview__intro' },
-            createElement('p', null, T.getIntroText()),
-            createElement(TipLink, { tipKey: 'livePreview', params: { slug } }));
+            T.getIntroText(), ' · ', createElement(TipLink, { tipKey: 'livePreview', params: { slug } }));
 
         // Zone 1: the slot's band — what the commit will do, with its Discard, or where the file
         // stands on the plugin page; once wordpress.org has read it, the check of the public switch
@@ -334,13 +334,17 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             : onWporg ? 'mirror' : 'working';
         const saveDetail = saveLine ? saveLine.detail : (onWporg ? onWporg.revision : null);
         const saveError = saveState === 'invalid' || saveState === 'refused' || saveState === 'elsewhere';
+        // Under the box: the save line at the left, and at the right wordpress.org's guide — the one the tip links to.
         const renderEditor = () => createElement('div', { className: 'pblsh--live-preview__editor' },
             createElement('div', { className: 'pblsh--live-preview__editor-box' },
                 createElement(BlueprintEditor, { value: editorValue, onChange: onEditorChange, readOnly: readOnly || fieldBusy !== null, placeholder: T.getPastePlaceholder(), label: __('Blueprint JSON', 'peak-publisher') })),
-            createElement('div', { className: 'pblsh--live-preview__save' + (saveError ? ' pblsh--live-preview__save--error' : '') },
-                T.getSaveLineText(saveState, saveDetail),
-                saveState === 'elsewhere' && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.loadElsewhere(id) }, T.getLoadElsewhereLabel())),
-                (saveState === 'invalid' || saveState === 'refused') && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.drop(id) }, T.getUndoLabel())),
+            createElement('div', { className: 'pblsh--live-preview__editor-foot' },
+                createElement('div', { className: 'pblsh--live-preview__save' + (saveError ? ' pblsh--live-preview__save--error' : '') },
+                    T.getSaveLineText(saveState, saveDetail),
+                    saveState === 'elsewhere' && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.loadElsewhere(id) }, T.getLoadElsewhereLabel())),
+                    (saveState === 'invalid' || saveState === 'refused') && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.drop(id) }, T.getUndoLabel())),
+                ),
+                external(T.getGuideUrl(), T.getGuideLabel() + ' ↗'),
             ),
         );
         // The main row: the fields' column, headed by the switch at its right end, and in expert

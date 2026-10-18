@@ -124,8 +124,9 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
     // The closed box's second line in this tab, under the closed notice every tab shares
     // (getWporgClosedNotice()): what the closure means for the assets.
     const getClosedAssetsNotice = () => __('Its page shows a generated icon and no banner until it is reopened.', 'peak-publisher');
-    // The commit's receipt; <revision /> is the WporgRevisionLink's slot (createInterpolateElement).
-    const getCommittedText = () => __('Committed to wordpress.org in <revision />.', 'peak-publisher');
+    // The commit's receipt, in the row where its button stood — a fragment of the row, no period;
+    // <revision /> is the WporgRevisionLink's slot (createInterpolateElement).
+    const getCommittedText = () => __('Committed to wordpress.org in <revision />', 'peak-publisher');
     const getShowWporgStateText = (showing) => showing ? __('Show my changes', 'peak-publisher') : __("Show wordpress.org's state", 'peak-publisher');
 
     // The commit's confirm, the last word before the write: the account that commits — the

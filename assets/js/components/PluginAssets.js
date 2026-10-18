@@ -635,13 +635,9 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
         ];
     };
 
-    // Above the card, flush in the tab panel: the last commit's outcome, why nothing can be
-    // changed while the mirror was never read, the directory's verdict, and why the commit
-    // waits when no account can make it.
+    // Above the card, flush in the tab panel: why nothing can be changed while the mirror was
+    // never read, the directory's verdict, and why the commit waits when no account can make it.
     const renderNotices = () => [
-        committedRevision && createElement(NoticeBox, { key: 'committed', variant: 'info', className: 'pblsh--tab-panel__notice' },
-            createElement('p', null, createInterpolateElement(getCommittedText(), { revision: createElement(WporgRevisionLink, { revision: committedRevision }) })),
-        ),
         notSynced && createElement(NoticeBox, { key: 'not-synced', variant: 'warning', className: 'pblsh--tab-panel__notice' },
             createElement('p', null, getNotSyncedNotice(), ' ',
                 createElement(Button, { isLink: true, isBusy: refreshingWporg, disabled: refreshingWporg, onClick: refreshFromWporg }, __('Refresh', 'peak-publisher')),
@@ -684,9 +680,15 @@ lodash.set(window, 'Pblsh.Components.PluginAssets', ({ pluginData, refreshPlugin
     }, [rowShown]);
     // One message for the working copy, the most pressing first: the commit under way, the
     // conflicts, the Live Preview's draft not saved yet, the count. The details stand where they
-    // happen — the red band, the save line, the dot on the section.
+    // happen — the red band, the save line, the dot on the section. Without a working copy, the
+    // last commit's receipt stands where its button stood, until the next change takes the place.
     const renderWorkingCopy = () => {
-        if (!hasWorkingCopy) return null;
+        if (!hasWorkingCopy) {
+            return committedRevision ? createElement('div', { className: 'pblsh--assets-subtabs__working-copy' },
+                createElement('div', { className: 'pblsh--assets-subtabs__working-copy-text' },
+                    createInterpolateElement(getCommittedText(), { revision: createElement(WporgRevisionLink, { revision: committedRevision }) })),
+            ) : null;
+        }
         if (busy === 'committing') {
             return createElement('div', { className: 'pblsh--assets-subtabs__working-copy' },
                 createElement('div', { className: 'pblsh--assets-subtabs__working-copy-text' }, createElement(Spinner), getCommittingText()),

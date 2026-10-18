@@ -4116,7 +4116,7 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 /* The assets tab's box — the one base of its look, shared by the slot boxes and the Live
    Preview's box: a band sits flush at its top as the head, the content beneath. */
 .pblsh--assets-box {
-    --pblsh-assets-box-border: 1.5px;
+    --pblsh-assets-box-border: 1px;
     border: var(--pblsh-assets-box-border) solid var(--border-color-medium);
     border-radius: 8px;
     background: #fff;

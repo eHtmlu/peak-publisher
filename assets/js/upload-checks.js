@@ -204,7 +204,7 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
 
         const preRelease = pre && sprintf(__('%s is a pre-release, a version for testers.', 'peak-publisher'), version);
         const preReleaseReceipt = pre && {
-            label: sprintf(__('That\'s fine, I want sites to receive the pre-release %s as a regular update.', 'peak-publisher'), version),
+            label: sprintf(__('That\'s fine, I want all sites to receive the pre-release %s as a regular update.', 'peak-publisher'), version),
             checked: confirmPreReleaseCurrent,
             onChange: setConfirmPreReleaseCurrent,
         };

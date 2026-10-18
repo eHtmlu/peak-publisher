@@ -57,11 +57,15 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getPluginNote = (plugin, required) => plugin.required && required
         ? sprintf(__('required by version %s', 'peak-publisher'), required.version)
         : __('added in the JSON', 'peak-publisher');
-    const getOwnPluginNote = () => __('your plugin, installed last', 'peak-publisher');
+    // The plugin itself at its place in the install order: last, or wherever the JSON puts it.
+    const getOwnPluginNote = (last) => last ? __('your plugin, installed last', 'peak-publisher') : __('your plugin', 'peak-publisher');
     // A required plugin the blueprint does not install before the plugin: WordPress activates no
     // plugin without its active dependencies, and the whole preview stops there. The dot stays
     // with the version (no-break space): a line never starts with it.
     const getNotInstalledNote = (required) => sprintf(__('required by version %s · not installed', 'peak-publisher'), required.version);
+    // A required plugin the blueprint installs, but not active before the plugin's own step —
+    // after it, or without activating it: the same stop.
+    const getNotActiveBeforeNote = (required) => sprintf(__('required by version %s · not active before your plugin', 'peak-publisher'), required.version);
     // A plugin the directory lacks (closed, or no such slug): Playground cannot install it, whatever else is true of it.
     const getNotOnWporgText = () => __('not on wordpress.org', 'peak-publisher');
     const getAddMissingLabel = (missing) => missing.length === 1 ? sprintf(__('Add %s', 'peak-publisher'), missing[0]) : __('Add them', 'peak-publisher');
@@ -155,7 +159,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
         getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
         getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getThemePlaceholder, getSetInJsonText,
-        getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotOnWporgText, getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
+        getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotActiveBeforeNote, getNotOnWporgText, getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,
         getTestLabel, getTestTooltip, getSetUpLabel, getRemoveLabel, getIntroText, getGuideUrl, getGuideLabel, getDeleteConfirmText, getStartOverConfirmText, getDiscardConfirmText, getUnsavedWorkingCopyText,
         getBlueprintPath, getOtherFilesText, getBlueprintsFolderLabel,

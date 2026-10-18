@@ -249,7 +249,8 @@ function blueprint_self_install_index(\stdClass $blueprint, string $own_slug): ?
  * - plugins: every wordpress.org plugin installed, the shorthand first (it runs before the
  *   steps), the plugin itself left out; `required` = named by the Requires Plugins of the
  *   current release ($required). Shown only — the header is where a plugin's needs belong.
- * - own: whether the plugin's own install step is there (else wordpress.org appends it).
+ *   The plugin itself stands among them at its place (`own`) — the order is the install
+ *   order —, at the end when the blueprint has no step for it (wordpress.org appends one).
  * - more: what no window shows, by name with how often it occurs — the other steps first (their
  *   `step`; `step` when it has none), in the order of their first appearance, then the
  *   top-level settings.
@@ -259,21 +260,19 @@ function blueprint_self_install_index(\stdClass $blueprint, string $own_slug): ?
 function blueprint_fields(\stdClass $blueprint, string $own_slug, array $required): array {
     $landing = property_exists($blueprint, 'landingPage') ? $blueprint->landingPage : null;
     $plugins = [];
+    $plugin = static fn(string $slug): array => [ 'slug' => $slug, 'required' => $slug !== $own_slug && in_array($slug, $required, true), 'own' => $slug === $own_slug ];
     foreach (is_array($blueprint->plugins ?? null) ? $blueprint->plugins : [] as $entry) {
         $slug = blueprint_shorthand_plugin_slug($entry);
-        if ($slug !== null && $slug !== $own_slug) {
-            $plugins[] = [ 'slug' => $slug, 'required' => in_array($slug, $required, true) ];
+        if ($slug !== null) {
+            $plugins[] = $plugin($slug);
         }
     }
     $themes = [];
     $foreign_themes = 0;
-    $own = false;
     $more = [];   // name → count, in the order of first appearance
     foreach (blueprint_step_kinds($blueprint) as $step) {
-        if ($step['kind'] === 'plugin' && $step['slug'] === $own_slug) {
-            $own = true;
-        } elseif ($step['kind'] === 'plugin') {
-            $plugins[] = [ 'slug' => $step['slug'], 'required' => in_array($step['slug'], $required, true) ];
+        if ($step['kind'] === 'plugin') {
+            $plugins[] = $plugin($step['slug']);
         } elseif ($step['kind'] === 'theme') {
             $themes[] = $step['slug'];
         } elseif ($step['kind'] === 'theme_other') {
@@ -286,12 +285,14 @@ function blueprint_fields(\stdClass $blueprint, string $own_slug, array $require
     foreach (array_diff(array_keys((array) $blueprint), [ 'landingPage', 'login', 'steps', 'plugins', '$schema', 'meta' ]) as $key) {
         $more[$key] = ($more[$key] ?? 0) + 1;
     }
+    if (!in_array(true, array_column($plugins, 'own'), true)) {
+        $plugins[] = $plugin($own_slug);
+    }
 
     return [
         'landing_page' => [ 'value' => is_string($landing) ? $landing : null, 'editable' => $landing === null || is_string($landing) ],
         'theme' => [ 'slug' => $themes[0] ?? null, 'editable' => count($themes) <= 1 && $foreign_themes === 0 ],
         'plugins' => $plugins,
-        'own' => $own,
         'more' => array_map(static fn($name, int $count): array => [ 'name' => (string) $name, 'count' => $count ], array_keys($more), array_values($more)),
     ];
 }

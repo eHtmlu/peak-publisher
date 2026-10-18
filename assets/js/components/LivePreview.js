@@ -299,13 +299,21 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 fieldError.theme && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.theme),
             );
         };
-        // The plugins as rows: icon, name and slug as the directory lists them (view.listings; the
-        // slug alone without a listing), linked to the page where there is one, the fact beside
-        // them — another plugin the directory lacks reads as that, whatever else is true of it;
-        // the plugin itself, last, keeps its fact (the test button says when its page is not
+        // The plugins as rows in the install order, the plugin itself among them at its place:
+        // icon, name and slug as the directory lists them (view.listings; the slug alone without a
+        // listing), linked to the page where there is one, the fact beside them — a required
+        // plugin the blueprint has but not active before the plugin's own step reads as that, one
+        // it lacks altogether stands right before the plugin's own row as not installed — where
+        // Add would put it —, another plugin the directory lacks as that, whatever else is true
+        // of it; the plugin itself keeps its fact (the test button says when its page is not
         // there yet).
         const renderPlugins = () => {
             const missing = view.missing;
+            const entries = view.fields.plugins;
+            const absent = missing.filter((name) => !entries.some((plugin) => plugin.slug === name));
+            const fact = (plugin, index) => plugin.own
+                ? T.getOwnPluginNote(index === entries.length - 1)
+                : missing.includes(plugin.slug) ? T.getNotActiveBeforeNote(required) : T.getPluginNote(plugin, required);
             const listings = view.listings || {};
             const row = (key, name, fact, stops, own) => {
                 const listing = listings[name] || null;
@@ -320,9 +328,10 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 createElement('div', { className: 'pblsh--framed-table-wrap pblsh--live-preview__plugins' },
                     createElement('table', { className: 'pblsh--framed-table pblsh--live-preview__plugins-table' },
                         createElement('tbody', null,
-                            ...view.fields.plugins.map((plugin, i) => row(plugin.slug + i, plugin.slug, T.getPluginNote(plugin, required), false, false)),
-                            ...missing.map((name) => row('missing-' + name, name, T.getNotInstalledNote(required), true, false)),
-                            row('own', slug, T.getOwnPluginNote(), false, true),
+                            ...entries.flatMap((plugin, i) => [
+                                ...(plugin.own ? absent.map((name) => row('missing-' + name, name, T.getNotInstalledNote(required), true, false)) : []),
+                                row(plugin.slug + i, plugin.slug, fact(plugin, i), !plugin.own && missing.includes(plugin.slug), plugin.own),
+                            ]),
                         ),
                     ),
                 ),

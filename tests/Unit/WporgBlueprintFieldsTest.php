@@ -48,8 +48,7 @@ final class WporgBlueprintFieldsTest extends TestCase {
 
         self::assertSame([ 'value' => '/wp-admin/admin.php?page=x', 'editable' => true ], $fields['landing_page']);
         self::assertSame([ 'slug' => 'twentytwentyfive', 'editable' => true ], $fields['theme']);
-        self::assertSame([ [ 'slug' => 'query-monitor', 'required' => false ], [ 'slug' => 'woocommerce', 'required' => true ], [ 'slug' => 'akismet', 'required' => false ] ], $fields['plugins'], 'the shorthand first — it runs before the steps —, the own plugin left out');
-        self::assertTrue($fields['own']);
+        self::assertSame([ [ 'slug' => 'query-monitor', 'required' => false, 'own' => false ], [ 'slug' => 'woocommerce', 'required' => true, 'own' => false ], [ 'slug' => 'my-plugin', 'required' => false, 'own' => true ], [ 'slug' => 'akismet', 'required' => false, 'own' => false ] ], $fields['plugins'], 'the shorthand first — it runs before the steps —, the own plugin left out');
         self::assertSame([ [ 'name' => 'runPHP', 'count' => 1 ], [ 'name' => 'siteOptions', 'count' => 1 ] ], $fields['more'], 'the runPHP step and siteOptions');
     }
 
@@ -71,7 +70,7 @@ final class WporgBlueprintFieldsTest extends TestCase {
     public function test_a_theme_the_field_cannot_hold_is_read_only(): void {
         $none = blueprint_fields(self::blueprint([ 'steps' => [] ]), 'my-plugin', []);
         self::assertSame([ 'slug' => null, 'editable' => true ], $none['theme']);
-        self::assertFalse($none['own'], 'wordpress.org appends it');
+        self::assertSame([ [ 'slug' => 'my-plugin', 'required' => false, 'own' => true ] ], $none['plugins'], 'no step of its own: wordpress.org appends it, so it stands last');
 
         $two = blueprint_fields(self::blueprint([ 'steps' => [ self::theme('a'), self::theme('b') ] ]), 'my-plugin', []);
         self::assertSame([ 'slug' => 'a', 'editable' => false ], $two['theme']);
@@ -85,7 +84,7 @@ final class WporgBlueprintFieldsTest extends TestCase {
 
     public function test_a_broken_foreign_blueprint_reads_without_throwing(): void {
         $fields = blueprint_fields(decode_blueprint('{"plugins":"x","steps":["abc",5,{"step":"installPlugin","pluginData":"x","options":"y"},{"step":"installTheme","themeData":7}]}'), 'my-plugin', [ 'woocommerce' ]);
-        self::assertSame([], $fields['plugins']);
+        self::assertSame([ [ 'slug' => 'my-plugin', 'required' => false, 'own' => true ] ], $fields['plugins'], 'nothing readable installs a plugin; the plugin itself, appended');
         self::assertSame([ 'slug' => null, 'editable' => false ], $fields['theme']);
         self::assertSame([ [ 'name' => 'installPlugin', 'count' => 1 ] ], $fields['more'], 'the plugin step without a wordpress.org slug');
         self::assertSame([ 'woocommerce' ], blueprint_missing_dependencies('{"plugins":"x","steps":[{"step":"installPlugin","pluginData":"x"}]}', 'my-plugin', [ 'woocommerce' ]));

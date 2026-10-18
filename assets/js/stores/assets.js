@@ -6,7 +6,7 @@
    into the plugin's entry (assets_pending), so the editor's Assets tab and the list stay
    current without a request for the plugin. Beside it the Live Preview's draft per plugin — JSON typed in its editor
    and not saved yet —, kept and saved by Pblsh.Controllers.BlueprintDraft whether the section
-   is shown or not. */
+   is shown or not, and dropped with the blueprint it edits. */
 (function() {
     'use strict';
     var registerStore = wp.data.registerStore;
@@ -84,6 +84,10 @@
         // The plugin's assets_pending is this view's count — the one place every new view passes.
         var plugin = wp.data.select('pblsh/plugins').getById(pluginId);
         if (plugin && view.wporg) wp.data.dispatch('pblsh/plugins').upsert({ id: pluginId, assets_pending: view.wporg.pending_count });
+        // The Live Preview's draft edits the blueprint in effect. A view without one — removed
+        // here, or in another tab — leaves it nothing to edit: it goes with the blueprint. The
+        // empty state has no editor that could show it, and no dot that should count it.
+        if (view.blueprint && view.blueprint.contents === null) window.Pblsh.Controllers.BlueprintDraft.drop(pluginId);
     }
     window.Pblsh.Controllers.Assets = {
         // Loads the view; one already there stays visible meanwhile. A failure is the caller's to report.

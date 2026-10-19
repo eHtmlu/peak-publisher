@@ -56,6 +56,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getThemeHint = () => __("Leave empty for Playground's default theme.", 'peak-publisher');
     const getSetInJsonText = () => __('Set in the JSON.', 'peak-publisher');
     const getSetInJsonNote = () => __('set in the JSON', 'peak-publisher');
+    const getChangeThemeLink = () => __('Change the theme…', 'peak-publisher');
     const getChangeLabel = () => __('Change', 'peak-publisher');
 
     // The plugins the preview installs: from the current release's Requires Plugins header — the
@@ -182,7 +183,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     return {
         getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
-        getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getDefaultThemeNote, getThemePlaceholder, getThemeHint, getSetInJsonText, getSetInJsonNote, getChangeLabel,
+        getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getDefaultThemeNote, getThemePlaceholder, getThemeHint, getSetInJsonText, getSetInJsonNote, getChangeThemeLink, getChangeLabel,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotActiveBeforeNote, getNotOnWporgText, getRedirectSkippedNote, getRedirectOpenNote, getSkipRedirectLabel,
         getAddPluginLink, getNeedQuestion, getNeedYes, getNeedNo, getNeedGuidanceTitle, getNeedGuidance, getRequiresPluginsHeaderUrl, getOkLabel, getCancelLabel, getAddPluginPlaceholder, getAddPluginLabel, getRemovePluginLabel,
         getAddMissingLabel, getMoreText, getFieldStateText,

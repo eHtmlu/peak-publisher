@@ -95,10 +95,12 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             }
         });
         // A field being edited or saved, told to the store: the commit waits for it like for the
-        // draft (PluginAssets). Gone with the section — an edit left behind is no edit.
+        // draft (PluginAssets). Edited means the path field, which saves when it is left; the theme's
+        // and the plugins' fields save only on Enter or their button, so typing there holds nothing.
+        // Gone with the section — an edit left behind is no edit.
         useEffect(() => {
-            wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, fieldBusy !== null ? 'saving' : (themeInput !== null || otherPath !== null ? 'editing' : null));
-        }, [id, fieldBusy, themeInput, otherPath]);
+            wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, fieldBusy !== null ? 'saving' : (otherPath !== null ? 'editing' : null));
+        }, [id, fieldBusy, otherPath]);
         useEffect(() => () => wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, null), [id]);
         useEffect(() => () => clearTimeout(savedTimer.current), []);
         const showSaved = (field) => {
@@ -304,18 +306,14 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             const listing = theme && theme.listing ? theme.listing : null;
             const absent = listing !== null && listing.state !== 'ok';
             const editing = themeInput !== null;
+            const next = editing ? (themeInput.trim() === '' ? '' : wporgSlugFromInput(themeInput, 'themes').slug) : null;
+            const unchanged = next === (field.slug || '');
+            const closeTheme = () => { setThemeInput(null); setFieldError({}); };
             const commitTheme = () => {
-                if (themeInput === null) return;
-                const next = themeInput.trim() === '' ? '' : wporgSlugFromInput(themeInput, 'themes').slug;
-                if (next === (field.slug || '')) { setThemeInput(null); return; }
+                if (!editing || unchanged) return;
                 change('theme', { change: 'theme', value: next }).then((ok) => { if (ok) setThemeInput(null); });
             };
             const facts = [ absent ? T.getNotOnWporgText() : null, theme && theme.default ? T.getDefaultThemeNote() : null, !field.editable ? T.getSetInJsonNote() : null ].filter(Boolean);
-            const fact = createElement('td', { className: 'pblsh--live-preview__row-fact' + (absent ? ' pblsh--live-preview__row-fact--missing' : ''), colSpan: theme && theme.slug ? 1 : 2 },
-                facts.join(' · '),
-                field.editable && !editing && createElement(Fragment, null, facts.length > 0 ? ' · ' : '',
-                    createElement(Button, { isLink: true, disabled: locked, onClick: () => { focusField.current = 'theme'; setThemeInput(field.slug || ''); } }, T.getChangeLabel())),
-            );
             return createElement('div', { className: 'pblsh--live-preview__field' },
                 renderFieldLabel('theme', __('Theme', 'peak-publisher')),
                 createElement('div', { className: 'pblsh--framed-table-wrap pblsh--live-preview__theme' },
@@ -323,28 +321,43 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                         createElement('tbody', null,
                             createElement('tr', null,
                                 theme && theme.slug && createElement('td', null, createElement(PluginIdentity, { kind: 'theme', image: listing ? listing.screenshot : null, name: listing ? listing.name || '' : '', slug: theme.slug, href: listing && listing.state === 'ok' ? getWporgThemeUrl(theme.slug) : null })),
-                                fact,
+                                createElement('td', { className: 'pblsh--live-preview__row-fact' + (absent ? ' pblsh--live-preview__row-fact--missing' : ''), colSpan: theme && theme.slug ? 1 : 2 }, facts.join(' · ')),
+                            ),
+                        ),
+                        // The foot: the link, then the field with Change and Cancel, the hint and the server's
+                        // answer under them. Enter changes, Escape cancels; leaving the field alone does nothing,
+                        // so Cancel stays a cancel.
+                        field.editable && !showingWporgState && createElement('tfoot', null,
+                            createElement('tr', null,
+                                createElement('td', { colSpan: 2, className: 'pblsh--live-preview__foot' },
+                                    !editing && createElement(Button, { isLink: true, disabled: locked, onClick: () => { focusField.current = 'theme'; setThemeInput(field.slug || ''); } }, T.getChangeThemeLink()),
+                                    editing && createElement(Fragment, null,
+                                        createElement('div', { className: 'pblsh--live-preview__foot-controls' },
+                                            createElement(TextControl, {
+                                                ref: (el) => { fieldInputs.current.theme = el; },
+                                                __nextHasNoMarginBottom: true,
+                                                label: __('Theme', 'peak-publisher'),
+                                                hideLabelFromVision: true,
+                                                placeholder: T.getThemePlaceholder(),
+                                                value: themeInput,
+                                                disabled: locked && fieldBusy !== 'theme',
+                                                onChange: (value) => { setThemeInput(value); setFieldError({}); },
+                                                onKeyDown: (e) => {
+                                                    if (e.key === 'Enter') { e.preventDefault(); commitTheme(); }
+                                                    if (e.key === 'Escape') closeTheme();
+                                                },
+                                            }),
+                                            createElement(Button, { isSecondary: true, isBusy: fieldBusy === 'theme', disabled: locked || unchanged, onClick: commitTheme }, T.getChangeLabel()),
+                                            createElement(Button, { isSecondary: true, disabled: fieldBusy === 'theme', onClick: closeTheme }, T.getCancelLabel()),
+                                        ),
+                                        createElement('div', { className: 'pblsh--live-preview__foot-hint' }, T.getThemeHint()),
+                                    ),
+                                    fieldError.theme && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.theme),
+                                ),
                             ),
                         ),
                     ),
                 ),
-                editing && createElement(TextControl, {
-                    ref: (el) => { fieldInputs.current.theme = el; },
-                    __nextHasNoMarginBottom: true,
-                    label: __('Theme', 'peak-publisher'),
-                    hideLabelFromVision: true,
-                    placeholder: T.getThemePlaceholder(),
-                    value: themeInput,
-                    disabled: locked && fieldBusy !== 'theme',
-                    onChange: (next) => { setThemeInput(next); setFieldError({}); },
-                    onBlur: commitTheme,
-                    onKeyDown: (e) => {
-                        if (e.key === 'Enter') commitTheme();
-                        if (e.key === 'Escape') { setThemeInput(null); setFieldError({}); }
-                    },
-                }),
-                editing && createElement('div', { className: 'pblsh--live-preview__muted' }, T.getThemeHint()),
-                fieldError.theme && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.theme),
             );
         };
         // The plugins as rows in the install order, the plugin itself among them at its place:
@@ -404,24 +417,24 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                         ),
                         !showingWporgState && createElement('tfoot', null,
                             createElement('tr', null,
-                                createElement('td', { colSpan: 2, className: 'pblsh--live-preview__plugins-foot' },
+                                createElement('td', { colSpan: 2, className: 'pblsh--live-preview__foot' },
                                     addStep === null && createElement(Button, { isLink: true, disabled: locked, onClick: () => setAddStep('ask') }, T.getAddPluginLink()),
                                     addStep === 'ask' && createElement(Fragment, null,
-                                        createElement('div', { className: 'pblsh--live-preview__plugins-question' }, T.getNeedQuestion()),
-                                        createElement('div', { className: 'pblsh--live-preview__plugins-foot-actions' },
+                                        createElement('div', { className: 'pblsh--live-preview__foot-question' }, T.getNeedQuestion()),
+                                        createElement('div', { className: 'pblsh--live-preview__foot-actions' },
                                             createElement(Button, { isSecondary: true, onClick: () => setAddStep('guide') }, T.getNeedYes()),
                                             createElement(Button, { isSecondary: true, onClick: () => { focusField.current = 'add'; setAddStep('slug'); } }, T.getNeedNo()),
                                             createElement(Button, { isLink: true, onClick: closeAdd }, T.getCancelLabel()),
                                         ),
                                     ),
                                     addStep === 'guide' && createElement(Fragment, null,
-                                        createElement('div', { className: 'pblsh--live-preview__plugins-question' }, T.getNeedGuidanceTitle()),
-                                        createElement('div', { className: 'pblsh--live-preview__plugins-foot-text' },
+                                        createElement('div', { className: 'pblsh--live-preview__foot-question' }, T.getNeedGuidanceTitle()),
+                                        createElement('div', { className: 'pblsh--live-preview__foot-text' },
                                             createInterpolateElement(T.getNeedGuidance(), { a: createElement('a', { href: T.getRequiresPluginsHeaderUrl(), target: '_blank', rel: 'noreferrer' }) })),
-                                        createElement('div', { className: 'pblsh--live-preview__plugins-foot-actions' },
+                                        createElement('div', { className: 'pblsh--live-preview__foot-actions' },
                                             createElement(Button, { isSecondary: true, onClick: closeAdd }, T.getOkLabel())),
                                     ),
-                                    addStep === 'slug' && createElement('div', { className: 'pblsh--live-preview__plugins-foot-controls' },
+                                    addStep === 'slug' && createElement('div', { className: 'pblsh--live-preview__foot-controls' },
                                         createElement(TextControl, {
                                             ref: (el) => { fieldInputs.current.add = el; },
                                             __nextHasNoMarginBottom: true,
@@ -502,9 +515,10 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // Zone 4: the actions on the blueprint in effect — the test of the working copy, the menu.
         // Setting up is no action on it: that button stands outside the box. Nothing unsaved is
         // tested: not while the JSON draft or a field is being edited or saved — a click on the
-        // button while a field has the focus saves the field (its blur) and finds the button
-        // locked until the fresh test link is here; the field's label line says so meanwhile.
-        const testBlocked = draft !== null || saving || fieldBusy !== null || themeInput !== null || otherPath !== null || !view.test.url;
+        // button while the path field has the focus saves the field (its blur) and finds the button
+        // locked until the fresh test link is here; the field's label line says so meanwhile. The
+        // theme's and the plugins' fields save only on Enter or their button: typing there holds nothing.
+        const testBlocked = draft !== null || saving || fieldBusy !== null || otherPath !== null || !view.test.url;
         const testButton = createElement(Button, {
             isPrimary: true,
             ...(testBlocked ? { disabled: true } : { href: view.test.url, target: '_blank', rel: 'noreferrer' }),

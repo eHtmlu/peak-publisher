@@ -306,8 +306,8 @@ function replace_release_zip_entries(string $zip_path, array $entries): bool|\WP
  * @param string $expected The effective value the client showed — a different live value
  *        refuses the edit (tested_up_to_changed, 409), as a moved pointer refuses a flip.
  * @param string|null $wporg_username The wordpress.org account a wporg edit commits as.
- * @return array{version:string, from:string, to:string, revision:?int, trunk:?array{state:string, version:?string}}|\WP_Error
- *         trunk (wporg, WporgOperations::set_tested_up_to()): whether trunk followed; null self-hosted.
+ * @return array{version:string, from:string, to:string, revision:?int}|\WP_Error The edit's facts
+ *         for the editor's notice; whether trunk followed stays in the operations log (wporg).
  */
 function set_release_tested_up_to(\WP_Post $release, string $value, string $expected, ?string $wporg_username = null): array|\WP_Error {
     if (!is_valid_tested_up_to($value)) {
@@ -346,7 +346,7 @@ function set_release_tested_up_to(\WP_Post $release, string $value, string $expe
         } else {
             mark_wporg_plugin_cache_stale((int) $parent->ID, $known);
         }
-        return [ 'version' => $version, 'from' => $result['from'], 'to' => $value, 'revision' => (int) $result['revision'], 'trunk' => $result['trunk'] ];
+        return [ 'version' => $version, 'from' => $result['from'], 'to' => $value, 'revision' => (int) $result['revision'] ];
     }
 
     // The ZIP is the release: checked once here, the ZIP helpers below trust it.
@@ -395,7 +395,7 @@ function set_release_tested_up_to(\WP_Post $release, string $value, string $expe
         'zip_sha256_before' => $zip_sha256_before,
         'zip_sha256_after' => (string) hash_file('sha256', $zip),
     ]);
-    return [ 'version' => $version, 'from' => $effective['value'], 'to' => $value, 'revision' => null, 'trunk' => null ];
+    return [ 'version' => $version, 'from' => $effective['value'], 'to' => $value, 'revision' => null ];
 }
 
 

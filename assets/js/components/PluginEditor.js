@@ -371,14 +371,13 @@ lodash.set(window, 'Pblsh.Components.PluginEditor', ({ pluginData, refreshPlugin
         const closed = isWporg ? pluginData.wporg_stats.closed : null;
         const draft = pluginData?.hosting_type === 'self_hosted' && pluginData.status !== 'publish';
         return [
-            // The last Tested up to edit — the value, the version, on wordpress.org the commit and,
-            // when trunk carries another version, that it was left unchanged.
+            // The last Tested up to edit — the value, the version, on wordpress.org the commit.
+            // Whether trunk followed is not said: wordpress.org reads the value from the tag the
+            // Stable tag names, so trunk's own value changes nothing the user sees.
             testedOutcome && createElement(NoticeBox, { key: 'tested', variant: 'info', className: 'pblsh--tab-panel__notice' },
                 createElement('p', null, isWporg
                     ? createInterpolateElement(sprintf(__('Tested up to set to %1$s for version %2$s in <revision /> — sites see it with their next update check once wordpress.org has processed the commit, usually within a few minutes.', 'peak-publisher'), testedOutcome.to, testedOutcome.version), { revision: createElement(WporgRevisionLink, { revision: testedOutcome.revision }) })
                     : sprintf(__('Tested up to set to %1$s for version %2$s — sites see it with their next update check.', 'peak-publisher'), testedOutcome.to, testedOutcome.version)),
-                isWporg && testedOutcome.trunk && testedOutcome.trunk.state === 'other_version' && createElement('p', null,
-                    sprintf(__('trunk carries version %s and was left unchanged.', 'peak-publisher'), testedOutcome.trunk.version)),
             ),
             // The self-hosted sentence has no <revision /> slot: the link stays unrendered there.
             // A wordpress.org flip that brought Requires Plugins into the Live Preview says so.

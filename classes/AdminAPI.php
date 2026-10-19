@@ -721,7 +721,7 @@ class AdminAPI {
     /**
      * Sets Tested up to of a release (set_release_tested_up_to(), includes/releases.php); a
      * wordpress.org release commits with the plugin's write account. Answers the edit's facts —
-     * version, from, to, the revision and what trunk did — for the editor's notice.
+     * version, from, to, the revision — for the editor's notice.
      */
     public function set_release_tested_up_to_rest(\WP_REST_Request $request) {
         $release = get_post((int) $request->get_param('id'));

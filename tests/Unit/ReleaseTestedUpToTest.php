@@ -46,7 +46,7 @@ final class ReleaseTestedUpToTest extends TestCase {
 
         $result = set_release_tested_up_to($release, '7.2', '7.1');
 
-        self::assertSame([ 'version' => '1.4', 'from' => '7.1', 'to' => '7.2', 'revision' => null, 'trunk' => null ], $result);
+        self::assertSame([ 'version' => '1.4', 'from' => '7.1', 'to' => '7.2', 'revision' => null ], $result);
         $zip = release_zip_path(get_post($release->ID));
         self::assertStringContainsString("Tested up to: 7.2\n", read_release_zip_entry($zip, 'my-plugin/readme.txt'));
         self::assertStringContainsString(" * Tested up to: 7.2\n", read_release_zip_entry($zip, 'my-plugin/my-plugin.php'));

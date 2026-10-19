@@ -179,9 +179,10 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const schedulePathSave = () => { cancelPathSave(); pathTimer.current = setTimeout(savePath, PATH_SAVE_DELAY); };
 
         // Whether the Live Preview is public — asked on wordpress.org only once wordpress.org has
-        // the file: when the section opens and the stored answer is older than five minutes, on
-        // "Check again", and on a return to the window within twenty minutes after the Advanced
-        // View was opened from here — the switch lives there, and may have moved several times.
+        // the file: when the band comes into view — the section opens, the import lands,
+        // wordpress.org's state is switched off again — and the stored answer is older than five
+        // minutes, on "Check again", and on a return to the window within twenty minutes after the
+        // Advanced View was opened from here — the switch lives there, and may have moved several times.
         const [checking, setChecking] = useState(false);
         const [checkFailed, setCheckFailed] = useState(false);
         const check = async () => {
@@ -198,7 +199,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         };
         useEffect(() => {
             if (imported && !showingWporgState && (!preview || Date.now() - preview.checked_at * 1000 > CHECK_STALE_AFTER)) check();
-        }, [id, imported]);
+        }, [id, imported, showingWporgState]);
         useEffect(() => {
             if (!imported) return undefined;
             const onReturn = () => {

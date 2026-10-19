@@ -12,16 +12,23 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     // the import has read and thrown away — a fact about wordpress.org, not about the page —,
     // and the public switch.
     const getIgnoredStatusText = () => __('Committed · wordpress.org ignores it', 'peak-publisher');
-    const getNotPublicText = () => __("On the plugin page, but visitors don't see it yet.", 'peak-publisher');
-    // The line beneath the fact: who sees it meanwhile — the reader, opening the page, is among
+    const getNotPublicText = () => __("On the plugin page, but visitors don't see it yet", 'peak-publisher');
+    // The note beneath the fact: who sees it meanwhile — the reader, opening the page, is among
     // them; Test Preview is the button's label there —, then the way to the switch: the last
     // entry of the Danger Zone, the last section of the page. <a> is the plugin's Advanced View
     // on wordpress.org.
     const getSwitchText = () => __("Only committers see it for now, as the Test Preview button. To make it public, switch it on in the Danger Zone at the bottom of the plugin's <a>Advanced View</a>.", 'peak-publisher');
     const getPublicText = () => __('Visitors see the Live Preview button', 'peak-publisher');
-    const getOpenLabel = () => __('Open', 'peak-publisher');
+    // The note beneath the public fact: the way back, the same switch — said as a purpose, not
+    // an instruction. The same <a> as above: a return from it checks the switch anew.
+    const getSwitchOffText = () => __("To hide the button from visitors, switch it off in the Danger Zone at the bottom of the plugin's <a>Advanced View</a>.", 'peak-publisher');
+    // The check of the public switch, beneath the band's text: its age — <time /> is the relative
+    // time of the last check —, then the link that checks anew, or in its place, about as long,
+    // the check under way: the line keeps its length, nothing beneath it moves. A failed check
+    // is said after the link.
+    const getCheckedText = () => __('checked <time />', 'peak-publisher');
     const getCheckAgainLabel = () => __('Check again', 'peak-publisher');
-    const getCheckingText = () => __('Checking wordpress.org…', 'peak-publisher');
+    const getCheckingText = () => __('Checking…', 'peak-publisher');
     const getCheckFailedText = () => __('Could not check wordpress.org', 'peak-publisher');
 
     // wordpress.org's own blueprint.json, which its import ignores: the plugin page has no preview.
@@ -186,7 +193,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getFlipCarriedText = (added) => sprintf(__('The Live Preview now installs %s too.', 'peak-publisher'), list(added));
 
     return {
-        getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
+        getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getSwitchOffText, getCheckedText, getCheckAgainLabel,
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
         getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getDefaultThemeNote, getThemePlaceholder, getThemeHint, getSetInJsonNote, getEditInExpertLink, getChangeThemeLink, getChangeLabel,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotActiveBeforeNote, getNotOnWporgText, getRedirectSkippedNote, getRedirectOpenNote, getSkipRedirectLabel,

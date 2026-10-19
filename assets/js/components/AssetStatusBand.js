@@ -7,13 +7,15 @@
 // forecast while it lasts), removed while the page still shows the file, on the plugin page,
 // empty. Every state has its sign before the text, in the band's colour: the text carries
 // the meaning, the sign lets a grid of boxes be read without reading. The colour changes with
-// the state, the height never does: one line, and beneath it what the caller adds (children:
-// the Live Preview's check line). A fact the slot does not carry — the Live Preview's file
-// wordpress.org ignores, its public switch — the caller says through `text` and `icon`;
-// `warning` marks the one state that asks the user to act without a Discard. The moment an
+// the state, the height never does: one line, and beneath it what the caller adds. A fact
+// the slot does not carry — the Live Preview's file wordpress.org ignores, its public switch
+// — the caller says through `text` and `icon`, the way out of a warning through `note`
+// (under the text, within the label), what stands beneath the line through `detail` (the
+// Live Preview's check, muted, under the text); `warning` marks the one state that asks the
+// user to act without a Discard. The moment an
 // import lands — the band turns from waiting to on the plugin page, or from removed to empty
 // — it lights up once; nothing moves while it waits.
-lodash.set(window, 'Pblsh.Components.AssetStatusBand', ({ slot, forecast, disabled, onDiscard, text = null, icon = null, warning = false, children = null }) => {
+lodash.set(window, 'Pblsh.Components.AssetStatusBand', ({ slot, forecast, disabled, onDiscard, text = null, icon = null, warning = false, detail = null, note = null }) => {
     const { __ } = wp.i18n;
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { Button } = wp.components;
@@ -74,10 +76,13 @@ lodash.set(window, 'Pblsh.Components.AssetStatusBand', ({ slot, forecast, disabl
         createElement('div', { className: 'pblsh--assets-band__line' },
             createElement('span', { className: 'pblsh--assets-band__text' },
                 createElement('span', { className: 'pblsh--assets-band__icon', 'aria-hidden': 'true' }, getSvgIcon(icon || (warning ? 'alert_outline' : stateIcon), { size: 16 })),
-                createElement('span', { className: 'pblsh--assets-band__label' }, text !== null ? text : stateText),
+                createElement('span', { className: 'pblsh--assets-band__label' },
+                    text !== null ? text : stateText,
+                    note && createElement('span', { className: 'pblsh--assets-band__note' }, note),
+                ),
             ),
             canDiscard && createElement(Button, { isSecondary: true, className: 'pblsh--assets-band__discard', disabled, onClick: onDiscard }, __('Discard', 'peak-publisher')),
         ),
-        children && createElement('div', { className: 'pblsh--assets-band__detail' }, children),
+        detail && createElement('div', { className: 'pblsh--assets-band__detail' }, detail),
     );
 });

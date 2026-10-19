@@ -215,7 +215,6 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         }, [id, imported]);
 
         const external = (href, text) => createElement('a', { href, target: '_blank', rel: 'noreferrer' }, text);
-        const previewUrl = getWporgPluginUrl(slug) + '?preview=1';
         const advancedUrl = getWporgPluginUrl(slug) + 'advanced/';
         const svnUrl = 'https://plugins.svn.wordpress.org/' + encodeURIComponent(slug) + '/assets/blueprints/';
         const advancedLink = createElement('a', { href: advancedUrl, target: '_blank', rel: 'noreferrer', onClick: () => { advancedViewClicks[id] = Date.now(); } });
@@ -228,19 +227,21 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
 
         // Zone 1: the slot's band — what the commit will do, with its Discard, or where the file
         // stands on the plugin page; once wordpress.org has read it, the check of the public switch
-        // beneath. The check's line keeps the last answer with its age while a new check runs,
-        // "Checking…" beside it — nothing jumps. Visitors not seeing what is on the page is the one
-        // state that asks the user to act: the warning, the way there on its own line. Not while wordpress.org's
+        // beneath. The check keeps the last answer with its age while a new check runs,
+        // "Checking…" in the link's place — nothing moves. Visitors not seeing what is on the page is the one
+        // state that asks the user to act: the warning, the way there as its note; the public state
+        // carries the way back the same way. Not while wordpress.org's
         // state is shown — like the images' boxes —, and not with nothing here, there or on the page:
         // unlike an image slot, the empty Live Preview is no slot in a grid, the empty state speaks
         // for itself.
-        const renderCheckLine = () => createElement(Fragment, null,
-            external(previewUrl, T.getOpenLabel() + ' ↗'),
-            preview && createElement(Fragment, null, ' · ', createElement(RelativeTime, { value: new Date(preview.checked_at * 1000).toISOString(), tooltip: true })),
-            ' · ', createElement(Button, { isLink: true, disabled: checking, onClick: check }, T.getCheckAgainLabel()),
-            checking && createElement(Fragment, null, ' · ', T.getCheckingText()),
-            !checking && checkFailed && createElement(Fragment, null, ' · ', T.getCheckFailedText()),
-        );
+        const renderCheck = () => {
+            const parts = [
+                preview && createInterpolateElement(T.getCheckedText(), { time: createElement(RelativeTime, { value: new Date(preview.checked_at * 1000).toISOString(), tooltip: true }) }),
+                checking ? T.getCheckingText() : createElement(Button, { isLink: true, onClick: check }, T.getCheckAgainLabel()),
+                !checking && checkFailed ? T.getCheckFailedText() : null,
+            ].filter(Boolean);
+            return createElement(Fragment, null, ...parts.flatMap((part, i) => i === 0 ? [part] : [' · ', part]));
+        };
         const renderBand = () => {
             if (showingWporgState) return null;
             const band = (props, detail = null) => createElement(AssetStatusBand, {
@@ -251,18 +252,20 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                     if (pending === 'put' && !confirm(T.getDiscardConfirmText())) return;
                     onResolve('blueprint', 'theirs');
                 },
+                detail,
                 ...props,
-            }, detail);
+            });
             if (!pending && !onWporg && !(slot && slot.shown)) return null;
             if (pending || !onWporg) return band({});
             if (onWporg.ignored) return band({ text: T.getIgnoredStatusText(), icon: 'alert_outline' });
             if (!imported) return band({});
-            if (!preview) return band({}, renderCheckLine());
-            if (preview.public) return band({ text: getShownText() + ' · ' + T.getPublicText() }, renderCheckLine());
+            if (!preview) return band({}, renderCheck());
+            if (preview.public) return band({ text: getShownText() + ' · ' + T.getPublicText(), note: createInterpolateElement(T.getSwitchOffText(), { a: advancedLink }) }, renderCheck());
             return band({
                 warning: true,
-                text: createElement(Fragment, null, T.getNotPublicText(), createElement('span', { className: 'pblsh--assets-band__note' }, createInterpolateElement(T.getSwitchText(), { a: advancedLink }))),
-            }, renderCheckLine());
+                text: T.getNotPublicText(),
+                note: createInterpolateElement(T.getSwitchText(), { a: advancedLink }),
+            }, renderCheck());
         };
 
         // Zone 2: the notices, at one place — fact, consequence, remedy.

@@ -148,7 +148,7 @@ class AssetManager {
         $own = (string) $plugin->post_name;
         $error = static fn(string $code, string $message, int $status): \WP_Error => new \WP_Error($code, $message, [ 'status' => $status ]);
 
-        if (!in_array($kind, [ 'create', 'contents', 'landing_page', 'theme', 'dependencies', 'plugin_add', 'plugin_remove', 'redirect_skip', 'delete' ], true)) {
+        if (!in_array($kind, [ 'create', 'contents', 'landing_page', 'theme', 'plugin_add', 'plugin_remove', 'redirect_skip', 'delete' ], true)) {
             return $error('invalid_request', __('Unknown change of the Live Preview.', 'peak-publisher'), 400);
         }
         if ($kind === 'landing_page' && !str_starts_with($value, '/')) {

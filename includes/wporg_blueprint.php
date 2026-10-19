@@ -550,6 +550,32 @@ function remove_blueprint_plugin(\stdClass $blueprint, string $slug): \stdClass 
 
 
 /**
+ * A plugin moved before the plugin's own step as it stands: every step installing it and the
+ * step dropping its activation redirect as Peak Publisher wrote it, in their order, taken out of
+ * their places and inserted before the plugin's own install step, the install steps activated —
+ * every other property of the steps kept. Offered for a required plugin the JSON installs only
+ * after the plugin itself, or without activating it (decide_blueprint_change() holds to that).
+ */
+function move_blueprint_plugin(\stdClass $blueprint, string $own_slug, string $slug): \stdClass {
+    $copy = clone_blueprint($blueprint);
+    $moving = [];
+    foreach (blueprint_step_kinds($copy) as $step) {
+        if (!in_array($step['kind'], [ 'plugin', 'redirect_skip' ], true) || $step['slug'] !== $slug) {
+            continue;
+        }
+        $raw = $copy->steps[$step['index']];
+        if ($step['kind'] === 'plugin') {
+            $raw->options = ($raw->options ?? null) instanceof \stdClass ? $raw->options : new \stdClass();
+            $raw->options->activate = true;
+        }
+        $moving[$step['index']] = $raw;
+    }
+    $copy->steps = array_values(array_filter($copy->steps, static fn($step, int $index): bool => !array_key_exists($index, $moving), ARRAY_FILTER_USE_BOTH));
+    return insert_blueprint_steps($copy, $own_slug, array_values($moving));
+}
+
+
+/**
  * A new Live Preview: the plugins screen (where wordpress.org's own generator lands), logged in
  * (playground.wordpress.net logs every blueprint from a URL in anyway), the dependencies, then
  * the plugin itself — written out, so the file says what happens. No preferredVersions,
@@ -683,13 +709,15 @@ function blueprint_fields_of(?string $contents, string $own_slug, array $require
  * A change of the Live Preview decided against the blueprint in effect ($effective, null: none)
  * — the one place every kind of change becomes an entry's contents: create (a new blueprint,
  * none in effect), contents (JSON as typed, on top of the md5 the editor showed as `expected`),
- * landing_page and theme (`value` written into the JSON through its field), dependencies (the
- * missing Requires Plugins added), plugin_add (the plugin `value` names installed before the
- * plugin itself, unless it is there already), plugin_remove (taken out, when the JSON alone adds
+ * landing_page and theme (`value` written into the JSON through its field), plugin_add (the
+ * plugin `value` names installed and active before the plugin itself: added when the JSON lacks
+ * it, moved there as it stands when the JSON installs it only after the plugin or without
+ * activating it, nothing when it is there already), plugin_remove (taken out, when the JSON alone adds
  * it — neither required nor the plugin itself), redirect_skip (the step dropping the activation
- * redirect of the plugin `value` names, when the fields read it as open), delete. Whatever a put would store passes
- * validate_blueprint_contents() first, however it was made. The caller validated the request's
- * values (the path's form, the theme's existence) and holds the lock.
+ * redirect of the plugin `value` names, when the fields read it as open), delete. Whatever a put
+ * would store passes validate_blueprint_contents() first, however it was made. The caller
+ * validated the request's kind and values (the path's form, the theme's and the plugin's
+ * existence) and holds the lock.
  *
  * @param string[] $required
  * @return array{action:string, contents?:string}|\WP_Error|null null: nothing to change
@@ -730,10 +758,11 @@ function decide_blueprint_change(string $kind, ?string $effective, array $params
             }
             $contents = encode_blueprint(set_blueprint_theme($blueprint, $own_slug, $value));
         } elseif ($kind === 'plugin_add') {
-            if ($value === $own_slug || in_array($value, array_column($fields['plugins'], 'slug'), true)) {
+            $present = in_array($value, array_column($fields['plugins'], 'slug'), true);
+            if ($value === $own_slug || ($present && !in_array($value, blueprint_missing_dependencies($effective, $own_slug, $required), true))) {
                 return null;
             }
-            $contents = encode_blueprint(add_blueprint_plugins($blueprint, $own_slug, [ $value ]));
+            $contents = encode_blueprint($present ? move_blueprint_plugin($blueprint, $own_slug, $value) : add_blueprint_plugins($blueprint, $own_slug, [ $value ]));
         } elseif ($kind === 'plugin_remove') {
             $added = array_filter($fields['plugins'], static fn(array $plugin): bool => $plugin['slug'] === $value && !$plugin['required'] && !$plugin['own']);
             if ($added === []) {
@@ -747,11 +776,7 @@ function decide_blueprint_change(string $kind, ?string $effective, array $params
             }
             $contents = encode_blueprint(add_blueprint_redirect_skip($blueprint, $value));
         } else {
-            $missing = blueprint_missing_dependencies($effective, $own_slug, $required);
-            if ($missing === []) {
-                return null;
-            }
-            $contents = encode_blueprint(add_blueprint_plugins($blueprint, $own_slug, $missing));
+            throw new \RuntimeException('Unknown blueprint change: ' . $kind);
         }
     }
     $valid = validate_blueprint_contents($contents);

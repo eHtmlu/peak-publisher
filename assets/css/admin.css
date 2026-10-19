@@ -4876,9 +4876,6 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     margin-top: 0.25rem;
     color: var(--color-orange);
 }
-.pblsh--live-preview__plugins-add {
-    margin: 0 0 0.5rem;
-}
 .pblsh--live-preview__more {
     margin-top: 1.25rem;
     color: #8c96a0;

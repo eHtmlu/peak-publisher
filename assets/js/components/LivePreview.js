@@ -73,7 +73,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const onEditorChange = (text) => Draft.edit(id, text, blueprint.hash);
 
         // The field changes in flight: which field, its state on the label line, its error beneath.
-        const [fieldBusy, setFieldBusy] = useState(null);     // 'landing_page' | 'theme' | 'dependencies' | 'create' | 'delete'
+        const [fieldBusy, setFieldBusy] = useState(null);     // the field or action under way: 'create' | 'delete' | 'landing_page' | 'plugins' | 'redirect_skip' | 'theme'
         const [fieldState, setFieldState] = useState({});     // field → 'saving' | 'asking' | 'saved'
         const [fieldError, setFieldError] = useState({});     // field → message
         const [otherPath, setOtherPath] = useState(null);     // the "Other page" path while typed
@@ -369,8 +369,9 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // of it; the plugin itself keeps its fact (the test button says when its page is not
         // there yet). A plugin with a known activation redirect says whether a step drops it —
         // open, it keeps an admin landing page from showing: the warning with the step's link,
-        // only while the landing page is one. A plugin the JSON adds alone can be taken out. The
-        // table's foot adds one, in steps: the link, the one question — a plugin the plugin needs
+        // only while the landing page is one. A required plugin the JSON lacks is added from its row,
+        // one it installs only after the plugin moved before it, a plugin the JSON adds alone taken
+        // out. The table's foot adds one, in steps: the link, the one question — a plugin the plugin needs
         // belongs in the Requires Plugins header, the guidance says so —, and only after "no" the
         // field for the slug or address; the plugin is added before the plugin itself.
         const renderPlugins = () => {
@@ -388,16 +389,25 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 if (slug === '') return;
                 change('plugins', { change: 'plugin_add', value: slug }).then((ok) => { if (ok) closeAdd(); });
             };
-            const row = (key, name, fact, stops, own, redirect = null, removable = false) => {
+            // One row: the identity, the fact beside it, and the step out of a stop where there is one
+            // — Add (a required plugin the JSON lacks), Move before your plugin (one it installs only
+            // after the plugin, or without activating it), Remove (one the JSON adds alone). Playground
+            // installs nothing the directory lacks: such a plugin is only ever taken out.
+            const row = (key, name, fact, { stops = false, own = false, redirect = null, fix = null }) => {
                 const listing = listings[name] || null;
                 const absent = !own && listing !== null && listing.state !== 'ok';
+                const step = {
+                    add: absent ? null : [ T.getAddPluginLabel(), 'plugin_add' ],
+                    move: absent ? null : [ T.getMoveBeforeLabel(), 'plugin_add' ],
+                    remove: [ T.getRemovePluginLabel(), 'plugin_remove' ],
+                }[fix] || null;
                 return createElement('tr', { key },
                     createElement('td', null, createElement(PluginIdentity, { image: listing ? listing.icon : null, name: listing ? listing.name || '' : '', slug: name, href: listing && listing.state === 'ok' ? getWporgPluginUrl(name) : null })),
                     createElement('td', { className: 'pblsh--live-preview__row-fact' + (stops || absent ? ' pblsh--live-preview__row-fact--missing' : '') },
                         absent ? T.getNotOnWporgText() : fact,
                         !absent && redirect === 'skipped' && createElement(Fragment, null, ' · ', T.getRedirectSkippedNote()),
-                        removable && !showingWporgState && createElement(Fragment, null, ' · ',
-                            createElement(Button, { isLink: true, disabled: locked, onClick: () => change('plugins', { change: 'plugin_remove', value: name }) }, T.getRemovePluginLabel())),
+                        step && !showingWporgState && createElement(Fragment, null, ' · ',
+                            createElement(Button, { isLink: true, disabled: locked, onClick: () => change('plugins', { change: step[1], value: name }) }, step[0])),
                         !absent && redirect === 'open' && adminLanding && createElement('div', { className: 'pblsh--live-preview__row-fact-warning' },
                             T.getRedirectOpenNote(), ' ',
                             createElement(Button, { isLink: true, isBusy: fieldBusy === 'redirect_skip', disabled: locked, onClick: () => change('redirect_skip', { change: 'redirect_skip', value: name }) }, T.getSkipRedirectLabel()),
@@ -411,8 +421,9 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                     createElement('table', { className: 'pblsh--framed-table pblsh--live-preview__plugins-table' },
                         createElement('tbody', null,
                             ...entries.flatMap((plugin, i) => [
-                                ...(plugin.own ? absent.map((name) => row('missing-' + name, name, T.getNotInstalledNote(required), true, false)) : []),
-                                row(plugin.slug + i, plugin.slug, fact(plugin, i), !plugin.own && missing.includes(plugin.slug), plugin.own, plugin.redirect, !plugin.own && !plugin.required),
+                                ...(plugin.own ? absent.map((name) => row('missing-' + name, name, T.getNotInstalledNote(required), { stops: true, fix: 'add' })) : []),
+                                row(plugin.slug + i, plugin.slug, fact(plugin, i), { stops: !plugin.own && missing.includes(plugin.slug), own: plugin.own, redirect: plugin.redirect,
+                                    fix: plugin.own ? null : missing.includes(plugin.slug) ? 'move' : !plugin.required ? 'remove' : null }),
                             ]),
                         ),
                         !showingWporgState && createElement('tfoot', null,
@@ -459,8 +470,6 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                         ),
                     ),
                 ),
-                missing.length > 0 && required && createElement('div', { className: 'pblsh--live-preview__plugins-add' },
-                    createElement(Button, { isLink: true, isBusy: fieldBusy === 'dependencies', disabled: locked, onClick: () => change('dependencies', { change: 'dependencies' }) }, T.getAddMissingLabel(missing))),
             );
         };
         // What the preview installs first — the theme, the plugins —, then where visitors start.

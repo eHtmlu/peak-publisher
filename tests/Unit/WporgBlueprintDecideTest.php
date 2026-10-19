@@ -6,6 +6,7 @@ namespace Pblsh\Tests\Unit;
 
 use function Pblsh\blueprint_dependency_carry;
 use function Pblsh\blueprint_fields_of;
+use function Pblsh\blueprint_redirect_skip_step;
 use function Pblsh\decide_blueprint_change;
 use function Pblsh\encode_blueprint;
 use function Pblsh\new_blueprint;
@@ -53,13 +54,6 @@ final class WporgBlueprintDecideTest extends TestCase {
         self::assertSame([ 'action' => 'delete' ], decide_blueprint_change('delete', '{}', [], 'my-plugin', []));
     }
 
-    public function test_dependencies_are_added_only_when_missing(): void {
-        self::assertNull(decide_blueprint_change('dependencies', '{"steps":[]}', [], 'my-plugin', []));
-        $added = decide_blueprint_change('dependencies', '{"steps":[]}', [], 'my-plugin', [ 'woocommerce' ]);
-        self::assertSame('put', $added['action']);
-        self::assertStringContainsString('"woocommerce"', $added['contents']);
-    }
-
     public function test_a_plugin_is_added_before_the_plugin_itself_and_taken_out_only_where_the_json_alone_adds_it(): void {
         $own = '{"step":"installPlugin","pluginData":{"resource":"wordpress.org/plugins","slug":"my-plugin"},"options":{"activate":true}}';
         $added = decide_blueprint_change('plugin_add', '{"steps":[' . $own . ']}', [ 'value' => 'akismet' ], 'my-plugin', []);
@@ -73,6 +67,30 @@ final class WporgBlueprintDecideTest extends TestCase {
         self::assertStringNotContainsString('akismet', $removed['contents']);
         self::assertNull(decide_blueprint_change('plugin_remove', $added['contents'], [ 'value' => 'akismet' ], 'my-plugin', [ 'akismet' ]), 'a required plugin is not taken out');
         self::assertNull(decide_blueprint_change('plugin_remove', $added['contents'], [ 'value' => 'my-plugin' ], 'my-plugin', []), 'nor the plugin itself');
+    }
+
+    public function test_a_required_plugin_is_moved_before_the_plugin_itself_as_it_stands_where_the_json_installs_it_only_after_or_inactive(): void {
+        $own = '{"step":"installPlugin","pluginData":{"resource":"wordpress.org/plugins","slug":"my-plugin"},"options":{"activate":true}}';
+        $akismet = '{"step":"installPlugin","pluginData":{"resource":"wordpress.org/plugins","slug":"akismet"},"options":{"activate":false,"targetFolderName":"akismet-dev"},"progress":{"weight":2}}';
+        $steps = static fn(array $result): array => json_decode($result['contents'], true)['steps'];
+
+        $added = decide_blueprint_change('plugin_add', '{"steps":[' . $own . ']}', [ 'value' => 'akismet' ], 'my-plugin', [ 'akismet' ]);
+        self::assertSame([ 'akismet', 'my-plugin' ], array_column(array_column($steps($added), 'pluginData'), 'slug'), 'the one the JSON lacks is added before the plugin');
+        self::assertNull(decide_blueprint_change('plugin_add', $added['contents'], [ 'value' => 'akismet' ], 'my-plugin', [ 'akismet' ]), 'active before the plugin already');
+
+        $moved = decide_blueprint_change('plugin_add', '{"steps":[' . $own . ',' . $akismet . ']}', [ 'value' => 'akismet' ], 'my-plugin', [ 'akismet' ]);
+        self::assertSame([ 'akismet', 'my-plugin' ], array_column(array_column($steps($moved), 'pluginData'), 'slug'), 'moved before the plugin, never installed twice');
+        self::assertSame([ 'activate' => true, 'targetFolderName' => 'akismet-dev' ], $steps($moved)[0]['options'], 'activated, the rest of its options kept');
+        self::assertSame([ 'weight' => 2 ], $steps($moved)[0]['progress'], 'and whatever else the step carries');
+
+        $woo = '{"step":"installPlugin","pluginData":{"resource":"wordpress.org/plugins","slug":"woocommerce"}}';
+        $skip = json_encode(blueprint_redirect_skip_step('woocommerce'));
+        $setup = '{"step":"runPHP","code":"<?php echo 1;"}';
+        $with_skip = decide_blueprint_change('plugin_add', '{"steps":[' . $own . ',' . $setup . ',' . $woo . ',' . $skip . ']}', [ 'value' => 'woocommerce' ], 'my-plugin', [ 'woocommerce' ]);
+        self::assertSame([ 'woocommerce', 'runPHP', 'my-plugin', 'runPHP' ], array_map(static fn(array $step): string => $step['pluginData']['slug'] ?? $step['step'], $steps($with_skip)), 'its redirect skip travels along, the other steps stay');
+        self::assertStringContainsString('_wc_activation_redirect', $steps($with_skip)[1]['code']);
+
+        self::assertNull(decide_blueprint_change('plugin_add', '{"steps":[' . $own . ',' . $akismet . ']}', [ 'value' => 'akismet' ], 'my-plugin', []), 'not required: there already, wherever it is');
     }
 
     public function test_the_redirect_skip_is_added_only_where_the_fields_read_it_as_open(): void {

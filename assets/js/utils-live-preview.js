@@ -96,7 +96,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getAddPluginPlaceholder = () => __('Plugin slug or wordpress.org URL…', 'peak-publisher');
     const getAddPluginLabel = () => __('Add', 'peak-publisher');
     const getRemovePluginLabel = () => __('Remove', 'peak-publisher');
-    const getAddMissingLabel = (missing) => missing.length === 1 ? sprintf(__('Add %s', 'peak-publisher'), missing[0]) : __('Add them', 'peak-publisher');
+    const getMoveBeforeLabel = () => __('Move before your plugin', 'peak-publisher');
     // What no field shows, by name: "2 runPHP, siteOptions".
     const getMoreText = (more) => sprintf(__('Also in the JSON: %s', 'peak-publisher'), more.map((item) => item.count > 1 ? item.count + ' ' + item.name : item.name).join(', '));
     // A field's state on its label line, gone again two seconds after a save.
@@ -185,8 +185,8 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
         getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getDefaultThemeNote, getThemePlaceholder, getThemeHint, getSetInJsonText, getSetInJsonNote, getChangeThemeLink, getChangeLabel,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotActiveBeforeNote, getNotOnWporgText, getRedirectSkippedNote, getRedirectOpenNote, getSkipRedirectLabel,
-        getAddPluginLink, getNeedQuestion, getNeedYes, getNeedNo, getNeedGuidanceTitle, getNeedGuidance, getRequiresPluginsHeaderUrl, getOkLabel, getCancelLabel, getAddPluginPlaceholder, getAddPluginLabel, getRemovePluginLabel,
-        getAddMissingLabel, getMoreText, getFieldStateText,
+        getAddPluginLink, getNeedQuestion, getNeedYes, getNeedNo, getNeedGuidanceTitle, getNeedGuidance, getRequiresPluginsHeaderUrl, getOkLabel, getCancelLabel, getAddPluginPlaceholder, getAddPluginLabel, getRemovePluginLabel, getMoveBeforeLabel,
+        getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,
         getTestLabel, getTestTooltip, getSetUpLabel, getRemoveLabel, getIntroText, getGuideUrl, getGuideLabel, getDeleteConfirmText, getStartOverConfirmText, getDiscardConfirmText, getUnsavedWorkingCopyText,
         getBlueprintPath, getOtherFilesText, getBlueprintsFolderLabel,

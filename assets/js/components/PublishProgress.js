@@ -1,11 +1,13 @@
 // PublishProgress Component - how far a publish got, as the steps of its channel: done,
 // running, still to come — in the upload result's body while the publish runs, in the
 // checklist's rhythm (a done step has the check of a passed one). Only the step whose amount
-// of work is known gets a bar — the operations of the commit; the others are named, so a wait
-// without a measure (wordpress.org saving the commit) is announced before it starts. The
-// phases are the server's finalize status (PBLSH_FINALIZE_STATUS_FILE): wporg prepare | read |
-// send | save, self-hosted prepare | build — after its ZIP, a self-hosted publish is over in
-// milliseconds, too short for a step anyone would see run.
+// of work is known gets a bar — the operations of the commit, said as a percentage: a count
+// would read as files, and one changed file is two operations when trunk follows the tag.
+// The others are named, so a wait without a measure (wordpress.org saving the commit) is
+// announced before it starts. The phases are the server's finalize status
+// (PBLSH_FINALIZE_STATUS_FILE): wporg prepare | read | send | save, self-hosted prepare |
+// build — after its ZIP, a self-hosted publish is over in milliseconds, too short for a step
+// anyone would see run.
 const PublishProgress = ({ channel, phase = 'prepare', done = 0, total = 0 } = {}) => {
     const { createElement } = wp.element;
     const { __, _n, sprintf } = wp.i18n;
@@ -25,7 +27,8 @@ const PublishProgress = ({ channel, phase = 'prepare', done = 0, total = 0 } = {
             label: __('Sending the changes', 'peak-publisher'),
             detail: true,
             bar: total > 0,
-            count: total > 0 ? sprintf(__('%1$d of %2$d', 'peak-publisher'), done, total) : null,
+            // Rounded down: 100 stands only when everything is sent.
+            count: total > 0 ? sprintf(/* translators: %d: how much of the commit is sent, in percent */ __('%d%%', 'peak-publisher'), Math.floor(100 * Math.min(done, total) / total)) : null,
         },
         { phases: ['save'], label: __('Saving on wordpress.org', 'peak-publisher') },
     ] : [

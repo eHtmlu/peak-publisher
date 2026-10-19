@@ -71,6 +71,7 @@ lodash.set(window, 'Pblsh.Utils', {
 
     // The plugin's public page in the wordpress.org directory.
     getWporgPluginUrl: (slug) => 'https://wordpress.org/plugins/' + encodeURIComponent(slug) + '/',
+    getWporgThemeUrl: (slug) => 'https://wordpress.org/themes/' + encodeURIComponent(slug) + '/',
     // The WordPress stable branch (x.y) a Tested up to is judged against — a site fact from
     // core's own version check (AdminUI, wordpress_stable_branch()); never empty, the running
     // version is its floor. The upload checklist judges against the branch its facts recorded.

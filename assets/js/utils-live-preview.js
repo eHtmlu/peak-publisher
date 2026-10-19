@@ -49,8 +49,11 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     // The one piece of advice at the field: the preview is only as convincing as its first page.
     const getLandingHint = () => __('Where visitors start — best a page that shows your plugin at work.', 'peak-publisher');
     const getLandingError = () => __('The landing page is a path on the site and starts with /, for example /wp-admin/admin.php?page=my-plugin.', 'peak-publisher');
+    // The theme row's fact and the slug field's placeholder say the same: what Playground starts with.
     const getThemePlaceholder = () => __("Playground's default theme", 'peak-publisher');
     const getSetInJsonText = () => __('Set in the JSON.', 'peak-publisher');
+    const getSetInJsonNote = () => __('set in the JSON', 'peak-publisher');
+    const getChangeLabel = () => __('Change', 'peak-publisher');
 
     // The plugins the preview installs: from the current release's Requires Plugins header — the
     // place where a plugin's needs belong —, others only through the JSON.
@@ -163,7 +166,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     return {
         getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
-        getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getThemePlaceholder, getSetInJsonText,
+        getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getThemePlaceholder, getSetInJsonText, getSetInJsonNote, getChangeLabel,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotActiveBeforeNote, getNotOnWporgText, getRedirectSkippedNote, getRedirectOpenNote, getSkipRedirectLabel,
         getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,

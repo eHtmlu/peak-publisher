@@ -567,7 +567,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
     const renderRowIdentity = (row) => {
         const hint = row.directory_hint && typeof row.directory_hint === 'object' ? row.directory_hint : null;
         const hasDirectoryPage = row.source === 'discover' || (hint && ['published', 'closed', 'unknown'].includes(hint.state));
-        return createElement(PluginIdentity, { icon: row.icon || (hint && hint.icon) || null, name: row.name, slug: row.slug, href: hasDirectoryPage ? getWporgPluginUrl(row.slug) : null });
+        return createElement(PluginIdentity, { image: row.icon || (hint && hint.icon) || null, name: row.name, slug: row.slug, href: hasDirectoryPage ? getWporgPluginUrl(row.slug) : null });
     };
 
     // The list's states (loading, discover failed, nothing found) render as one

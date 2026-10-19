@@ -392,6 +392,40 @@ function add_blueprint_redirect_skip(\stdClass $blueprint, string $slug): \stdCl
     return $copy;
 }
 
+/** The default theme of the stable branch — a cache, regenerable (docs/data-schema.md): { branch, slug, checked_at }. */
+const PBLSH_WP_DEFAULT_THEME_OPTION = 'pblsh_wp_default_theme';
+
+/**
+ * The theme a Live Preview starts with when the blueprint sets none: the default theme of the
+ * WordPress Playground boots, its latest — WP_DEFAULT_THEME of the stable branch
+ * (wordpress_stable_branch(), core's own version check), read from core's default-constants.php
+ * on core.svn.wordpress.org once per branch and kept until the branch moves; a branch never
+ * changes it. Null while the branch is unknown or the read fails — the row names no theme then,
+ * and the next look asks again.
+ */
+function wp_default_theme(): ?string {
+    $branch = wordpress_stable_branch();
+    if ($branch === '') {
+        return null;
+    }
+    // Re-validation when reading back from persistence: the branch's own answer, or none.
+    $stored = get_option(PBLSH_WP_DEFAULT_THEME_OPTION, []);
+    if (is_array($stored) && ($stored['branch'] ?? null) === $branch && is_string($stored['slug'] ?? null) && is_wordpress_org_slug($stored['slug'])) {
+        return $stored['slug'];
+    }
+    $response = wp_remote_get('https://core.svn.wordpress.org/branches/' . rawurlencode($branch) . '/wp-includes/default-constants.php', [
+        'timeout' => 10,
+        'redirection' => 3,
+        'user-agent' => wporg_user_agent(),
+    ]);
+    if (is_wp_error($response) || (int) wp_remote_retrieve_response_code($response) !== 200
+        || preg_match("/define\(\s*'WP_DEFAULT_THEME',\s*'([a-z0-9-]+)'\s*\)/", (string) wp_remote_retrieve_body($response), $m) !== 1) {
+        return null;
+    }
+    update_option(PBLSH_WP_DEFAULT_THEME_OPTION, [ 'branch' => $branch, 'slug' => $m[1], 'checked_at' => time() ], false);
+    return $m[1];
+}
+
 /** An install step of a wordpress.org plugin or theme, activated — the one shape Peak Publisher writes. */
 function blueprint_install_step(string $type, string $slug): \stdClass {
     return $type === 'theme'

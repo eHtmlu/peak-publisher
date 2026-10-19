@@ -70,7 +70,7 @@ class AssetManager {
      * builds on, the fields (null when there is none to write safely — blueprint_fields_of()), the warnings, what the current
      * release requires and which of it is not installed before the plugin, the directory's
      * listings of the plugins named (wporg_plugin_listings(); the plugin's own from its marker
-     * and the directory check), the test link (the
+     * and the directory check), the theme the preview starts with (theme_view()), the test link (the
      * blueprint as the plugin page will serve it) or why there is none, wordpress.org's file —
      * why it ignores it, its fields and what it lacks; whether its import has read it is the
      * slot's fact (wporg_view()) —, the counts of assets/blueprints/, and the last check of the
@@ -105,6 +105,7 @@ class AssetManager {
             'contents' => $contents,
             'hash' => md5($contents ?? ''),
             'fields' => $fields,
+            'theme' => $this->theme_view($fields),
             'warnings' => blueprint_warnings($contents, $state['blueprints']['blueprint_files']),
             'required' => $requirements,
             'missing' => $missing,
@@ -117,6 +118,7 @@ class AssetManager {
                 'ignored' => blueprint_ignored_reason($file),
                 'problem' => $this->blueprint_problem($file),
                 'fields' => $file_fields,
+                'theme' => $this->theme_view($file_fields),
                 'missing' => $file_missing,
             ],
             'blueprint_files' => $state['blueprints']['blueprint_files'],
@@ -169,6 +171,23 @@ class AssetManager {
         $required = live_preview_requirements($plugin)['slugs'] ?? [];
         $result = $this->wporg()->change_blueprint($plugin, static fn(array $state): array|\WP_Error|null => decide_blueprint_change($kind, effective_blueprint_contents($state), [ ...$params, 'value' => $value ], $own, $required));
         return is_wp_error($result) ? $result : [ 'assets' => $this->describe($plugin) ];
+    }
+
+    /**
+     * The theme the preview starts with, for its row: the blueprint's wordpress.org theme, or
+     * Playground's default (wp_default_theme()) when the fields set none — with the directory's
+     * listing (wporg_theme_listings()). Null without readable fields; the slug null for a theme
+     * from elsewhere, or while the default is unknown.
+     *
+     * @return array{slug:?string, default:bool, listing:?array}|null
+     */
+    private function theme_view(?array $fields): ?array {
+        if ($fields === null) {
+            return null;
+        }
+        $default = $fields['theme']['slug'] === null && $fields['theme']['editable'];
+        $slug = $default ? wp_default_theme() : $fields['theme']['slug'];
+        return [ 'slug' => $slug, 'default' => $default, 'listing' => $slug === null ? null : (wporg_theme_listings([ $slug ])[$slug] ?? null) ];
     }
 
     /** The screenshots as views, by number. */

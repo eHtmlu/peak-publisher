@@ -30,7 +30,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const { createElement, createInterpolateElement, Fragment, useState, useEffect, useRef } = wp.element;
         const { useSelect } = wp.data;
         const { Button, DropdownMenu, MenuItem, SelectControl, TextControl, ToggleControl, Tooltip } = wp.components;
-        const { getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
+        const { getSvgIcon, getWporgPluginUrl, getWporgThemeUrl } = Pblsh.Utils;
         const { getShownText } = Pblsh.AssetsUtils;
         const T = Pblsh.LivePreviewUtils;
         const { NoticeBox, BlueprintEditor, RelativeTime, TipLink, WporgRevisionLink, AssetStatusBand, PluginIdentity } = Pblsh.Components;
@@ -47,7 +47,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // wordpress.org's state alone (the bar's switch): the mirror's file and fields, read-only;
         // else the working copy applied.
         const view = showingWporgState
-            ? { contents: onWporg ? onWporg.contents : null, hash: null, fields: onWporg ? onWporg.fields : null, missing: onWporg ? onWporg.missing : [], warnings: [], test: { url: null, blocked: null } }
+            ? { contents: onWporg ? onWporg.contents : null, hash: null, fields: onWporg ? onWporg.fields : null, theme: onWporg ? onWporg.theme : null, missing: onWporg ? onWporg.missing : [], listings: blueprint.listings, warnings: [], test: { url: null, blocked: null } }
             : blueprint;
         const hasBlueprint = view.contents !== null;
         const pending = !showingWporgState && slot ? slot.pending : null;
@@ -79,15 +79,16 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const [otherPath, setOtherPath] = useState(null);     // the "Other page" path while typed
         const [themeInput, setThemeInput] = useState(null);   // the theme slug while typed
         const savedTimer = useRef(null);
-        // The path field, focused with its text selected once the user chose "Other page…": the
-        // field appears with that choice, so the focus follows the render that mounts it.
-        const pathInput = useRef(null);
-        const focusPathInput = useRef(false);
+        // A field that appears on a choice — the path on "Other page…", the theme's slug on Change
+        // — takes the focus with its text selected: the focus follows the render that mounts it.
+        const fieldInputs = useRef({});
+        const focusField = useRef(null);
         useEffect(() => {
-            if (focusPathInput.current && pathInput.current) {
-                focusPathInput.current = false;
-                pathInput.current.focus();
-                pathInput.current.select();
+            const input = focusField.current ? fieldInputs.current[focusField.current] : null;
+            if (input) {
+                focusField.current = null;
+                input.focus();
+                input.select();
             }
         });
         // A field being edited or saved, told to the store: the commit waits for it like for the
@@ -262,13 +263,13 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                             options: T.getLandingOptions(),
                             disabled: locked,
                             onChange: (key) => {
-                                if (key === 'other') { focusPathInput.current = true; setOtherPath(field.value || ''); return; }
+                                if (key === 'other') { focusField.current = 'path'; setOtherPath(field.value || ''); return; }
                                 setOtherPath(null);
                                 if (T.getLandingPath(key) !== field.value) change('landing_page', { change: 'landing_page', value: T.getLandingPath(key) });
                             },
                         }),
                         choice === 'other' && createElement(TextControl, {
-                            ref: pathInput,
+                            ref: (el) => { fieldInputs.current.path = el; },
                             __nextHasNoMarginBottom: true,
                             label: __('Path', 'peak-publisher'),
                             hideLabelFromVision: true,
@@ -287,33 +288,57 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 fieldError.landing_page && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.landing_page),
             );
         };
+        // The theme as a row — screenshot, name and slug as the directory lists it (view.theme: the
+        // blueprint's wordpress.org theme, or Playground's default when it sets none), linked to
+        // its page where there is one —, the fact beside it: the default, set in the JSON, red
+        // when the directory lacks it; nothing to name for a theme from elsewhere or an unknown
+        // default. Change opens the slug field beneath, focused with the slug selected; Enter or
+        // leaving saves, Escape closes, an empty slug returns to the default.
         const renderTheme = () => {
             const field = view.fields.theme;
-            const value = themeInput !== null ? themeInput : (field.slug || '');
+            const theme = view.theme;
+            const listing = theme && theme.listing ? theme.listing : null;
+            const absent = listing !== null && listing.state !== 'ok';
+            const editing = themeInput !== null;
             const commitTheme = () => {
                 if (themeInput === null) return;
                 const next = themeInput.trim();
                 if (next === (field.slug || '')) { setThemeInput(null); return; }
                 change('theme', { change: 'theme', value: next }).then((ok) => { if (ok) setThemeInput(null); });
             };
+            const facts = [ absent ? T.getNotOnWporgText() : null, theme && theme.default ? T.getThemePlaceholder() : null, !field.editable ? T.getSetInJsonNote() : null ].filter(Boolean);
+            const fact = createElement('td', { className: 'pblsh--live-preview__row-fact' + (absent ? ' pblsh--live-preview__row-fact--missing' : ''), colSpan: theme && theme.slug ? 1 : 2 },
+                facts.join(' · '),
+                field.editable && !editing && createElement(Fragment, null, facts.length > 0 ? ' · ' : '',
+                    createElement(Button, { isLink: true, disabled: locked, onClick: () => { focusField.current = 'theme'; setThemeInput(field.slug || ''); } }, T.getChangeLabel())),
+            );
             return createElement('div', { className: 'pblsh--live-preview__field' },
                 renderFieldLabel('theme', __('Theme', 'peak-publisher')),
-                !field.editable
-                    ? createElement('div', { className: 'pblsh--live-preview__muted' }, (field.slug ? field.slug + ' · ' : '') + T.getSetInJsonText())
-                    : createElement(TextControl, {
-                        __nextHasNoMarginBottom: true,
-                        label: __('Theme', 'peak-publisher'),
-                        hideLabelFromVision: true,
-                        placeholder: T.getThemePlaceholder(),
-                        value,
-                        disabled: locked && fieldBusy !== 'theme',
-                        onChange: (next) => { setThemeInput(next); setFieldError({}); },
-                        onBlur: commitTheme,
-                        onKeyDown: (e) => {
-                            if (e.key === 'Enter') commitTheme();
-                            if (e.key === 'Escape') { setThemeInput(null); setFieldError({}); }
-                        },
-                    }),
+                createElement('div', { className: 'pblsh--framed-table-wrap pblsh--live-preview__theme' },
+                    createElement('table', { className: 'pblsh--framed-table pblsh--live-preview__theme-table' },
+                        createElement('tbody', null,
+                            createElement('tr', null,
+                                theme && theme.slug && createElement('td', null, createElement(PluginIdentity, { kind: 'theme', image: listing ? listing.screenshot : null, name: listing ? listing.name || '' : '', slug: theme.slug, href: listing && listing.state === 'ok' ? getWporgThemeUrl(theme.slug) : null })),
+                                fact,
+                            ),
+                        ),
+                    ),
+                ),
+                editing && createElement(TextControl, {
+                    ref: (el) => { fieldInputs.current.theme = el; },
+                    __nextHasNoMarginBottom: true,
+                    label: __('Theme', 'peak-publisher'),
+                    hideLabelFromVision: true,
+                    placeholder: T.getThemePlaceholder(),
+                    value: themeInput,
+                    disabled: locked && fieldBusy !== 'theme',
+                    onChange: (next) => { setThemeInput(next); setFieldError({}); },
+                    onBlur: commitTheme,
+                    onKeyDown: (e) => {
+                        if (e.key === 'Enter') commitTheme();
+                        if (e.key === 'Escape') { setThemeInput(null); setFieldError({}); }
+                    },
+                }),
                 fieldError.theme && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.theme),
             );
         };
@@ -340,11 +365,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 const listing = listings[name] || null;
                 const absent = !own && listing !== null && listing.state !== 'ok';
                 return createElement('tr', { key },
-                    createElement('td', null, createElement(PluginIdentity, { icon: listing ? listing.icon : null, name: listing ? listing.name || '' : '', slug: name, href: listing && listing.state === 'ok' ? getWporgPluginUrl(name) : null })),
-                    createElement('td', { className: 'pblsh--live-preview__plugin-fact' + (stops || absent ? ' pblsh--live-preview__plugin-fact--missing' : '') },
+                    createElement('td', null, createElement(PluginIdentity, { image: listing ? listing.icon : null, name: listing ? listing.name || '' : '', slug: name, href: listing && listing.state === 'ok' ? getWporgPluginUrl(name) : null })),
+                    createElement('td', { className: 'pblsh--live-preview__row-fact' + (stops || absent ? ' pblsh--live-preview__row-fact--missing' : '') },
                         absent ? T.getNotOnWporgText() : fact,
                         !absent && redirect === 'skipped' && createElement(Fragment, null, ' · ', T.getRedirectSkippedNote()),
-                        !absent && redirect === 'open' && adminLanding && createElement('div', { className: 'pblsh--live-preview__plugin-fact-warning' },
+                        !absent && redirect === 'open' && adminLanding && createElement('div', { className: 'pblsh--live-preview__row-fact-warning' },
                             T.getRedirectOpenNote(), ' ',
                             createElement(Button, { isLink: true, isBusy: fieldBusy === 'redirect_skip', disabled: locked, onClick: () => change('redirect_skip', { change: 'redirect_skip', value: name }) }, T.getSkipRedirectLabel()),
                         ),

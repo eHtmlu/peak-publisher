@@ -291,26 +291,41 @@ function wporg_profile_avatar_url(string $username): ?string {
 }
 
 
-/** The themes API: whether a theme exists, for the Live Preview's theme field. */
+/** The themes API: what wordpress.org lists for a theme, for the Live Preview's theme field and row. */
 const PBLSH_WPORG_THEMES_API_URL = 'https://api.wordpress.org/themes/info/1.2/';
 
 /**
- * Whether wordpress.org has a theme by this slug — the Live Preview's theme field asks before
- * it writes a slug Playground could not install. A user action, one request.
+ * What wordpress.org lists for a theme by this slug: the state — ok, or not_found, the API's 404
+ * —, the name and the screenshot, its URL made absolute. The Live Preview's theme field asks
+ * before it writes a slug Playground could not install, its row shows the theme. One request
+ * per theme: the themes API knows no slugs form.
  *
+ * @return array{state:string, name:?string, screenshot:?string}
  * @throws WporgSvnException wporg_api_unavailable when the API gives no determinate answer.
  */
-function wporg_theme_exists(string $slug): bool {
-    $response = wp_remote_get(add_query_arg([ 'action' => 'theme_information', 'request' => [ 'slug' => $slug ] ], PBLSH_WPORG_THEMES_API_URL), [
+function wporg_theme_information(string $slug): array {
+    $response = wp_remote_get(add_query_arg([ 'action' => 'theme_information', 'request' => [ 'slug' => $slug, 'fields' => [ 'screenshot_url' => 1, 'description' => 0, 'sections' => 0 ] ] ], PBLSH_WPORG_THEMES_API_URL), [
         'timeout' => 10,
         'redirection' => 3,
         'user-agent' => wporg_user_agent(),
     ]);
-    $state = is_wp_error($response) ? null : wporg_theme_state_from_response((int) wp_remote_retrieve_response_code($response), (string) wp_remote_retrieve_body($response));
+    $body = is_wp_error($response) ? '' : (string) wp_remote_retrieve_body($response);
+    $state = is_wp_error($response) ? null : wporg_theme_state_from_response((int) wp_remote_retrieve_response_code($response), $body);
     if ($state === null) {
         throw wporg_api_unavailable();
     }
-    return $state === 'ok';
+    $data = $state === 'ok' ? (array) json_decode($body, true) : [];
+    $screenshot = is_string($data['screenshot_url'] ?? null) && $data['screenshot_url'] !== '' ? $data['screenshot_url'] : null;
+    return [
+        'state' => $state,
+        'name' => wporg_api_clean_text($data['name'] ?? ''),
+        'screenshot' => $screenshot !== null && str_starts_with($screenshot, '//') ? 'https:' . $screenshot : $screenshot,
+    ];
+}
+
+/** Whether wordpress.org has a theme by this slug (wporg_theme_information()). */
+function wporg_theme_exists(string $slug): bool {
+    return wporg_theme_information($slug)['state'] === 'ok';
 }
 
 /** The themes API's answer: 200 with the theme's slug → ok, 404 (`{"error":"Theme not found"}`) → not_found, anything else null. */

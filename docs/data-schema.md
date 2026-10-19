@@ -71,9 +71,12 @@ code in this repository creates today:
   never / not since), `_pblsh_avatar_url` (the resolved Gravatar URL, `''` = unresolved).
 - **Options:** `pblsh_settings` (settings), `pblsh_secret_salt`, `pblsh_encryption_context_id`,
   `pblsh_schema_version` (autoloaded), `pblsh_upgrade_notice` (facts of the migration until
-  dismissed), `pblsh_wporg_plugin_listings` (the directory listings of the other plugins the
-  Live Preview names — `{slug: {name, icon, state, checked_at}}`, a cache, regenerable;
-  `includes/wporg_directory.php`), `pblsh_schema_migration_lock` (only while the migration runs),
+  dismissed), `pblsh_wporg_plugin_listings` and `pblsh_wporg_theme_listings` (the directory
+  listings of the other plugins and of the themes the Live Preview names — `{slug: {name, icon
+  | screenshot, state, checked_at}}`, caches, regenerable; `includes/wporg_directory.php`),
+  `pblsh_wp_default_theme` (the default theme of the stable WordPress branch, `{branch, slug,
+  checked_at}`, a cache, regenerable; `includes/wporg_blueprint.php`),
+  `pblsh_schema_migration_lock` (only while the migration runs),
   `pblsh_wporg_deploy_lock_{slug}` (only while an operation holds the plugin's write lock:
   `{key, blog_id, lock_blog_id, acquired_at, alive_at, username, operation, wporg_slug,
   plugin_id}`; a commit renews `alive_at`, a lock without it moving for 5 min is taken over;

@@ -237,7 +237,7 @@ lodash.set(window, 'Pblsh.Tips', {
         const { __ } = wp.i18n;
         const { createElement, createInterpolateElement } = wp.element;
         const { getWporgPluginUrl } = Pblsh.Utils;
-        const { getGuideUrl } = Pblsh.LivePreviewUtils;
+        const { getDocumentationUrl, getGuideUrl } = Pblsh.LivePreviewUtils;
 
         return {
             title: __('How the Live Preview works', 'peak-publisher'),
@@ -259,7 +259,7 @@ lodash.set(window, 'Pblsh.Tips', {
                     __('For more, see wordpress.org\'s <guide>guide to plugin previews</guide> and the <documentation>blueprint documentation</documentation>, which covers everything a Playground blueprint can do.', 'peak-publisher'),
                     {
                         guide: createElement('a', { href: getGuideUrl(), target: '_blank', rel: 'noreferrer' }),
-                        documentation: createElement('a', { href: 'https://developer.wordpress.org/playground/blueprints/', target: '_blank', rel: 'noreferrer' }),
+                        documentation: createElement('a', { href: getDocumentationUrl(), target: '_blank', rel: 'noreferrer' }),
                     },
                 )),
             ],

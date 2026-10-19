@@ -549,23 +549,27 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             : draft !== null || !hasBlueprint ? 'pending'
             : pending === 'put' ? 'working'
             : onWporg ? 'mirror' : 'working';
-        const saveDetail = saveLine ? saveLine.detail : (onWporg ? onWporg.revision : null);
+        const saveDetail = saveLine ? saveLine.detail : null;
         const saveError = saveState === 'invalid' || saveState === 'refused' || saveState === 'elsewhere';
-        // The box: its head names the file by its path in SVN, the editor fills the body. Under the
-        // box the save line at the left, and at the right wordpress.org's guide — the one the tip links to.
+        // The box: its head names the file by its path in SVN, the editor fills the body, and its
+        // foot, gray like the head, carries the save line at the left and the two references the
+        // tip links to at the right — the blueprint documentation first, the one to have open
+        // while typing, then wordpress.org's guide. The mirror's revision is not named: a revision
+        // is the receipt of a commit (WporgRevisionLink), never a figure of a file at rest.
         const renderEditor = () => createElement('div', { className: 'pblsh--live-preview__editor' },
             createElement('div', { className: 'pblsh--live-preview__editor-box' },
                 createElement('div', { className: 'pblsh--live-preview__editor-head' }, createElement('code', null, T.getBlueprintPath())),
                 createElement('div', { className: 'pblsh--live-preview__editor-body' },
                     createElement(BlueprintEditor, { value: editorValue, onChange: onEditorChange, readOnly: readOnly || fieldBusy !== null, placeholder: T.getPastePlaceholder(), label: __('Blueprint JSON', 'peak-publisher') })),
-            ),
-            createElement('div', { className: 'pblsh--live-preview__editor-foot' },
-                createElement('div', { className: 'pblsh--live-preview__save' + (saveError ? ' pblsh--live-preview__save--error' : '') },
-                    T.getSaveLineText(saveState, saveDetail),
-                    saveState === 'elsewhere' && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.loadElsewhere(id) }, T.getLoadElsewhereLabel())),
-                    (saveState === 'invalid' || saveState === 'refused') && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.drop(id) }, T.getUndoLabel())),
+                createElement('div', { className: 'pblsh--live-preview__editor-foot' },
+                    createElement('div', { className: 'pblsh--live-preview__save' + (saveError ? ' pblsh--live-preview__save--error' : '') },
+                        T.getSaveLineText(saveState, saveDetail),
+                        saveState === 'elsewhere' && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.loadElsewhere(id) }, T.getLoadElsewhereLabel())),
+                        (saveState === 'invalid' || saveState === 'refused') && createElement(Fragment, null, ' ', createElement(Button, { isLink: true, onClick: () => Draft.drop(id) }, T.getUndoLabel())),
+                    ),
+                    createElement('span', { className: 'pblsh--live-preview__editor-links' },
+                        external(T.getDocumentationUrl(), T.getDocumentationLabel() + ' ↗'), ' · ', external(T.getGuideUrl(), T.getGuideLabel() + ' ↗')),
                 ),
-                external(T.getGuideUrl(), T.getGuideLabel() + ' ↗'),
             ),
         );
         // The main row: the fields' column, headed by the switch at its right end, and in expert

@@ -4829,6 +4829,10 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--live-preview__landing-lead {
     margin: 0 0 0.75rem;
 }
+/* The landing page's fact in place of its controls, muted like a row's fact: a line of the box, no column. */
+.pblsh--live-preview__landing-fact {
+    color: #8c96a0;
+}
 .pblsh--live-preview__plugins-table,
 .pblsh--live-preview__theme-table {
     table-layout: fixed;

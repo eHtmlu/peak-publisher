@@ -62,6 +62,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // Without fields (no JSON object) the editor is the only way in: shown whatever the switch says.
         const forcedExpert = hasBlueprint && !view.fields;
         const showEditor = expert || forcedExpert;
+        // Beside a fact only the JSON can change — a field that cannot read its part, what no
+        // field shows —, the switch as a link while the editor is hidden. Not while wordpress.org's
+        // state is shown: nothing is edited there, like the fields' own actions.
+        const editInExpertLink = () => !showEditor && !showingWporgState && createElement(Fragment, null, ' · ',
+            createElement(Button, { isLink: true, onClick: () => toggleExpert(true) }, T.getEditInExpertLink()));
 
         // The editor's draft: text null while the editor shows the view's contents. Leaving the
         // section saves a valid draft at once; an invalid one waits here for the return.
@@ -244,7 +249,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // them: the choice, and for a page of the plugin's own the path with Change. A preset
         // applies as it is chosen; "Other page…" opens the path field on the page set, selected,
         // and a path applies with Change or Enter, Escape returns to the page set. When the JSON
-        // sets the page in a form the fields cannot read, the box says so.
+        // sets the page in a form the fields cannot read, the box says so, with the way to the editor.
         const renderLanding = () => {
             const field = view.fields.landing_page;
             const current = field.value === null ? '/' : field.value;   // without landingPage Playground opens the front page
@@ -277,7 +282,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 renderFieldLabel('landing_page', __('Landing page', 'peak-publisher')),
                 createElement('div', { className: 'pblsh--framed-box pblsh--live-preview__landing' },
                     createElement('div', { className: 'pblsh--live-preview__landing-lead' }, T.getLandingHint()),
-                    !field.editable && createElement('div', { className: 'pblsh--live-preview__row-fact' }, T.getSetInJsonNote()),
+                    !field.editable && createElement('div', { className: 'pblsh--live-preview__landing-fact' }, T.getSetInJsonNote(), editInExpertLink()),
                     field.editable && createElement(Fragment, null,
                         createElement('div', { className: 'pblsh--live-preview__controls' },
                             createElement(SelectControl, {
@@ -313,8 +318,8 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         };
         // The theme as a row — screenshot, name and slug as the directory lists it (view.theme: the
         // blueprint's wordpress.org theme, or Playground's default when it sets none), linked to
-        // its page where there is one —, the fact beside it: the default, set in the JSON, red
-        // when the directory lacks it; nothing to name for a theme from elsewhere or an unknown
+        // its page where there is one —, the fact beside it: the default, set in the JSON (with the
+        // way to the editor), red when the directory lacks it; nothing to name for a theme from elsewhere or an unknown
         // default. Change opens the field beneath, focused with the slug selected — a slug, or the
         // theme's wordpress.org address (wporgSlugFromInput()); Enter or leaving saves, Escape
         // closes, an empty field returns to the default.
@@ -339,7 +344,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                         createElement('tbody', null,
                             createElement('tr', null,
                                 theme && theme.slug && createElement('td', null, createElement(PluginIdentity, { kind: 'theme', image: listing ? listing.screenshot : null, name: listing ? listing.name || '' : '', slug: theme.slug, href: listing && listing.state === 'ok' ? getWporgThemeUrl(theme.slug) : null })),
-                                createElement('td', { className: 'pblsh--live-preview__row-fact' + (absent ? ' pblsh--live-preview__row-fact--missing' : ''), colSpan: theme && theme.slug ? 1 : 2 }, facts.join(' · ')),
+                                createElement('td', { className: 'pblsh--live-preview__row-fact' + (absent ? ' pblsh--live-preview__row-fact--missing' : ''), colSpan: theme && theme.slug ? 1 : 2 }, facts.join(' · '), !field.editable && editInExpertLink()),
                             ),
                         ),
                         // The foot: the link, then the field with Change and Cancel, the hint and the server's
@@ -490,12 +495,13 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 ),
             );
         };
-        // What the preview installs first — the theme, the plugins —, then where visitors start.
+        // What the preview installs first — the theme, the plugins —, then where visitors start,
+        // and beneath what no field shows, with the way to the editor.
         const renderFields = () => createElement(Fragment, null,
             renderTheme(),
             renderPlugins(),
             renderLanding(),
-            view.fields.more.length > 0 && createElement('div', { className: 'pblsh--live-preview__more' }, T.getMoreText(view.fields.more)),
+            view.fields.more.length > 0 && createElement('div', { className: 'pblsh--live-preview__more' }, T.getMoreText(view.fields.more), editInExpertLink()),
         );
 
         // The JSON: the editor with its save line — how the text there stands to the working copy

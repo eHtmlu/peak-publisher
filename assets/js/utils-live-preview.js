@@ -55,14 +55,17 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getThemePlaceholder = () => __('Theme slug or wordpress.org URL…', 'peak-publisher');
     const getThemeHint = () => __("Leave empty for Playground's default theme.", 'peak-publisher');
     const getSetInJsonNote = () => __('set in the JSON', 'peak-publisher');
+    // Beside a fact only the JSON can change, while the editor is hidden: the switch as a link.
+    const getEditInExpertLink = () => __('edit in Expert mode', 'peak-publisher');
     const getChangeThemeLink = () => __('Change the theme…', 'peak-publisher');
     const getChangeLabel = () => __('Change', 'peak-publisher');
 
     // The plugins the preview installs: from the current release's Requires Plugins header — the
-    // place where a plugin's needs belong —, others only through the JSON.
+    // place where a plugin's needs belong —, the others for the preview alone, as the add's
+    // question sorts them.
     const getPluginNote = (plugin, required) => plugin.required && required
         ? sprintf(__('required by version %s', 'peak-publisher'), required.version)
-        : __('added in the JSON', 'peak-publisher');
+        : __('only for the preview', 'peak-publisher');
     // The plugin itself at its place in the install order: last, or wherever the JSON puts it.
     const getOwnPluginNote = (last) => last ? __('your plugin, installed last', 'peak-publisher') : __('your plugin', 'peak-publisher');
     // A required plugin the blueprint does not install before the plugin: WordPress activates no
@@ -97,7 +100,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getRemovePluginLabel = () => __('Remove', 'peak-publisher');
     const getMoveBeforeLabel = () => __('Move before your plugin', 'peak-publisher');
     // What no field shows, by name: "2 runPHP, siteOptions".
-    const getMoreText = (more) => sprintf(__('Also in the JSON: %s', 'peak-publisher'), more.map((item) => item.count > 1 ? item.count + ' ' + item.name : item.name).join(', '));
+    const getMoreText = (more) => sprintf(__('Also set: %s', 'peak-publisher'), more.map((item) => item.count > 1 ? item.count + ' ' + item.name : item.name).join(', '));
     // A field's state on its label line, gone again two seconds after a save.
     const getFieldStateText = (state) => ({
         saving: __('Saving…', 'peak-publisher'),
@@ -182,7 +185,7 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     return {
         getIgnoredStatusText, getNotPublicText, getSwitchText, getPublicText, getOpenLabel, getCheckAgainLabel,
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
-        getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getDefaultThemeNote, getThemePlaceholder, getThemeHint, getSetInJsonNote, getChangeThemeLink, getChangeLabel,
+        getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getDefaultThemeNote, getThemePlaceholder, getThemeHint, getSetInJsonNote, getEditInExpertLink, getChangeThemeLink, getChangeLabel,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotActiveBeforeNote, getNotOnWporgText, getRedirectSkippedNote, getRedirectOpenNote, getSkipRedirectLabel,
         getAddPluginLink, getNeedQuestion, getNeedYes, getNeedNo, getNeedGuidanceTitle, getNeedGuidance, getRequiresPluginsHeaderUrl, getOkLabel, getCancelLabel, getAddPluginPlaceholder, getAddPluginLabel, getRemovePluginLabel, getMoveBeforeLabel,
         getMoreText, getFieldStateText,

@@ -17,7 +17,7 @@
         byPluginId: {},
         loadingIds: [],
         blueprintDrafts: {},
-        blueprintFieldStates: {},   // per plugin, while a field of the Live Preview is being saved: 'saving'
+        blueprintFieldStates: {},   // per plugin, while a field of the Live Preview holds something not saved yet: 'editing' (typed, its save pending) | 'saving'
     };
     var actions = {
         setLoading: function(pluginId, flag) {
@@ -30,7 +30,7 @@
         setBlueprintDraft: function(pluginId, draft) {
             return { type: 'SET_BLUEPRINT_DRAFT', pluginId: pluginId, draft: draft };
         },
-        // 'saving' while a field of the Live Preview is being saved; null when none is
+        // 'editing' while a field of the Live Preview holds something not saved yet, 'saving' while its save is in flight; null when none does
         setBlueprintFieldState: function(pluginId, fieldState) {
             return { type: 'SET_BLUEPRINT_FIELD_STATE', pluginId: pluginId, fieldState: fieldState };
         },
@@ -75,10 +75,11 @@
         getBlueprintDraft: function(state, pluginId) {
             return state.blueprintDrafts[pluginId] || null;
         },
-        hasUnsavedBlueprintDraft: function(state) {
-            return Object.values(state.blueprintDrafts).some(isUnsaved);
+        // Something of a Live Preview not saved yet, on any plugin: a draft, or a field typed in or being saved.
+        hasUnsavedLivePreview: function(state) {
+            return Object.values(state.blueprintDrafts).some(isUnsaved) || Object.keys(state.blueprintFieldStates).length > 0;
         },
-        // 'saving' while a field of the plugin's Live Preview is being saved, else null
+        // 'editing' | 'saving' while a field of the plugin's Live Preview holds something not saved yet, else null
         getBlueprintFieldState: function(state, pluginId) {
             return state.blueprintFieldStates[pluginId] || null;
         },
@@ -129,7 +130,7 @@
     // what is typed meanwhile follows when the answer is in, built on that answer's hash, so the
     // save never runs into itself. An invalid draft waits, said in its line, until it is fixed
     // or undone. drop() starts over from the server's view: answers of saves sent before it are
-    // not shown. While a draft is not saved, closing the page asks first.
+    // not shown. While a draft or a field is not saved, closing the page asks first.
     var timers = {};
     var generations = {};
     var sending = {};
@@ -184,7 +185,7 @@
         }
     }
     window.addEventListener('beforeunload', function(event) {
-        if (wp.data.select('pblsh/assets').hasUnsavedBlueprintDraft()) {
+        if (wp.data.select('pblsh/assets').hasUnsavedLivePreview()) {
             event.preventDefault();
             event.returnValue = '';
         }

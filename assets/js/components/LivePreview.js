@@ -9,7 +9,9 @@
 // the other files of assets/blueprints/. Set up stands outside the box, beneath it, while no
 // blueprint is in effect; with nothing here, there or on the page only the introduction and
 // Set up remain — the zones with nothing to say are not there. Every change goes into the working copy at once — a
-// field when it is left, the editor a second after the typing stops while it is valid. The
+// preset as it is chosen, a typed path a second after the typing stops or when its field is
+// left, the theme and a plugin on their button, the editor a second after the typing stops
+// while it is valid. The
 // view is the server's (assets.blueprint, assets.wporg.slots.blueprint); the editor's draft
 // and its saving are the store's (Pblsh.Controllers.BlueprintDraft), so leaving the section
 // loses nothing; the field changes in flight, the expert mode and the check are the
@@ -19,6 +21,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
     const ADVANCED_VIEW_WINDOW = 1200000;  // ms: after a click on the Advanced View from here, a return to the window checks
     const RETURN_DEBOUNCE = 5000;          // ms: focus and visibility arrive together — one check
     const SAVED_SHOWN_FOR = 2000;          // ms: "Saved" on a field's label line
+    const PATH_SAVE_DELAY = 1000;          // ms: a typed landing page saves this long after the typing stops, like the editor's draft
     const EXPERT_KEY = 'pblsh.livePreview.expert';
     // Per plugin, across the section's mounts: when the Advanced View was opened from here, and
     // when the last check ran.
@@ -86,6 +89,14 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const [addStep, setAddStep] = useState(null);         // adding a plugin: null (the link) | 'ask' (the question) | 'guide' (the answer to yes) | 'slug' (the field)
         const [addSlug, setAddSlug] = useState('');           // the plugin typed, slug or address
         const savedTimer = useRef(null);
+        const pathTimer = useRef(null);                       // the typed path's pending save
+        // The landing page typed but not saved yet: the path field shows something other than the
+        // page set. It holds the commit and the test until its save has landed.
+        const landingCurrent = view.fields ? (view.fields.landing_page.value === null ? '/' : view.fields.landing_page.value) : null;   // without landingPage Playground opens the front page
+        const landingTyped = landing && landing.choice === 'other' ? landing.path.trim() : null;
+        const landingDirty = landingTyped !== null && landingCurrent !== null && landingTyped !== landingCurrent;
+        const latest = useRef({});                            // the last render's state, for the path's save when it runs
+        latest.current = { landing, landingCurrent, fieldBusy };
         // A field that appears on a choice — the path on "Other page…", the theme's slug on Change,
         // the plugin to add after "no" — takes the focus with its text selected: the focus follows
         // the render that mounts it.
@@ -99,14 +110,15 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 if (typeof input.select === 'function') input.select();
             }
         });
-        // A field being saved, told to the store: the commit waits for it like for the draft
-        // (PluginAssets). A field being typed in holds nothing — every field saves only on Enter or
-        // its button. Gone with the section.
+        // A field holding something not saved yet, or being saved, told to the store: the commit
+        // waits for it like for the draft (PluginAssets). The path field holds while it differs
+        // from the page set; the theme's and the plugins' fields save only on Enter or their
+        // button, so typing there holds nothing. Gone with the section.
         useEffect(() => {
-            wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, fieldBusy !== null ? 'saving' : null);
-        }, [id, fieldBusy]);
+            wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, fieldBusy !== null ? 'saving' : landingDirty ? 'editing' : null);
+        }, [id, fieldBusy, landingDirty]);
         useEffect(() => () => wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, null), [id]);
-        useEffect(() => () => clearTimeout(savedTimer.current), []);
+        useEffect(() => () => { clearTimeout(savedTimer.current); clearTimeout(pathTimer.current); }, []);
         const showSaved = (field) => {
             setFieldState({ [field]: 'saved' });
             clearTimeout(savedTimer.current);
@@ -139,6 +151,32 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // Removing and starting over are the same step: a pending delete leaves nothing in effect,
         // and setting up or pasting replaces it with a put.
         const remove = (confirmText) => { if (confirm(confirmText)) change('delete', { change: 'delete' }); };
+        // The typed path's save: a second after the typing stops, on Enter, and when the field is
+        // left — whichever comes first. It reads the last render's state, not the keystroke's: the
+        // timer is set anew with every keystroke, so what it finds is what the field shows. A save
+        // under way is not doubled — what is typed meanwhile is saved when the answer is in —, and
+        // the field returns to the page set only when nothing was typed meanwhile.
+        const cancelPathSave = () => { clearTimeout(pathTimer.current); pathTimer.current = null; };
+        const savePath = () => {
+            cancelPathSave();
+            const { landing: now, landingCurrent: current, fieldBusy: busy } = latest.current;
+            const value = now && now.choice === 'other' ? now.path.trim() : null;
+            if (value === null || value === current || busy !== null) return;
+            if (!value.startsWith('/')) {
+                setFieldError({ landing_page: T.getLandingError() });
+                return;
+            }
+            change('landing_page', { change: 'landing_page', value }).then((ok) => {
+                const after = latest.current.landing;
+                const typed = after && after.choice === 'other' ? after.path.trim() : null;
+                if (typed === value) {
+                    if (ok) setLanding(null);
+                } else if (ok && typed !== null) {
+                    schedulePathSave();
+                }
+            });
+        };
+        const schedulePathSave = () => { cancelPathSave(); pathTimer.current = setTimeout(savePath, PATH_SAVE_DELAY); };
 
         // Whether the Live Preview is public — asked on wordpress.org only once wordpress.org has
         // the file: when the section opens and the stored answer is older than five minutes, on
@@ -246,17 +284,18 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             createElement('span', { className: 'pblsh--live-preview__field-state' }, T.getFieldStateText(fieldState[field])),
         );
         // The landing page as its fields in the box, always at hand, the one piece of advice above
-        // them: the choice, and for a page of the plugin's own the path with Change. A preset
-        // applies as it is chosen; "Other page…" opens the path field on the page set, selected,
-        // and a path applies with Change or Enter, Escape returns to the page set. When the JSON
-        // sets the page in a form the fields cannot read, the box says so, with the way to the editor.
+        // them: the choice, and for a page of the plugin's own the path. A preset applies as it is
+        // chosen; "Other page…" opens the path field on the page set, selected, and a typed path
+        // saves a second after the typing stops, on Enter or when the field is left — whichever
+        // comes first —, Escape returns to the page set. When the JSON sets the page in a form the
+        // fields cannot read, the box says so, with the way to the editor.
         const renderLanding = () => {
             const field = view.fields.landing_page;
-            const current = field.value === null ? '/' : field.value;   // without landingPage Playground opens the front page
+            const current = landingCurrent;
             const choice = landing ? landing.choice : T.getLandingChoice(field.value);
             const path = landing ? landing.path : (choice === 'other' ? current : '');
-            const next = path.trim();
             const choose = (key) => {
+                cancelPathSave();
                 setFieldError({});
                 if (key === 'other') {
                     focusField.current = 'path';
@@ -269,14 +308,6 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                 }
                 setLanding({ choice: key, path: '' });   // shown as chosen while it saves; back to the page set either way after
                 change('landing_page', { change: 'landing_page', value: T.getLandingPath(key) }).then(() => setLanding(null));
-            };
-            const commitPath = () => {
-                if (next === '' || next === current) return;
-                if (!next.startsWith('/')) {
-                    setFieldError({ landing_page: T.getLandingError() });
-                    return;
-                }
-                change('landing_page', { change: 'landing_page', value: next }).then((ok) => { if (ok) setLanding(null); });
             };
             return createElement('div', { className: 'pblsh--live-preview__field' },
                 renderFieldLabel('landing_page', __('Landing page', 'peak-publisher')),
@@ -303,13 +334,13 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                                 hideLabelFromVision: true,
                                 value: path,
                                 disabled: locked && fieldBusy !== 'landing_page',
-                                onChange: (typed) => { setLanding({ choice: 'other', path: typed }); setFieldError({}); },
+                                onChange: (typed) => { setLanding({ choice: 'other', path: typed }); setFieldError({}); if (fieldBusy === null) schedulePathSave(); },
+                                onBlur: savePath,
                                 onKeyDown: (e) => {
-                                    if (e.key === 'Enter') { e.preventDefault(); commitPath(); }
-                                    if (e.key === 'Escape') { setLanding(null); setFieldError({}); }
+                                    if (e.key === 'Enter') { e.preventDefault(); savePath(); }
+                                    if (e.key === 'Escape') { cancelPathSave(); setLanding(null); setFieldError({}); }
                                 },
                             }),
-                            choice === 'other' && createElement(Button, { isSecondary: true, isBusy: fieldBusy === 'landing_page', disabled: locked || next === '' || next === current, onClick: commitPath }, T.getChangeLabel()),
                         ),
                         fieldError.landing_page && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.landing_page),
                     ),
@@ -547,10 +578,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
 
         // Zone 4: the actions on the blueprint in effect — the test of the working copy, the menu.
         // Setting up is no action on it: that button stands outside the box. Nothing unsaved is
-        // tested: not while the JSON draft is being edited or a field saved — the button stays locked
-        // until the fresh test link is here; the field's label line says so meanwhile. A field being
-        // typed in holds nothing: every field saves only on Enter or its button.
-        const testBlocked = draft !== null || saving || fieldBusy !== null || !view.test.url;
+        // tested: not while the JSON draft is being edited, a path typed or a field saved — the
+        // button stays locked until the fresh test link is here; the field's label line says so
+        // while it saves. The theme's and the plugins' fields save only on Enter or their button:
+        // typing there holds nothing.
+        const testBlocked = draft !== null || saving || fieldBusy !== null || landingDirty || !view.test.url;
         const testButton = createElement(Button, {
             isPrimary: true,
             ...(testBlocked ? { disabled: true } : { href: view.test.url, target: '_blank', rel: 'noreferrer' }),

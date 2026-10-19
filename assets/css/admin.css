@@ -4835,6 +4835,34 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
     width: 11rem;
     color: #8c96a0;
 }
+/* The plugins' foot, gray like the import table's add row, the frame its edge: the link, then
+   the question with its answers, then the guidance under its own heading with OK, or the
+   field with Add and Cancel. */
+.pblsh--live-preview__plugins-table tfoot td {
+    border-bottom: 0;
+    background: #f6f7f7;
+}
+.pblsh--live-preview__plugins-question {
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+.pblsh--live-preview__plugins-foot-text {
+    margin-bottom: 0.75rem;
+}
+.pblsh--live-preview__plugins-foot-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+.pblsh--live-preview__plugins-foot-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.pblsh--live-preview__plugins-foot-controls .components-base-control {
+    flex: 1;
+}
 .pblsh--live-preview__row-fact--missing {
     color: var(--color-red);
 }

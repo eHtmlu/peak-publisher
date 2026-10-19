@@ -79,10 +79,23 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     const getRedirectSkippedNote = () => __('setup skipped', 'peak-publisher');
     const getRedirectOpenNote = () => __('its setup would open instead of your landing page', 'peak-publisher');
     const getSkipRedirectLabel = () => __('Skip it', 'peak-publisher');
+    // Adding a plugin to the preview, in steps: the link, then the one question — a plugin the
+    // plugin needs belongs in the Requires Plugins header, the guidance says so —, and only after
+    // "no" the field for the slug or address, so nothing is typed in vain.
+    const getAddPluginLink = () => __('Add a plugin…', 'peak-publisher');
+    const getNeedQuestion = () => __('Does your plugin need it to work?', 'peak-publisher');
+    const getNeedYes = () => __('Yes, it is necessary', 'peak-publisher');
+    const getNeedNo = () => __('No, it is optional or only for the preview', 'peak-publisher');
+    // The answer to yes: a heading like the question's, the text with the header's documentation linked (<a>).
+    const getNeedGuidanceTitle = () => __('Then it is a hard dependency', 'peak-publisher');
+    const getNeedGuidance = () => __('A hard dependency belongs in the <a>"Requires Plugins" header</a> of your plugin file. Re-upload the current release with the new header and come back here.', 'peak-publisher');
+    const getRequiresPluginsHeaderUrl = () => 'https://developer.wordpress.org/plugins/plugin-basics/header-requirements/#header-fields';
+    const getOkLabel = () => __('OK', 'peak-publisher');
+    const getCancelLabel = () => __('Cancel', 'peak-publisher');
+    const getAddPluginPlaceholder = () => __('Plugin slug or wordpress.org URL…', 'peak-publisher');
+    const getAddPluginLabel = () => __('Add', 'peak-publisher');
+    const getRemovePluginLabel = () => __('Remove', 'peak-publisher');
     const getAddMissingLabel = (missing) => missing.length === 1 ? sprintf(__('Add %s', 'peak-publisher'), missing[0]) : __('Add them', 'peak-publisher');
-    const getPluginsSourceText = (required) => required
-        ? sprintf(__('From the Requires Plugins header of version %s.', 'peak-publisher'), required.version)
-        : __('From the Requires Plugins header of the current release (none yet).', 'peak-publisher');
     // What no field shows, by name: "2 runPHP, siteOptions".
     const getMoreText = (more) => sprintf(__('Also in the JSON: %s', 'peak-publisher'), more.map((item) => item.count > 1 ? item.count + ' ' + item.name : item.name).join(', '));
     // A field's state on its label line, gone again two seconds after a save.
@@ -171,7 +184,8 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
         getCheckingText, getCheckFailedText, getIgnoredText, getNotDownloadableText,
         getLandingChoice, getLandingOptions, getLandingPath, getLandingError, getLandingHint, getDefaultThemeNote, getThemePlaceholder, getThemeHint, getSetInJsonText, getSetInJsonNote, getChangeLabel,
         getPluginNote, getOwnPluginNote, getNotInstalledNote, getNotActiveBeforeNote, getNotOnWporgText, getRedirectSkippedNote, getRedirectOpenNote, getSkipRedirectLabel,
-        getAddMissingLabel, getPluginsSourceText, getMoreText, getFieldStateText,
+        getAddPluginLink, getNeedQuestion, getNeedYes, getNeedNo, getNeedGuidanceTitle, getNeedGuidance, getRequiresPluginsHeaderUrl, getOkLabel, getCancelLabel, getAddPluginPlaceholder, getAddPluginLabel, getRemovePluginLabel,
+        getAddMissingLabel, getMoreText, getFieldStateText,
         getExpertLabel, getPastePlaceholder, getSaveLineText, getNotObjectText, getUndoLabel, getLoadElsewhereLabel,
         getTestLabel, getTestTooltip, getSetUpLabel, getRemoveLabel, getIntroText, getGuideUrl, getGuideLabel, getDeleteConfirmText, getStartOverConfirmText, getDiscardConfirmText, getUnsavedWorkingCopyText,
         getBlueprintPath, getOtherFilesText, getBlueprintsFolderLabel,

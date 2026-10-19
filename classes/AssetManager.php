@@ -148,7 +148,7 @@ class AssetManager {
         $own = (string) $plugin->post_name;
         $error = static fn(string $code, string $message, int $status): \WP_Error => new \WP_Error($code, $message, [ 'status' => $status ]);
 
-        if (!in_array($kind, [ 'create', 'contents', 'landing_page', 'theme', 'dependencies', 'redirect_skip', 'delete' ], true)) {
+        if (!in_array($kind, [ 'create', 'contents', 'landing_page', 'theme', 'dependencies', 'plugin_add', 'plugin_remove', 'redirect_skip', 'delete' ], true)) {
             return $error('invalid_request', __('Unknown change of the Live Preview.', 'peak-publisher'), 400);
         }
         if ($kind === 'landing_page' && !str_starts_with($value, '/')) {
@@ -165,6 +165,22 @@ class AssetManager {
             }
             if (!$exists) {
                 return $error('blueprint_theme_not_found', sprintf(__('wordpress.org has no theme with the slug %s.', 'peak-publisher'), $value), 404);
+            }
+        }
+
+        if ($kind === 'plugin_add') {
+            if (!is_wordpress_org_slug($value)) {
+                return $error('blueprint_plugin_not_found', __('A plugin slug is written in lowercase letters, digits and hyphens, as in its address on wordpress.org/plugins/.', 'peak-publisher'), 404);
+            }
+            try {
+                $state = (string) (wporg_api_plugin_information([ $value ], wporg_api_fields([]))[$value]['state'] ?? 'not_found');
+            } catch (WporgSvnException $e) {
+                return $e->to_wp_error();
+            }
+            if ($state !== 'ok') {
+                return $error('blueprint_plugin_not_found', $state === 'closed'
+                    ? sprintf(__('wordpress.org has closed the plugin %s — Playground could not install it.', 'peak-publisher'), $value)
+                    : sprintf(__('wordpress.org has no plugin with the slug %s.', 'peak-publisher'), $value), 404);
             }
         }
 

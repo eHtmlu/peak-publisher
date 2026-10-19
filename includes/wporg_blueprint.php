@@ -342,7 +342,7 @@ function set_blueprint_landing_page(\stdClass $blueprint, string $path): \stdCla
  * setup — and the transient carrying the redirect: dropped right after the install, the landing
  * page stays, as wordpress.org's own blueprints do it (WordPress/blueprints: woo-shipping,
  * woocommerce-product-feed). By slug. The fields read the fact (blueprint_fields(): `redirect`),
- * Peak Publisher's writes add the step (blueprint_dependency_steps(), add_blueprint_redirect_skip()).
+ * Peak Publisher's writes add the step (blueprint_plugin_steps(), add_blueprint_redirect_skip()).
  */
 const PBLSH_BLUEPRINT_ACTIVATION_REDIRECTS = [ 'woocommerce' => '_wc_activation_redirect' ];
 
@@ -365,7 +365,7 @@ function blueprint_redirect_skip_slug(array $step): ?string {
 }
 
 /** The install steps of dependencies as Peak Publisher writes them: each activated, a known activation redirect dropped right after it. */
-function blueprint_dependency_steps(array $slugs): array {
+function blueprint_plugin_steps(array $slugs): array {
     $steps = [];
     foreach ($slugs as $slug) {
         $steps[] = blueprint_install_step('plugin', $slug);
@@ -517,9 +517,35 @@ function blueprint_missing_dependencies(string $contents, string $own_slug, arra
 }
 
 
-/** The dependencies added as Peak Publisher writes them (blueprint_dependency_steps()) right before the plugin's own step, in the given order — nothing removed, nothing moved. */
-function add_blueprint_dependencies(\stdClass $blueprint, string $own_slug, array $slugs): \stdClass {
-    return insert_blueprint_steps($blueprint, $own_slug, blueprint_dependency_steps($slugs));
+/** Plugins added as Peak Publisher writes them (blueprint_plugin_steps()) right before the plugin's own step, in the given order — the missing dependencies, or one the user adds; nothing removed, nothing moved. */
+function add_blueprint_plugins(\stdClass $blueprint, string $own_slug, array $slugs): \stdClass {
+    return insert_blueprint_steps($blueprint, $own_slug, blueprint_plugin_steps($slugs));
+}
+
+/**
+ * A plugin taken out of the blueprint: every step installing it from wordpress.org, the step
+ * dropping its activation redirect as Peak Publisher wrote it, and its entry in the shorthand
+ * `plugins` list — nothing else moved. Offered for a plugin the JSON adds alone, neither
+ * required nor the plugin itself (decide_blueprint_change() holds to that).
+ */
+function remove_blueprint_plugin(\stdClass $blueprint, string $slug): \stdClass {
+    $copy = clone_blueprint($blueprint);
+    $gone = [];
+    foreach (blueprint_step_kinds($copy) as $step) {
+        if (in_array($step['kind'], [ 'plugin', 'redirect_skip' ], true) && $step['slug'] === $slug) {
+            $gone[] = $step['index'];
+        }
+    }
+    if (is_array($copy->steps ?? null)) {
+        $copy->steps = array_values(array_filter($copy->steps, static fn($step, int $index): bool => !in_array($index, $gone, true), ARRAY_FILTER_USE_BOTH));
+    }
+    if (is_array($copy->plugins ?? null)) {
+        $copy->plugins = array_values(array_filter($copy->plugins, static fn($entry): bool => blueprint_shorthand_plugin_slug($entry) !== $slug));
+        if ($copy->plugins === []) {
+            unset($copy->plugins);
+        }
+    }
+    return $copy;
 }
 
 
@@ -534,7 +560,7 @@ function new_blueprint(string $own_slug, array $required): \stdClass {
     return (object) [
         'landingPage' => '/wp-admin/plugins.php',
         'login' => true,
-        'steps' => [ ...blueprint_dependency_steps($required), blueprint_install_step('plugin', $own_slug) ],
+        'steps' => [ ...blueprint_plugin_steps($required), blueprint_install_step('plugin', $own_slug) ],
     ];
 }
 
@@ -621,7 +647,7 @@ function release_requires_plugins(\WP_Post $release): array {
 
 /**
  * What a commit that makes a release current writes into blueprint.json: the release's Requires
- * Plugins the blueprint does not install before the plugin, added (add_blueprint_dependencies()),
+ * Plugins the blueprint does not install before the plugin, added (add_blueprint_plugins()),
  * the file written as Peak Publisher writes a blueprint; `read` is the file it started from.
  * Null when nothing is missing, when wordpress.org ignores the file anyway, or when the written
  * file would be one wordpress.org ignores (pretty printing can push it over the limit) — it is not
@@ -636,7 +662,7 @@ function blueprint_dependency_carry(string $contents, string $own_slug, array $r
     if ($missing === [] || $blueprint === null) {
         return null;
     }
-    $carried = encode_blueprint(add_blueprint_dependencies($blueprint, $own_slug, $missing));
+    $carried = encode_blueprint(add_blueprint_plugins($blueprint, $own_slug, $missing));
     return validate_blueprint_contents($carried) === true ? [ 'contents' => $carried, 'added' => $missing, 'read' => $contents ] : null;
 }
 
@@ -658,8 +684,10 @@ function blueprint_fields_of(?string $contents, string $own_slug, array $require
  * — the one place every kind of change becomes an entry's contents: create (a new blueprint,
  * none in effect), contents (JSON as typed, on top of the md5 the editor showed as `expected`),
  * landing_page and theme (`value` written into the JSON through its field), dependencies (the
- * missing Requires Plugins added), redirect_skip (the step dropping the activation redirect of
- * the plugin `value` names, when the fields read it as open), delete. Whatever a put would store passes
+ * missing Requires Plugins added), plugin_add (the plugin `value` names installed before the
+ * plugin itself, unless it is there already), plugin_remove (taken out, when the JSON alone adds
+ * it — neither required nor the plugin itself), redirect_skip (the step dropping the activation
+ * redirect of the plugin `value` names, when the fields read it as open), delete. Whatever a put would store passes
  * validate_blueprint_contents() first, however it was made. The caller validated the request's
  * values (the path's form, the theme's existence) and holds the lock.
  *
@@ -701,6 +729,17 @@ function decide_blueprint_change(string $kind, ?string $effective, array $params
                 return $changed;
             }
             $contents = encode_blueprint(set_blueprint_theme($blueprint, $own_slug, $value));
+        } elseif ($kind === 'plugin_add') {
+            if ($value === $own_slug || in_array($value, array_column($fields['plugins'], 'slug'), true)) {
+                return null;
+            }
+            $contents = encode_blueprint(add_blueprint_plugins($blueprint, $own_slug, [ $value ]));
+        } elseif ($kind === 'plugin_remove') {
+            $added = array_filter($fields['plugins'], static fn(array $plugin): bool => $plugin['slug'] === $value && !$plugin['required'] && !$plugin['own']);
+            if ($added === []) {
+                return null;
+            }
+            $contents = encode_blueprint(remove_blueprint_plugin($blueprint, $value));
         } elseif ($kind === 'redirect_skip') {
             $open = array_filter($fields['plugins'], static fn(array $plugin): bool => $plugin['slug'] === $value && $plugin['redirect'] === 'open');
             if ($open === []) {
@@ -712,7 +751,7 @@ function decide_blueprint_change(string $kind, ?string $effective, array $params
             if ($missing === []) {
                 return null;
             }
-            $contents = encode_blueprint(add_blueprint_dependencies($blueprint, $own_slug, $missing));
+            $contents = encode_blueprint(add_blueprint_plugins($blueprint, $own_slug, $missing));
         }
     }
     $valid = validate_blueprint_contents($contents);

@@ -60,6 +60,21 @@ final class WporgBlueprintDecideTest extends TestCase {
         self::assertStringContainsString('"woocommerce"', $added['contents']);
     }
 
+    public function test_a_plugin_is_added_before_the_plugin_itself_and_taken_out_only_where_the_json_alone_adds_it(): void {
+        $own = '{"step":"installPlugin","pluginData":{"resource":"wordpress.org/plugins","slug":"my-plugin"},"options":{"activate":true}}';
+        $added = decide_blueprint_change('plugin_add', '{"steps":[' . $own . ']}', [ 'value' => 'akismet' ], 'my-plugin', []);
+        self::assertSame('put', $added['action']);
+        self::assertLessThan(strpos($added['contents'], '"my-plugin"'), strpos($added['contents'], '"akismet"'), 'before the plugin itself');
+        self::assertNull(decide_blueprint_change('plugin_add', $added['contents'], [ 'value' => 'akismet' ], 'my-plugin', []), 'there already');
+        self::assertNull(decide_blueprint_change('plugin_add', '{"steps":[]}', [ 'value' => 'my-plugin' ], 'my-plugin', []), 'the plugin itself is no addition');
+
+        $removed = decide_blueprint_change('plugin_remove', $added['contents'], [ 'value' => 'akismet' ], 'my-plugin', []);
+        self::assertSame('put', $removed['action']);
+        self::assertStringNotContainsString('akismet', $removed['contents']);
+        self::assertNull(decide_blueprint_change('plugin_remove', $added['contents'], [ 'value' => 'akismet' ], 'my-plugin', [ 'akismet' ]), 'a required plugin is not taken out');
+        self::assertNull(decide_blueprint_change('plugin_remove', $added['contents'], [ 'value' => 'my-plugin' ], 'my-plugin', []), 'nor the plugin itself');
+    }
+
     public function test_the_redirect_skip_is_added_only_where_the_fields_read_it_as_open(): void {
         $woo = '{"steps":[{"step":"installPlugin","pluginData":{"resource":"wordpress.org/plugins","slug":"woocommerce"},"options":{"activate":true}}]}';
         $added = decide_blueprint_change('redirect_skip', $woo, [ 'value' => 'woocommerce' ], 'my-plugin', [ 'woocommerce' ]);

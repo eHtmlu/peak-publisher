@@ -6,6 +6,7 @@ namespace Pblsh\Tests\Unit;
 
 use function Pblsh\asset_imported;
 use function Pblsh\assets_import_waiting;
+use function Pblsh\assets_shadowed;
 use function Pblsh\assets_shown;
 
 /**
@@ -72,5 +73,19 @@ final class WporgAssetsImportTest extends TestCase {
         self::assertTrue(assets_import_waiting(self::stamp([ 'screenshot-3.png' => 7 ]), []));
         self::assertTrue(assets_import_waiting(self::stamp([ 'blueprint.json' => 7 ]), []), 'the Live Preview too');
         self::assertFalse(assets_import_waiting(self::stamp([ 'blueprint-x.json' => 7, 'screenshot-0.png' => 7 ]), []), 'files of no slot are nobody\'s wait');
+    }
+
+    public function test_the_page_passes_the_raster_icons_over_while_it_shows_the_svg(): void {
+        self::assertSame([ 'icon_256', 'icon_128' ], assets_shadowed([ 'icon_svg' => 'icon.svg', 'icon_128' => 'icon-128x128.png' ]), 'SVG has priority: the raster icons, shown or not');
+        self::assertSame([], assets_shadowed([ 'icon_128' => 'icon-128x128.png', 'banner_hd' => 'banner-1544x500.png' ]), 'without an SVG icon nothing is passed over');
+        self::assertSame([], assets_shadowed([]));
+    }
+
+    public function test_a_raster_icon_the_page_passes_over_waits_for_nothing(): void {
+        $mirror = [ 'icon_svg' => [ 'filename' => 'icon.svg', 'revision' => 12 ], 'icon_128' => [ 'filename' => 'icon-128x128.png', 'revision' => 20 ] ];
+
+        self::assertFalse(assets_import_waiting(self::stamp([ 'icon.svg' => 12 ]), $mirror), 'the API never names the PNG while it shows the SVG');
+        self::assertTrue(assets_import_waiting(self::stamp([ 'icon.svg' => 12, 'banner-772x250.png' => 5 ]), [ ...$mirror, 'banner_sd' => [ 'filename' => 'banner-772x250.png', 'revision' => 20 ] ]), 'a banner the import has not read waits as before');
+        self::assertTrue(assets_import_waiting(self::stamp([ 'icon-128x128.png' => 9 ]), $mirror), 'the SVG not shown yet: it waits, the PNG is on the page');
     }
 }

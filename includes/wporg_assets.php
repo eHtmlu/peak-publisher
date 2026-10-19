@@ -270,10 +270,28 @@ function assets_shown(?array $stamp): array {
 }
 
 /**
+ * The slots the plugin page passes over while it shows another file: wordpress.org picks the
+ * icon by "SVG has priority" (Template::get_plugin_icon()) — while the page shows icon.svg,
+ * the raster icons are read by the import but never shown, and the info API never names them,
+ * so the stamp cannot say whether they were read. Slot ids, from what the page shows
+ * (assets_shown()); nothing for banners, whose SVG wordpress.org never shows.
+ *
+ * @param array<string, string> $shown
+ * @return string[]
+ */
+function assets_shadowed(array $shown): array {
+    if (!isset($shown['icon_svg'])) {
+        return [];
+    }
+    return array_keys(array_filter(get_asset_slots(), static fn(array $slot, string $slot_id): bool => $slot['type'] === 'icon' && $slot_id !== 'icon_svg', ARRAY_FILTER_USE_BOTH));
+}
+
+/**
  * Whether the plugin page is behind the mirror, an import still to come: a slot of the mirror
  * the import has not read (asset_imported()), or a slot the page shows a file for that the
- * mirror no longer holds — deleted, the import of the delete waiting. Unknown is no waiting:
- * false before the first check.
+ * mirror no longer holds — deleted, the import of the delete waiting. A slot the page passes
+ * over (assets_shadowed()) waits for nothing: the page would show no more of it after an
+ * import. Unknown is no waiting: false before the first check.
  *
  * @param array<string, array{filename:string, revision:int}> $mirror slot → state, the Live Preview included (wporg_mirror_slots())
  */
@@ -281,12 +299,14 @@ function assets_import_waiting(?array $stamp, array $mirror): bool {
     if ($stamp === null) {
         return false;
     }
-    foreach ($mirror as $file) {
-        if (asset_imported($stamp, $file) !== true) {
+    $shown = assets_shown($stamp);
+    $shadowed = assets_shadowed($shown);
+    foreach ($mirror as $slot_id => $file) {
+        if (!in_array((string) $slot_id, $shadowed, true) && asset_imported($stamp, $file) !== true) {
             return true;
         }
     }
-    return array_diff_key(assets_shown($stamp), $mirror) !== [];
+    return array_diff_key($shown, $mirror) !== [];
 }
 
 /** Slots whose entry builds on a mirror state the mirror no longer has — changed here and on wordpress.org. */

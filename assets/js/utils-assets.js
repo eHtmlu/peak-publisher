@@ -195,6 +195,8 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         return sprintf(__('Removed · on the plugin page until around %s', 'peak-publisher'), formatForecastTime(forecast));
     }
     const getShownText = () => __('On the plugin page', 'peak-publisher');
+    // Committed, and passed over: the page shows the SVG icon in the raster icon's place (wordpress.org's "SVG has priority").
+    const getShadowedText = () => __('Committed · the plugin page shows the SVG', 'peak-publisher');
     // An empty slot has no page to lag behind: the slot is what it is.
     const getEmptyText = () => __('Empty', 'peak-publisher');
     // Committed, and the plugin page never looked at: the first directory check is still to come.
@@ -217,6 +219,6 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText, getAssetSections, getAssetSection,
         getPendingChangesText, getPendingCountText, getConflictsText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
-        getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getEmptyText, getUncheckedText, getImportWatchAt,
+        getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getShadowedText, getEmptyText, getUncheckedText, getImportWatchAt,
     };
 })());

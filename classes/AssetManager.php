@@ -252,8 +252,9 @@ class AssetManager {
      * assets_import_waiting()) and, for every slot with a mirror file, a pending entry or a file
      * the plugin page shows, the entry's action, whether it conflicts, wordpress.org's file (the
      * mirror entry with its URL — the conflict box and the state view show it — and whether the
-     * import has read it, asset_imported()) and the file the page shows (`shown`,
-     * assets_shown()): the slot's band is decided from these facts alone.
+     * import has read it, asset_imported()), the file the page shows (`shown`, assets_shown())
+     * and whether the page passes the slot over for another file (`shadowed`,
+     * assets_shadowed()): the slot's band is decided from these facts alone.
      */
     private function wporg_view(\WP_Post $plugin, array $state, array $manifest, array $directory): array {
         $pending = $state['pending'];
@@ -261,6 +262,7 @@ class AssetManager {
         $conflicts = asset_conflicts($pending, $mirror);
         $stamp = $directory['stamp'];
         $shown = assets_shown($stamp);
+        $shadowed = assets_shadowed($shown);
         $slots = [];
         foreach (array_unique([ ...array_keys($mirror), ...array_keys($pending), ...array_keys($shown) ]) as $slot_id) {
             $on_wporg = null;
@@ -274,6 +276,7 @@ class AssetManager {
                 'conflict' => in_array((string) $slot_id, $conflicts, true),
                 'on_wporg' => $on_wporg === null ? null : [ ...$on_wporg, 'imported' => asset_imported($stamp, $on_wporg) ],
                 'shown' => $shown[$slot_id] ?? null,
+                'shadowed' => in_array((string) $slot_id, $shadowed, true),
             ];
         }
         return [

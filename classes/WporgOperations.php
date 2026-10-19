@@ -87,9 +87,12 @@ class WporgOperations {
 
         $lock = self::acquire_wporg_deploy_lock($wporg_slug, $username, $operation, (int) $marker->ID);
         // Every report is the lock's sign of life (LOCK_HEARTBEAT) — a deploy of a large plugin
-        // holds it for minutes — and, for the caller, the write's progress.
+        // holds it for minutes —, renews PHP's time limit, so that it holds per operation and not
+        // per cycle (a first deploy without a tag to copy sends every file, hundreds of requests),
+        // and, for the caller, the write's progress.
         $beat_at = time();
         $report = static function(string $phase, int $done = 0, int $total = 0) use ($lock, $progress, &$beat_at): void {
+            raise_wporg_time_limit();
             if (time() - $beat_at >= self::LOCK_HEARTBEAT) {
                 self::renew_wporg_deploy_lock($lock);
                 $beat_at = time();

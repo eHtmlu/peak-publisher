@@ -289,8 +289,10 @@ function summarize_plugin_downloads(array $days, ?string $today = null): array {
     return $out;
 }
 /**
- * Raises the PHP execution time limit for request cycles that perform many
- * sequential wordpress.org SVN requests (deploys, tag syncs, imports).
+ * Raises the PHP execution time limit for request cycles that perform many sequential
+ * wordpress.org SVN requests (deploys, tag syncs, imports). The limit counts from the call:
+ * a commit renews it with every progress report (WporgOperations::commit_files()), so there
+ * it holds per operation, not per cycle.
  */
 function raise_wporg_time_limit(): void {
     if (function_exists('set_time_limit')) {

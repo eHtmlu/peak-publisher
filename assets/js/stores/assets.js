@@ -17,7 +17,7 @@
         byPluginId: {},
         loadingIds: [],
         blueprintDrafts: {},
-        blueprintFieldStates: {},   // per plugin, while a field of the Live Preview is being edited or saved: 'editing' | 'saving'
+        blueprintFieldStates: {},   // per plugin, while a field of the Live Preview is being saved: 'saving'
     };
     var actions = {
         setLoading: function(pluginId, flag) {
@@ -30,7 +30,7 @@
         setBlueprintDraft: function(pluginId, draft) {
             return { type: 'SET_BLUEPRINT_DRAFT', pluginId: pluginId, draft: draft };
         },
-        // 'editing' | 'saving' while a field of the Live Preview is one; null when none is
+        // 'saving' while a field of the Live Preview is being saved; null when none is
         setBlueprintFieldState: function(pluginId, fieldState) {
             return { type: 'SET_BLUEPRINT_FIELD_STATE', pluginId: pluginId, fieldState: fieldState };
         },
@@ -78,7 +78,7 @@
         hasUnsavedBlueprintDraft: function(state) {
             return Object.values(state.blueprintDrafts).some(isUnsaved);
         },
-        // 'editing' | 'saving' while a field of the plugin's Live Preview is one, else null
+        // 'saving' while a field of the plugin's Live Preview is being saved, else null
         getBlueprintFieldState: function(state, pluginId) {
             return state.blueprintFieldStates[pluginId] || null;
         },

@@ -634,7 +634,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
                 createElement(Spinner),
                 createElement('span', null, __('Loading wordpress.org plugins…', 'peak-publisher')),
             ) : null,
-            createElement('div', { className: 'pblsh--framed-table-wrap' },
+            createElement('div', { className: 'pblsh--framed-box' },
                 createElement('table', { className: 'pblsh--framed-table pblsh--wporg-import__table' },
                     createElement('thead', null,
                         createElement('tr', null,

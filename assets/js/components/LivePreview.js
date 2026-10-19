@@ -76,7 +76,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const [fieldBusy, setFieldBusy] = useState(null);     // the field or action under way: 'create' | 'delete' | 'landing_page' | 'plugins' | 'redirect_skip' | 'theme'
         const [fieldState, setFieldState] = useState({});     // field → 'saving' | 'asking' | 'saved'
         const [fieldError, setFieldError] = useState({});     // field → message
-        const [otherPath, setOtherPath] = useState(null);     // the "Other page" path while typed
+        const [landing, setLanding] = useState(null);         // the landing page chosen or typed but not applied yet: { choice, path }; null: the page set
         const [themeInput, setThemeInput] = useState(null);   // the theme slug while typed
         const [addStep, setAddStep] = useState(null);         // adding a plugin: null (the link) | 'ask' (the question) | 'guide' (the answer to yes) | 'slug' (the field)
         const [addSlug, setAddSlug] = useState('');           // the plugin typed, slug or address
@@ -91,16 +91,15 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             if (input) {
                 focusField.current = null;
                 input.focus();
-                input.select();
+                if (typeof input.select === 'function') input.select();
             }
         });
-        // A field being edited or saved, told to the store: the commit waits for it like for the
-        // draft (PluginAssets). Edited means the path field, which saves when it is left; the theme's
-        // and the plugins' fields save only on Enter or their button, so typing there holds nothing.
-        // Gone with the section — an edit left behind is no edit.
+        // A field being saved, told to the store: the commit waits for it like for the draft
+        // (PluginAssets). A field being typed in holds nothing — every field saves only on Enter or
+        // its button. Gone with the section.
         useEffect(() => {
-            wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, fieldBusy !== null ? 'saving' : (otherPath !== null ? 'editing' : null));
-        }, [id, fieldBusy, otherPath]);
+            wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, fieldBusy !== null ? 'saving' : null);
+        }, [id, fieldBusy]);
         useEffect(() => () => wp.data.dispatch('pblsh/assets').setBlueprintFieldState(id, null), [id]);
         useEffect(() => () => clearTimeout(savedTimer.current), []);
         const showSaved = (field) => {
@@ -241,56 +240,75 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             createElement('span', null, text),
             createElement('span', { className: 'pblsh--live-preview__field-state' }, T.getFieldStateText(fieldState[field])),
         );
+        // The landing page as its fields in the box, always at hand, the one piece of advice above
+        // them: the choice, and for a page of the plugin's own the path with Change. A preset
+        // applies as it is chosen; "Other page…" opens the path field on the page set, selected,
+        // and a path applies with Change or Enter, Escape returns to the page set. When the JSON
+        // sets the page in a form the fields cannot read, the box says so.
         const renderLanding = () => {
             const field = view.fields.landing_page;
-            const choice = otherPath !== null ? 'other' : T.getLandingChoice(field.value);
-            const commitPath = (path) => {
-                if (!path.startsWith('/')) {
+            const current = field.value === null ? '/' : field.value;   // without landingPage Playground opens the front page
+            const choice = landing ? landing.choice : T.getLandingChoice(field.value);
+            const path = landing ? landing.path : (choice === 'other' ? current : '');
+            const next = path.trim();
+            const choose = (key) => {
+                setFieldError({});
+                if (key === 'other') {
+                    focusField.current = 'path';
+                    setLanding({ choice: 'other', path: current });
+                    return;
+                }
+                if (T.getLandingPath(key) === current) {
+                    setLanding(null);
+                    return;
+                }
+                setLanding({ choice: key, path: '' });   // shown as chosen while it saves; back to the page set either way after
+                change('landing_page', { change: 'landing_page', value: T.getLandingPath(key) }).then(() => setLanding(null));
+            };
+            const commitPath = () => {
+                if (next === '' || next === current) return;
+                if (!next.startsWith('/')) {
                     setFieldError({ landing_page: T.getLandingError() });
                     return;
                 }
-                if (path === field.value) {
-                    setOtherPath(null);
-                    return;
-                }
-                change('landing_page', { change: 'landing_page', value: path }).then((ok) => { if (ok) setOtherPath(null); });
+                change('landing_page', { change: 'landing_page', value: next }).then((ok) => { if (ok) setLanding(null); });
             };
             return createElement('div', { className: 'pblsh--live-preview__field' },
                 renderFieldLabel('landing_page', __('Landing page', 'peak-publisher')),
-                !field.editable
-                    ? createElement('div', { className: 'pblsh--live-preview__muted' }, T.getSetInJsonText())
-                    : createElement('div', { className: 'pblsh--live-preview__landing' },
-                        createElement(SelectControl, {
-                            __nextHasNoMarginBottom: true,
-                            label: __('Landing page', 'peak-publisher'),
-                            hideLabelFromVision: true,
-                            value: choice,
-                            options: T.getLandingOptions(),
-                            disabled: locked,
-                            onChange: (key) => {
-                                if (key === 'other') { focusField.current = 'path'; setOtherPath(field.value || ''); return; }
-                                setOtherPath(null);
-                                if (T.getLandingPath(key) !== field.value) change('landing_page', { change: 'landing_page', value: T.getLandingPath(key) });
-                            },
-                        }),
-                        choice === 'other' && createElement(TextControl, {
-                            ref: (el) => { fieldInputs.current.path = el; },
-                            __nextHasNoMarginBottom: true,
-                            label: __('Path', 'peak-publisher'),
-                            hideLabelFromVision: true,
-                            placeholder: '/wp-admin/admin.php?page=' + slug,
-                            value: otherPath !== null ? otherPath : (field.value || ''),
-                            disabled: locked && fieldBusy !== 'landing_page',
-                            onChange: setOtherPath,
-                            onBlur: () => { if (otherPath !== null && otherPath.trim() !== '') commitPath(otherPath.trim()); },
-                            onKeyDown: (e) => {
-                                if (e.key === 'Enter' && otherPath !== null) commitPath(otherPath.trim());
-                                if (e.key === 'Escape') { setOtherPath(null); setFieldError({}); }
-                            },
-                        }),
+                createElement('div', { className: 'pblsh--framed-box pblsh--live-preview__landing' },
+                    createElement('div', { className: 'pblsh--live-preview__landing-lead' }, T.getLandingHint()),
+                    !field.editable && createElement('div', { className: 'pblsh--live-preview__row-fact' }, T.getSetInJsonNote()),
+                    field.editable && createElement(Fragment, null,
+                        createElement('div', { className: 'pblsh--live-preview__controls' },
+                            createElement(SelectControl, {
+                                className: 'pblsh--live-preview__landing-choice',
+                                __nextHasNoMarginBottom: true,
+                                label: __('Landing page', 'peak-publisher'),
+                                hideLabelFromVision: true,
+                                value: choice,
+                                options: T.getLandingOptions(),
+                                disabled: locked,
+                                onChange: choose,
+                            }),
+                            choice === 'other' && createElement(TextControl, {
+                                ref: (el) => { fieldInputs.current.path = el; },
+                                className: 'pblsh--live-preview__landing-path',
+                                __nextHasNoMarginBottom: true,
+                                label: __('Path', 'peak-publisher'),
+                                hideLabelFromVision: true,
+                                value: path,
+                                disabled: locked && fieldBusy !== 'landing_page',
+                                onChange: (typed) => { setLanding({ choice: 'other', path: typed }); setFieldError({}); },
+                                onKeyDown: (e) => {
+                                    if (e.key === 'Enter') { e.preventDefault(); commitPath(); }
+                                    if (e.key === 'Escape') { setLanding(null); setFieldError({}); }
+                                },
+                            }),
+                            choice === 'other' && createElement(Button, { isSecondary: true, isBusy: fieldBusy === 'landing_page', disabled: locked || next === '' || next === current, onClick: commitPath }, T.getChangeLabel()),
+                        ),
+                        fieldError.landing_page && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.landing_page),
                     ),
-                field.editable && createElement('div', { className: 'pblsh--live-preview__muted' }, T.getLandingHint()),
-                fieldError.landing_page && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.landing_page),
+                ),
             );
         };
         // The theme as a row — screenshot, name and slug as the directory lists it (view.theme: the
@@ -316,7 +334,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             const facts = [ absent ? T.getNotOnWporgText() : null, theme && theme.default ? T.getDefaultThemeNote() : null, !field.editable ? T.getSetInJsonNote() : null ].filter(Boolean);
             return createElement('div', { className: 'pblsh--live-preview__field' },
                 renderFieldLabel('theme', __('Theme', 'peak-publisher')),
-                createElement('div', { className: 'pblsh--framed-table-wrap pblsh--live-preview__theme' },
+                createElement('div', { className: 'pblsh--framed-box pblsh--live-preview__theme' },
                     createElement('table', { className: 'pblsh--framed-table pblsh--live-preview__theme-table' },
                         createElement('tbody', null,
                             createElement('tr', null,
@@ -332,7 +350,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                                 createElement('td', { colSpan: 2, className: 'pblsh--live-preview__foot' },
                                     !editing && createElement(Button, { isLink: true, disabled: locked, onClick: () => { focusField.current = 'theme'; setThemeInput(field.slug || ''); } }, T.getChangeThemeLink()),
                                     editing && createElement(Fragment, null,
-                                        createElement('div', { className: 'pblsh--live-preview__foot-controls' },
+                                        createElement('div', { className: 'pblsh--live-preview__controls' },
                                             createElement(TextControl, {
                                                 ref: (el) => { fieldInputs.current.theme = el; },
                                                 __nextHasNoMarginBottom: true,
@@ -417,7 +435,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             };
             return createElement('div', { className: 'pblsh--live-preview__field' },
                 renderFieldLabel('plugins', __('Plugins', 'peak-publisher')),
-                createElement('div', { className: 'pblsh--framed-table-wrap pblsh--live-preview__plugins' },
+                createElement('div', { className: 'pblsh--framed-box pblsh--live-preview__plugins' },
                     createElement('table', { className: 'pblsh--framed-table pblsh--live-preview__plugins-table' },
                         createElement('tbody', null,
                             ...entries.flatMap((plugin, i) => [
@@ -445,7 +463,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                                         createElement('div', { className: 'pblsh--live-preview__foot-actions' },
                                             createElement(Button, { isSecondary: true, onClick: closeAdd }, T.getOkLabel())),
                                     ),
-                                    addStep === 'slug' && createElement('div', { className: 'pblsh--live-preview__foot-controls' },
+                                    addStep === 'slug' && createElement('div', { className: 'pblsh--live-preview__controls' },
                                         createElement(TextControl, {
                                             ref: (el) => { fieldInputs.current.add = el; },
                                             __nextHasNoMarginBottom: true,
@@ -523,11 +541,10 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
 
         // Zone 4: the actions on the blueprint in effect — the test of the working copy, the menu.
         // Setting up is no action on it: that button stands outside the box. Nothing unsaved is
-        // tested: not while the JSON draft or a field is being edited or saved — a click on the
-        // button while the path field has the focus saves the field (its blur) and finds the button
-        // locked until the fresh test link is here; the field's label line says so meanwhile. The
-        // theme's and the plugins' fields save only on Enter or their button: typing there holds nothing.
-        const testBlocked = draft !== null || saving || fieldBusy !== null || otherPath !== null || !view.test.url;
+        // tested: not while the JSON draft is being edited or a field saved — the button stays locked
+        // until the fresh test link is here; the field's label line says so meanwhile. A field being
+        // typed in holds nothing: every field saves only on Enter or its button.
+        const testBlocked = draft !== null || saving || fieldBusy !== null || !view.test.url;
         const testButton = createElement(Button, {
             isPrimary: true,
             ...(testBlocked ? { disabled: true } : { href: view.test.url, target: '_blank', rel: 'noreferrer' }),

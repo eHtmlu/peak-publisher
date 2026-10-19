@@ -1463,7 +1463,7 @@ ol.pblsh--content-list {
 } */
 
 .pblsh--upload-result {
-    width: 45rem;
+    width: 40rem;
     max-width: 100%;
     max-height: calc(100vh - 2rem);
     box-sizing: border-box;

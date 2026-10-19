@@ -72,6 +72,17 @@ lodash.set(window, 'Pblsh.Utils', {
     // The plugin's public page in the wordpress.org directory.
     getWporgPluginUrl: (slug) => 'https://wordpress.org/plugins/' + encodeURIComponent(slug) + '/',
     getWporgThemeUrl: (slug) => 'https://wordpress.org/themes/' + encodeURIComponent(slug) + '/',
+    // A slug as typed, or the slug out of a pasted wordpress.org address (its path segment under
+    // plugins/ or themes/, `kind`), lowercased — nobody has to know a slug to fill such a field.
+    // `valid` says whether it is spelled as wordpress.org spells slugs; `slug` is what was read
+    // either way, for the message.
+    wporgSlugFromInput: (value, kind) => {
+        let raw = String(value || '').trim();
+        const match = raw.match(new RegExp('wordpress\\.org\\/' + kind + '\\/([^\\/?#]+)', 'i'));
+        if (match) raw = match[1];
+        const slug = raw.toLowerCase();
+        return { slug, valid: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) };
+    },
     // The WordPress stable branch (x.y) a Tested up to is judged against — a site fact from
     // core's own version check (AdminUI, wordpress_stable_branch()); never empty, the running
     // version is its floor. The upload checklist judges against the branch its facts recorded.

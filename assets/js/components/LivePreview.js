@@ -30,7 +30,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         const { createElement, createInterpolateElement, Fragment, useState, useEffect, useRef } = wp.element;
         const { useSelect } = wp.data;
         const { Button, DropdownMenu, MenuItem, SelectControl, TextControl, ToggleControl, Tooltip } = wp.components;
-        const { getSvgIcon, getWporgPluginUrl, getWporgThemeUrl } = Pblsh.Utils;
+        const { getSvgIcon, getWporgPluginUrl, getWporgThemeUrl, wporgSlugFromInput } = Pblsh.Utils;
         const { getShownText } = Pblsh.AssetsUtils;
         const T = Pblsh.LivePreviewUtils;
         const { NoticeBox, BlueprintEditor, RelativeTime, TipLink, WporgRevisionLink, AssetStatusBand, PluginIdentity } = Pblsh.Components;
@@ -292,8 +292,9 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // blueprint's wordpress.org theme, or Playground's default when it sets none), linked to
         // its page where there is one —, the fact beside it: the default, set in the JSON, red
         // when the directory lacks it; nothing to name for a theme from elsewhere or an unknown
-        // default. Change opens the slug field beneath, focused with the slug selected; Enter or
-        // leaving saves, Escape closes, an empty slug returns to the default.
+        // default. Change opens the field beneath, focused with the slug selected — a slug, or the
+        // theme's wordpress.org address (wporgSlugFromInput()); Enter or leaving saves, Escape
+        // closes, an empty field returns to the default.
         const renderTheme = () => {
             const field = view.fields.theme;
             const theme = view.theme;
@@ -302,11 +303,11 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             const editing = themeInput !== null;
             const commitTheme = () => {
                 if (themeInput === null) return;
-                const next = themeInput.trim();
+                const next = themeInput.trim() === '' ? '' : wporgSlugFromInput(themeInput, 'themes').slug;
                 if (next === (field.slug || '')) { setThemeInput(null); return; }
                 change('theme', { change: 'theme', value: next }).then((ok) => { if (ok) setThemeInput(null); });
             };
-            const facts = [ absent ? T.getNotOnWporgText() : null, theme && theme.default ? T.getThemePlaceholder() : null, !field.editable ? T.getSetInJsonNote() : null ].filter(Boolean);
+            const facts = [ absent ? T.getNotOnWporgText() : null, theme && theme.default ? T.getDefaultThemeNote() : null, !field.editable ? T.getSetInJsonNote() : null ].filter(Boolean);
             const fact = createElement('td', { className: 'pblsh--live-preview__row-fact' + (absent ? ' pblsh--live-preview__row-fact--missing' : ''), colSpan: theme && theme.slug ? 1 : 2 },
                 facts.join(' · '),
                 field.editable && !editing && createElement(Fragment, null, facts.length > 0 ? ' · ' : '',
@@ -339,6 +340,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
                         if (e.key === 'Escape') { setThemeInput(null); setFieldError({}); }
                     },
                 }),
+                editing && createElement('div', { className: 'pblsh--live-preview__muted' }, T.getThemeHint()),
                 fieldError.theme && createElement('div', { className: 'pblsh--live-preview__field-error' }, fieldError.theme),
             );
         };

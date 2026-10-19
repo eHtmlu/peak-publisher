@@ -10,7 +10,7 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
     const { useState, useEffect, useRef, createElement } = wp.element;
     const { useSelect } = wp.data;
     const { Button, TextControl, Spinner } = wp.components;
-    const { getSvgIcon, getWporgPluginUrl } = Pblsh.Utils;
+    const { getSvgIcon, getWporgPluginUrl, wporgSlugFromInput } = Pblsh.Utils;
     const { formatWporgActiveInstalls } = Pblsh.InstallationsUtils;
     const { Figure, PluginIdentity } = Pblsh.Components;
 
@@ -359,23 +359,10 @@ const WporgImportTable = ({ onOpenPlugin = null, onImported = null } = {}) => {
         }
     };
 
+    // A slug, or a pasted wordpress.org plugin URL (wporgSlugFromInput()).
     const validateManualSlug = (value) => {
-        let raw = String(value || '').trim();
-        // A pasted wordpress.org plugin URL carries the slug as its path
-        // segment — accept it, so nobody has to know their slug to fill
-        // this field.
-        const urlMatch = raw.match(/wordpress\.org\/plugins\/([^\/?#]+)/i);
-        if (urlMatch) {
-            raw = urlMatch[1];
-        }
-        const slug = raw.toLowerCase();
-        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
-            return {
-                slug,
-                error: __('Invalid plugin slug.', 'peak-publisher'),
-            };
-        }
-        return { slug, error: '' };
+        const { slug, valid } = wporgSlugFromInput(value, 'plugins');
+        return { slug, error: valid ? '' : __('Invalid plugin slug.', 'peak-publisher') };
     };
 
     const addManualSlug = () => {

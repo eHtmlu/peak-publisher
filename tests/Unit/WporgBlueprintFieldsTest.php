@@ -142,8 +142,8 @@ final class WporgBlueprintFieldsTest extends TestCase {
 
     public function test_dependencies_are_added_before_the_plugin_and_nothing_goes(): void {
         $own = self::plugin('my-plugin');
-        $added = add_blueprint_plugins(self::blueprint([ 'steps' => [ self::plugin('query-monitor'), $own, [ 'step' => 'login' ] ] ]), 'my-plugin', [ 'buddypress', 'woocommerce' ]);
-        self::assertSame([ self::plugin('query-monitor'), self::plugin('buddypress'), self::plugin('woocommerce'), self::skip('woocommerce'), $own, [ 'step' => 'login' ] ], self::steps($added), 'a known activation redirect dropped right after its install');
+        $added = add_blueprint_plugins(self::blueprint([ 'steps' => [ self::plugin('query-monitor'), $own, [ 'step' => 'login' ] ] ]), 'my-plugin', [ 'akismet', 'woocommerce' ]);
+        self::assertSame([ self::plugin('query-monitor'), self::plugin('akismet'), self::plugin('woocommerce'), self::skip('woocommerce'), $own, [ 'step' => 'login' ] ], self::steps($added), 'a known activation redirect dropped right after its install');
 
         $appended = add_blueprint_plugins(self::blueprint([ 'steps' => [ [ 'step' => 'login' ] ] ]), 'my-plugin', [ 'woocommerce' ]);
         self::assertSame([ [ 'step' => 'login' ], self::plugin('woocommerce'), self::skip('woocommerce') ], self::steps($appended));
@@ -175,6 +175,10 @@ final class WporgBlueprintFieldsTest extends TestCase {
         $fields = blueprint_fields(self::blueprint([ 'steps' => [ $woo, self::skip('woocommerce'), $official, self::plugin('my-plugin') ] ]), 'my-plugin', [ 'woocommerce' ]);
         self::assertSame([ [ 'name' => 'runPHP', 'count' => 1 ] ], $fields['more'], 'the step as Peak Publisher writes it is known; a step doing more is listed');
         self::assertNull(blueprint_fields(self::blueprint([ 'steps' => [ self::plugin('akismet') ] ]), 'my-plugin', [])['plugins'][0]['redirect'], 'no known redirect: nothing to say');
+
+        $elementor = static fn(array $steps): ?string => blueprint_fields(self::blueprint([ 'steps' => $steps ]), 'my-plugin', [])['plugins'][0]['redirect'];
+        self::assertSame('open', $elementor([ self::plugin('elementor'), self::skip('woocommerce') ]), 'another catalogued plugin, its own transient: WooCommerce\'s drop is not its');
+        self::assertSame('skipped', $elementor([ self::plugin('elementor'), self::skip('elementor') ]));
     }
 
     public function test_a_plugin_is_taken_out_with_its_steps_and_its_shorthand_entry(): void {

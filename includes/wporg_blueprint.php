@@ -338,13 +338,30 @@ function set_blueprint_landing_page(\stdClass $blueprint, string $path): \stdCla
 
 
 /**
- * Plugins that send the first admin visit after their activation elsewhere — WooCommerce to its
- * setup — and the transient carrying the redirect: dropped right after the install, the landing
- * page stays, as wordpress.org's own blueprints do it (WordPress/blueprints: woo-shipping,
- * woocommerce-product-feed). By slug. The fields read the fact (blueprint_fields(): `redirect`),
- * Peak Publisher's writes add the step (blueprint_plugin_steps(), add_blueprint_redirect_skip()).
+ * Plugins that send the first admin visit after their activation elsewhere — to their setup or
+ * onboarding — and the transient carrying the redirect: dropped right after the install, the
+ * landing page stays, as wordpress.org's own blueprints do it for WooCommerce
+ * (WordPress/blueprints: woo-shipping, woocommerce-product-feed). By slug; each transient as the
+ * plugin's own source sets it at activation and reads it on admin_init — WooCommerce
+ * includes/class-wc-install.php, Elementor includes/maintenance.php, WPForms
+ * includes/class-install.php, Easy Digital Downloads includes/install.php, The Events Calendar
+ * src/Tribe/Main.php, BuddyPress bp-core/bp-core-update.php, Polylang
+ * src/modules/wizard/wizard.php, Dokan includes/Install/Installer.php. Plugins that carry the
+ * redirect in an option instead (Yoast SEO, Paid Memberships Pro, LifterLMS) are not here: a
+ * different step would have to drop it. The fields read the fact (blueprint_fields():
+ * `redirect`), Peak Publisher's writes add the step (blueprint_plugin_steps(),
+ * add_blueprint_redirect_skip()).
  */
-const PBLSH_BLUEPRINT_ACTIVATION_REDIRECTS = [ 'woocommerce' => '_wc_activation_redirect' ];
+const PBLSH_BLUEPRINT_ACTIVATION_REDIRECTS = [
+    'woocommerce'            => '_wc_activation_redirect',
+    'elementor'              => 'elementor_activation_redirect',
+    'wpforms-lite'           => 'wpforms_activation_redirect',
+    'easy-digital-downloads' => 'edd_onboarding_redirect',
+    'the-events-calendar'    => '_tribe_events_activation_redirect',
+    'buddypress'             => '_bp_activation_redirect',
+    'polylang'               => 'pll_activation_redirect',
+    'dokan-lite'             => '_dokan_setup_page_redirect',
+];
 
 /** The step dropping a plugin's activation redirect — the one shape Peak Publisher writes; blueprint_step_kinds() knows it by its code. */
 function blueprint_redirect_skip_step(string $slug): \stdClass {

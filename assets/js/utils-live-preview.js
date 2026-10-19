@@ -13,9 +13,12 @@ lodash.set(window, 'Pblsh.LivePreviewUtils', (() => {
     // and the public switch.
     const getIgnoredStatusText = () => __('Committed · wordpress.org ignores it', 'peak-publisher');
     const getNotPublicText = () => __("On the plugin page, but visitors don't see it yet.", 'peak-publisher');
-    // <a> is the plugin's Advanced View on wordpress.org.
-    const getSwitchText = () => __("Switch it on in the plugin's <a>Advanced View</a>: The Danger Zone › Toggle Live Preview. Until then only committers see it, as Test Preview.", 'peak-publisher');
-    const getPublicText = () => __('Public — visitors see the Live Preview button', 'peak-publisher');
+    // The line beneath the fact: who sees it meanwhile — the reader, opening the page, is among
+    // them; Test Preview is the button's label there —, then the way to the switch: the last
+    // entry of the Danger Zone, the last section of the page. <a> is the plugin's Advanced View
+    // on wordpress.org.
+    const getSwitchText = () => __("Only committers see it for now, as the Test Preview button. To make it public, switch it on in the Danger Zone at the bottom of the plugin's <a>Advanced View</a>.", 'peak-publisher');
+    const getPublicText = () => __('Visitors see the Live Preview button', 'peak-publisher');
     const getOpenLabel = () => __('Open', 'peak-publisher');
     const getCheckAgainLabel = () => __('Check again', 'peak-publisher');
     const getCheckingText = () => __('Checking wordpress.org…', 'peak-publisher');

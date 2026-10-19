@@ -230,7 +230,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // stands on the plugin page; once wordpress.org has read it, the check of the public switch
         // beneath. The check's line keeps the last answer with its age while a new check runs,
         // "Checking…" beside it — nothing jumps. Visitors not seeing what is on the page is the one
-        // state that asks the user to act: the warning, with the way there. Not while wordpress.org's
+        // state that asks the user to act: the warning, the way there on its own line. Not while wordpress.org's
         // state is shown — like the images' boxes —, and not with nothing here, there or on the page:
         // unlike an image slot, the empty Live Preview is no slot in a grid, the empty state speaks
         // for itself.
@@ -261,7 +261,7 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
             if (preview.public) return band({ text: getShownText() + ' · ' + T.getPublicText() }, renderCheckLine());
             return band({
                 warning: true,
-                text: createElement(Fragment, null, T.getNotPublicText(), ' ', createElement('span', { className: 'pblsh--assets-band__note' }, createInterpolateElement(T.getSwitchText(), { a: advancedLink }))),
+                text: createElement(Fragment, null, T.getNotPublicText(), createElement('span', { className: 'pblsh--assets-band__note' }, createInterpolateElement(T.getSwitchText(), { a: advancedLink }))),
             }, renderCheckLine());
         };
 

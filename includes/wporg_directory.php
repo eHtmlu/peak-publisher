@@ -107,11 +107,16 @@ function record_wporg_live_preview_check(int $plugin_id, bool $public, int $at):
  * Checks whether a plugin's Live Preview is public — one HEAD against its page on wordpress.org
  * (the website, not SVN), on a user's look at the Live Preview — and records the answer.
  *
+ * The URL carries the moment of the check: wordpress.org's edge cache keeps the answer to a
+ * request like this one for minutes, per node, and ignores a no-cache header — without it a
+ * check would read its own earlier answer while a visitor's browser, which the cache serves
+ * anew, already gets the switch's new state. The redirect looks only at `preview`.
+ *
  * @return array{public:bool, checked_at:int}
  * @throws WporgSvnException live_preview_check_failed when wordpress.org gives no determinate answer
  */
 function check_wporg_live_preview(\WP_Post $marker): array {
-    $response = wp_remote_head('https://wordpress.org/plugins/' . rawurlencode($marker->post_name) . '/?preview=1', [
+    $response = wp_remote_head('https://wordpress.org/plugins/' . rawurlencode($marker->post_name) . '/?preview=1&pblsh_check=' . time(), [
         'timeout' => 10,
         'redirection' => 0,
         'user-agent' => wporg_user_agent(),

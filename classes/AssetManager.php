@@ -123,7 +123,7 @@ class AssetManager {
             ],
             'blueprint_files' => $state['blueprints']['blueprint_files'],
             'other_files' => $state['blueprints']['other_files'],
-            'preview' => $directory['preview'],
+            'preview' => get_wporg_live_preview_check((int) $plugin->ID),
         ];
     }
 

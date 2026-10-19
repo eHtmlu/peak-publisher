@@ -57,9 +57,11 @@ code in this repository creates today:
   here and is not regenerable; `includes/wporg_directory.php`),
   `_pblsh_wporg_account_username`, `_pblsh_wporg_directory` (the directory cache: the daily info API figures and the
   check's record — the stamp `{version, last_updated, assets: filename → revision}` of the last completed check, the
-  blueprints of `assets/blueprints/` among the assets, when that was and the last failure since —, the day's claim of
-  the download history's fetch and the last check of the Live Preview's public switch `{public, checked_at}`,
-  regenerable, not declared), `_pblsh_wporg_import` (the import forecast
+  blueprints of `assets/blueprints/` among the assets, when that was and the last failure since —, and the day's claim of
+  the download history's fetch, regenerable, not declared), `_pblsh_wporg_preview` (the last check of the Live
+  Preview's public switch `{public, checked_at}`, absent = never checked; a key of its own, so the check and the
+  directory check never write over each other; regenerable, not declared; `includes/wporg_directory.php`),
+  `_pblsh_wporg_import` (the import forecast
   `{expected_at, reason, assets, stable_touched_at, computed_at}`, regenerable, not declared); release `_pblsh_zip_path`,
   `_pblsh_directory_content_hash` (sha256 over the paths and file contents of the shipped
   tree, `content_hash_from_entries()` in `includes/releases.php`; `''` when the ZIP is

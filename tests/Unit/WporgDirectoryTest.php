@@ -9,6 +9,7 @@ use Pblsh\WporgSvnException;
 
 use function Pblsh\confirm_wporg_directory_check;
 use function Pblsh\get_wporg_directory;
+use function Pblsh\get_wporg_live_preview_check;
 use function Pblsh\is_wporg_directory_check_due;
 use function Pblsh\record_wporg_directory_check_error;
 use function Pblsh\record_wporg_live_preview_check;
@@ -20,6 +21,7 @@ use function Pblsh\wporg_live_preview_public_from_response;
 
 use const Pblsh\PBLSH_WPORG_DIRECTORY_CHECKED_OPTION;
 use const Pblsh\PBLSH_WPORG_DIRECTORY_META;
+use const Pblsh\PBLSH_WPORG_PREVIEW_META;
 
 /**
  * The directory cache of wordpress.org plugins (includes/wporg_directory.php): who is asked —
@@ -364,11 +366,12 @@ final class WporgDirectoryTest extends TestCase {
         self::assertNull(wporg_live_preview_public_from_response(503, ''));
 
         $marker = $this->create_plugin('pblsh_wporg_plugin', 'plugin-a');
-        self::assertNull(get_wporg_directory($marker->ID)['preview']);
+        self::assertNull(get_wporg_live_preview_check($marker->ID));
         record_wporg_live_preview_check($marker->ID, true, 1000);
-        self::assertSame([ 'public' => true, 'checked_at' => 1000 ], get_wporg_directory($marker->ID)['preview']);
-        update_post_meta($marker->ID, PBLSH_WPORG_DIRECTORY_META, [ ...get_wporg_directory($marker->ID), 'preview' => [ 'public' => 'yes' ] ]);
-        self::assertNull(get_wporg_directory($marker->ID)['preview'], 'a foreign shape reads as never checked');
+        self::assertSame([ 'public' => true, 'checked_at' => 1000 ], get_wporg_live_preview_check($marker->ID));
+        self::assertArrayNotHasKey('preview', get_wporg_directory($marker->ID), 'a key of its own, never a field of the directory cache');
+        update_post_meta($marker->ID, PBLSH_WPORG_PREVIEW_META, [ 'public' => 'yes' ]);
+        self::assertNull(get_wporg_live_preview_check($marker->ID), 'a foreign shape reads as never checked');
     }
 
     public function test_a_stored_stamp_without_the_asset_revisions_reads_as_none(): void {

@@ -28,6 +28,9 @@ require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
 
 const PBLSH_WPORG_DIRECTORY_META = '_pblsh_wporg_directory';
 
+/** The last check of the Live Preview's public switch — a key of its own: the check and the directory check never write over each other. Regenerable (docs/data-schema.md). */
+const PBLSH_WPORG_PREVIEW_META = '_pblsh_wporg_preview';
+
 /** The site-wide claim of the last stamp check — the list compares the stamps at most this often. */
 const PBLSH_WPORG_DIRECTORY_CHECKED_OPTION = 'pblsh_wporg_directory_checked_at';
 
@@ -61,7 +64,6 @@ function wporg_directory_defaults(): array {
         'checked_at' => 0,           // the last completed check
         'check_error' => null,       // { code, message, at }, null after a completed check
         'downloads_fetched_at' => 0, // the last fetch of the download history, claimed before the request
-        'preview' => null,           // { public, checked_at } — the last check of the Live Preview's public switch, null = never
     ];
 }
 
@@ -73,10 +75,6 @@ function get_wporg_directory(int $plugin_id): array {
     $stored = get_post_meta($plugin_id, PBLSH_WPORG_DIRECTORY_META, true);
     $directory = is_array($stored) ? array_merge($defaults, array_intersect_key($stored, $defaults)) : $defaults;
     $directory['stamp'] = wporg_directory_stored_stamp($directory['stamp']);
-    $preview = $directory['preview'];
-    $directory['preview'] = is_array($preview) && is_bool($preview['public'] ?? null) && is_int($preview['checked_at'] ?? null)
-        ? [ 'public' => $preview['public'], 'checked_at' => $preview['checked_at'] ]
-        : null;
     return $directory;
 }
 
@@ -97,9 +95,23 @@ function wporg_live_preview_public_from_response(int $status, string $location):
 }
 
 
-/** Records a check of the Live Preview's public switch. */
+/** Records a check of the Live Preview's public switch — its own key, written whole. */
 function record_wporg_live_preview_check(int $plugin_id, bool $public, int $at): void {
-    update_post_meta($plugin_id, PBLSH_WPORG_DIRECTORY_META, [ ...get_wporg_directory($plugin_id), 'preview' => [ 'public' => $public, 'checked_at' => $at ] ]);
+    update_post_meta($plugin_id, PBLSH_WPORG_PREVIEW_META, [ 'public' => $public, 'checked_at' => $at ]);
+}
+
+
+/**
+ * The last check of the Live Preview's public switch, `{public, checked_at}`; null = never.
+ *
+ * @return array{public:bool, checked_at:int}|null
+ */
+function get_wporg_live_preview_check(int $plugin_id): ?array {
+    // Re-validation when reading back from persistence: absent, or of a foreign shape, reads as never checked.
+    $stored = get_post_meta($plugin_id, PBLSH_WPORG_PREVIEW_META, true);
+    return is_array($stored) && is_bool($stored['public'] ?? null) && is_int($stored['checked_at'] ?? null)
+        ? [ 'public' => $stored['public'], 'checked_at' => $stored['checked_at'] ]
+        : null;
 }
 
 

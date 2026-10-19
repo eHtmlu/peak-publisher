@@ -213,7 +213,7 @@ function wporg_sync_token(\WP_Post $marker): string {
     $cached = wporg_decode_json_object((string) $marker->post_content);
     $directory = get_wporg_directory($id);
     $assets = get_wporg_assets_state($id);
-    return ($cached['revision'] ?? '-') . ':' . ($assets['revision'] ?? '-') . ':' . md5((string) json_encode([ $directory['stamp'], $directory['preview'], $assets['pending'] ]));
+    return ($cached['revision'] ?? '-') . ':' . ($assets['revision'] ?? '-') . ':' . md5((string) json_encode([ $directory['stamp'], get_wporg_live_preview_check($id), $assets['pending'] ]));
 }
 
 

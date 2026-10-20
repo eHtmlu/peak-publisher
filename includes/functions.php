@@ -54,6 +54,28 @@ function get_peak_publisher_faq_urls(): array {
 
 
 /**
+ * The footer's promotion of the day: two notes on what wppeak is up to, taking turns by UTC
+ * day — the even days presscharts.com, the odd days the question what Peak Publisher Pro
+ * should do —, so every reader sees the same one on a given day and both over a week. The
+ * footer renders the day's at load (AdminUI::render_peak_publisher()); footer-promo.js turns
+ * the page at midnight UTC for a tab that stays open.
+ *
+ * @return array<int, array{url:string, text:string}> indexed by footer_promo_index()
+ */
+function footer_promos(): array {
+    return [
+        [ 'url' => 'https://www.presscharts.com/', 'text' => __('Coming soon: presscharts.com', 'peak-publisher') ],
+        [ 'url' => 'https://www.wppeak.com/plugins/peak-publisher/', 'text' => __('Peak Publisher Pro is coming — what should it do?', 'peak-publisher') ],
+    ];
+}
+
+/** The promotion a moment falls on: its UTC day's number since the epoch, even or odd — the rule footer-promo.js shares. */
+function footer_promo_index(int $timestamp): int {
+    return intdiv($timestamp, DAY_IN_SECONDS) % 2;
+}
+
+
+/**
  * Returns the installed Peak Publisher version. The plugin header is the only place it is declared.
  */
 function get_peak_publisher_version(): string {

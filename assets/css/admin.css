@@ -2673,15 +2673,17 @@ ol.pblsh--content-list {
    the window's bottom while the content passes above, with the inset above itself — the footer
    owns that distance, so nothing at the bottom of the content brings a bottom margin of its own.
    One quiet row in the admin footer's size and gray: the identity at its start, the links at
-   its end — gray like the text, dark on hover, so the row stays calm beside the content. */
+   its end — gray like the text, dark on hover, so the row stays calm beside the content —, and
+   the day's note in the middle of the row: three columns whose sides share the width equally,
+   so the note is centred on the row and not merely between neighbours of unequal width. */
 .pblsh--footer {
     position: sticky;
     bottom: 0;
     z-index: 100;
     box-sizing: border-box;
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr minmax(0, max-content) 1fr;
     align-items: center;
-    justify-content: space-between;
     gap: 1rem;
     height: var(--pblsh-footer-height);
     margin: var(--pblsh-page-inset) 0 0 calc(-1 * var(--pblsh-page-inset));
@@ -2702,7 +2704,6 @@ ol.pblsh--content-list {
     display: flex;
     align-items: center;
     gap: 1rem;
-    min-width: 0;
 }
 
 /* The brand: the mark and the name, one link. */
@@ -2725,6 +2726,22 @@ ol.pblsh--content-list {
     margin: 0;
     padding: 0;
     list-style: none;
+}
+
+/* The day's promotion (footer_promos()) in the middle column: one line that ellipsizes
+   before either side gives way — the sides never go below their content. The column is as
+   wide as the text, so the clipping the ellipsis needs would cut the link's focus ring: the
+   padding is the ring's room. */
+.pblsh--footer__promo {
+    min-width: 0;
+    padding: 0 0.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+.pblsh--footer__nav {
+    justify-self: end;
 }
 
 /* A dot between the links, on the list item: outside the link, so it neither clicks nor
@@ -2753,6 +2770,7 @@ ol.pblsh--content-list {
 }
 
 @media (max-width: 48.875rem) { /* 782px — the row keeps the identity only, as WordPress drops its footer */
+    .pblsh--footer__promo,
     .pblsh--footer__links {
         display: none;
     }

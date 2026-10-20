@@ -60,8 +60,9 @@ class AdminUI {
      * and the footer (#pblsh-footer), the header's counterpart held at the window's bottom, in
      * place of WordPress's own footer on this page. The footer's content is the same in every
      * view and rendered here, so it stands even when the app does not come up: the brand with
-     * its mark and the installed version, and the three ways to the project — the support
-     * forum, the page on what comes next, and the donation. The outer .pblsh-app is the scope
+     * its mark and the installed version at its start, the support forum and the donation at
+     * its end, and between them the day's promotion (footer_promos()) — both rendered, the
+     * day's shown; footer-promo.js turns the page at midnight UTC. The outer .pblsh-app is the scope
      * of the app's variables and base styles for all of them, and the column that keeps the
      * footer at the bottom of a short page.
      */
@@ -69,12 +70,16 @@ class AdminUI {
         $brand_mark = trim((string) file_get_contents(PBLSH_PLUGIN_DIR . 'assets/images/wppeak-mark.svg'));
         $links = [
             'https://wordpress.org/support/plugin/peak-publisher/' => __('Support', 'peak-publisher'),
-            'https://www.wppeak.com/plugins/peak-publisher/' => __('What\'s next', 'peak-publisher'),
             'https://www.wppeak.com/donate/' => __('Buy me a coffee', 'peak-publisher') . ' ☕',
         ];
         $links_html = '';
         foreach ($links as $url => $label) {
             $links_html .= '<li><a class="pblsh--footer__link" href="' . esc_url($url) . '" target="_blank" rel="noreferrer">' . esc_html($label) . '</a></li>';
+        }
+        $today = footer_promo_index(time());
+        $promos_html = '';
+        foreach (footer_promos() as $index => $promo) {
+            $promos_html .= '<a class="pblsh--footer__link" data-pblsh-promo="' . (int) $index . '" href="' . esc_url($promo['url']) . '" target="_blank" rel="noreferrer"' . ($index === $today ? '' : ' hidden') . '>' . esc_html($promo['text']) . '</a>';
         }
         echo '<div class="pblsh-app">'
             . '<header id="pblsh-header" class="pblsh--header"></header>'
@@ -84,7 +89,8 @@ class AdminUI {
                     . '<a class="pblsh--footer__brand" href="https://www.wppeak.com/" target="_blank" rel="noreferrer">' . $brand_mark . 'wppeak.com</a>'
                     . '<span class="pblsh--footer__version">' . esc_html('Peak Publisher ' . get_peak_publisher_version()) . '</span>'
                 . '</div>'
-                . '<nav aria-label="' . esc_attr__('About Peak Publisher', 'peak-publisher') . '"><ul class="pblsh--footer__links">' . $links_html . '</ul></nav>'
+                . '<div class="pblsh--footer__promo">' . $promos_html . '</div>'
+                . '<nav class="pblsh--footer__nav" aria-label="' . esc_attr__('About Peak Publisher', 'peak-publisher') . '"><ul class="pblsh--footer__links">' . $links_html . '</ul></nav>'
             . '</footer>'
             . '</div>';
     }
@@ -149,6 +155,7 @@ class AdminUI {
             'components/PublishProgress.js',
             'components/GlobalDropOverlay.js',
             'admin.js',
+            'footer-promo.js',
             //'highlightjs/highlight.js',
         ];
 

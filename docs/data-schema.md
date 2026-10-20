@@ -5,8 +5,13 @@ Live: schema version 0 (Peak Publisher 1.3.1, released 2026-04-04 on wordpress.o
 Two schemas exist, never more. The **live schema** is the one publicly rolled out — the data on
 users' sites: Peak Publisher 1.3.1 knows no schema version option (`pblsh_schema_version` absent
 = live), keeps release posts with status `publish`/`draft` whose content is the upload state
-of finalize, md5 or sha256 content hashes over the workspace directory, and assets manifest
-entries `{filename, revision, resolution, local}`. The **current schema** is what the
+of finalize, md5 or sha256 content hashes over the workspace directory, assets manifest
+entries `{filename, revision, resolution, local}`, the plugin meta `_pblsh_latest_release_id`
+(the newest release's post ID), the settings `auto_add_top_level_folder` and
+`readme_txt_convert_to_utf8_without_bom`, the artifact list under the misspelled key
+`wordspace_artifacts_to_remove`, and an installations cache keyed by the whole user
+agent (the migration leaves it to expire within its day — a site counts twice until then,
+as it did under 1.3.1 after every WordPress update). The **current schema** is what the
 code in this repository creates today:
 
 - **Posts:** `pblsh_plugin` (self-hosted plugin, `post_name` = slug, status Public/Draft = the

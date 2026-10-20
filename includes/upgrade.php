@@ -76,14 +76,22 @@ function acquire_schema_migration_lock(): bool {
  * A section the operator may need to know about returns the facts the one-time admin notice
  * reports under its topic key, or null when it has nothing to say this time; a section that
  * never concerns the operator returns nothing.
+ *
+ * Left alone on purpose: the installations cache `_pblsh_installations`, which 1.3.1 keyed
+ * by the whole user agent and the current code keys by the site. Its rows expire within
+ * their day; until then a site counts twice — what every WordPress update did under 1.3.1,
+ * as the user agent carried the WordPress version. Dropping it would show zero instead.
  */
 function upgrade_schema_from_live(): void {
     upgrade_asset_manifest_entries();
     upgrade_self_hosted_release_snapshots();
+    upgrade_drop_latest_release_meta();
+    upgrade_rename_workspace_artifacts_setting();
 
     $topics = array_filter([
         'release_drafts' => upgrade_release_drafts_to_pointer(),
         'readme_conversion' => upgrade_drop_readme_conversion_setting(),
+        'top_level_folder' => upgrade_drop_top_level_folder_setting(),
     ]);
 
     if (!empty($topics)) {
@@ -215,6 +223,78 @@ function upgrade_drop_readme_conversion_setting(): ?array {
     unset($settings['readme_txt_convert_to_utf8_without_bom']);
     update_option('pblsh_settings', $settings, false);
     return $was_disabled ? [ 'was_disabled' => true ] : null;
+}
+
+
+/**
+ * Schema version 1 (ships with the release after 1.3.1): the setting
+ * `auto_add_top_level_folder` ("Add top-level folder if missing") is gone — every release ZIP
+ * is built at finalize with the plugin's slug as its top-level folder.
+ *
+ * Why: WordPress installs the ZIP's root as the plugin folder, and wordpress.org names it by
+ * the slug; a ZIP without that folder was never a useful choice, so the folder is no longer
+ * an option but the way the release is built.
+ *
+ * What: the key is removed from the stored option. An operator who had switched the addition
+ * off learns about the change through the notice.
+ *
+ * @return array|null `{ was_disabled: true }` when the addition was switched off; null otherwise.
+ */
+function upgrade_drop_top_level_folder_setting(): ?array {
+    $settings = get_option('pblsh_settings');
+    if (!is_array($settings) || !array_key_exists('auto_add_top_level_folder', $settings)) {
+        return null;
+    }
+    $was_disabled = empty($settings['auto_add_top_level_folder']);
+    unset($settings['auto_add_top_level_folder']);
+    update_option('pblsh_settings', $settings, false);
+    return $was_disabled ? [ 'was_disabled' => true ] : null;
+}
+
+
+/**
+ * Schema version 1 (ships with the release after 1.3.1): the setting
+ * `wordspace_artifacts_to_remove` is spelled `workspace_artifacts_to_remove`.
+ *
+ * Why: a typo in the stored key since the first release; the name should say what the
+ * setting holds.
+ *
+ * What: the value moves under the new key — where the new key exists already (an interrupted
+ * run), the old one is only dropped — and the old key is removed. Nothing for the notice.
+ */
+function upgrade_rename_workspace_artifacts_setting(): void {
+    $settings = get_option('pblsh_settings');
+    if (!is_array($settings) || !array_key_exists('wordspace_artifacts_to_remove', $settings)) {
+        return;
+    }
+    if (!array_key_exists('workspace_artifacts_to_remove', $settings)) {
+        $settings['workspace_artifacts_to_remove'] = $settings['wordspace_artifacts_to_remove'];
+    }
+    unset($settings['wordspace_artifacts_to_remove']);
+    update_option('pblsh_settings', $settings, false);
+}
+
+
+/**
+ * Schema version 1 (ships with the release after 1.3.1): the plugin meta
+ * `_pblsh_latest_release_id` is gone.
+ *
+ * Why: 1.3.1 recorded the newest release's post ID on the plugin with every upload; since the
+ * current-release pointer nothing reads it — what sites receive is `_pblsh_current_release`,
+ * and the newest release is read from the releases themselves.
+ *
+ * What: the meta is deleted from every self-hosted plugin. Nothing for the notice.
+ */
+function upgrade_drop_latest_release_meta(): void {
+    $plugin_ids = get_posts([
+        'post_type' => 'pblsh_plugin',
+        'post_status' => 'any',
+        'posts_per_page' => -1,
+        'fields' => 'ids',
+    ]);
+    foreach ($plugin_ids as $plugin_id) {
+        delete_post_meta((int) $plugin_id, '_pblsh_latest_release_id');
+    }
 }
 
 

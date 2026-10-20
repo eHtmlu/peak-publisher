@@ -52,7 +52,7 @@ function get_peak_publisher_settings_defaults(): array {
         'standalone_mode' => false,
         'auto_remove_workspace_artifacts' => true,
         'count_plugin_installations' => true,
-        'wordspace_artifacts_to_remove' => [
+        'workspace_artifacts_to_remove' => [
             '.git',
             '.gitignore',
             '.gitattributes',
@@ -110,15 +110,15 @@ function sanitize_peak_publisher_settings(array $settings): array {
     $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
     $out['auto_remove_workspace_artifacts'] = (bool) ($settings['auto_remove_workspace_artifacts'] ?? true);
     $out['count_plugin_installations'] = (bool) ($settings['count_plugin_installations'] ?? true);
-    $wordspace_artifacts_to_remove = $settings['wordspace_artifacts_to_remove'] ?? [];
-    if (!is_array($wordspace_artifacts_to_remove)) {
-        $wordspace_artifacts_to_remove = [];
+    $workspace_artifacts_to_remove = $settings['workspace_artifacts_to_remove'] ?? [];
+    if (!is_array($workspace_artifacts_to_remove)) {
+        $workspace_artifacts_to_remove = [];
     }
-    $out['wordspace_artifacts_to_remove'] = array_values(array_filter(array_map(function($v){
+    $out['workspace_artifacts_to_remove'] = array_values(array_filter(array_map(function($v){
         $v = trim((string) $v);
         $v = wp_basename($v);
         return $v !== '' ? $v : null;
-    }, $wordspace_artifacts_to_remove)));
+    }, $workspace_artifacts_to_remove)));
     $ips = $settings['ip_whitelist'] ?? [];
     if (!is_array($ips)) {
         $ips = [];

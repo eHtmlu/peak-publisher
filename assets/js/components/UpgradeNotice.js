@@ -77,10 +77,19 @@ lodash.set(window, 'Pblsh.Components.UpgradeNotice', ({ onOpenPlugin }) => {
         ),
     ];
 
+    // The top-level folder setting is gone; the section appears only where it was off.
+    const renderTopLevelFolder = () => [
+        topicTitle(__('Every release ZIP has the plugin folder as its root now', 'peak-publisher')),
+        createElement('p', null,
+            __('The setting "Add top-level folder if missing" is gone, and you had switched it off: every release ZIP is now built with the plugin\'s slug as its top-level folder. WordPress installs the ZIP\'s root as the plugin folder, and wordpress.org names that folder by the slug.', 'peak-publisher'),
+        ),
+    ];
+
     const topics = notice.topics && typeof notice.topics === 'object' ? notice.topics : {};
     const sections = [
         topics.release_drafts && renderReleaseDrafts(topics.release_drafts),
         topics.readme_conversion && renderReadmeConversion(),
+        topics.top_level_folder && renderTopLevelFolder(),
     ].filter(Boolean);
     if (sections.length === 0) return null;
 

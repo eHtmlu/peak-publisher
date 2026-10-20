@@ -19,7 +19,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
     const [settings, setSettings] = useState({
         standalone_mode: false,
         auto_remove_workspace_artifacts: false,
-        wordspace_artifacts_to_remove: [],
+        workspace_artifacts_to_remove: [],
         ip_whitelist: [],
         count_plugin_installations: false,
         standalone_redirect_url: '',
@@ -55,7 +55,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             setSettings({
                 standalone_mode: !!serverSettings.standalone_mode,
                 auto_remove_workspace_artifacts: !!serverSettings.auto_remove_workspace_artifacts,
-                wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.wordspace_artifacts_to_remove) ? serverSettings.wordspace_artifacts_to_remove : []),
+                workspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.workspace_artifacts_to_remove) ? serverSettings.workspace_artifacts_to_remove : []),
                 ip_whitelist: getTextareaFromList(Array.isArray(serverSettings.ip_whitelist) ? serverSettings.ip_whitelist : []),
                 count_plugin_installations: !!serverSettings.count_plugin_installations,
                 standalone_redirect_url: serverSettings.standalone_redirect_url || '',
@@ -88,7 +88,7 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
 
         payload.standalone_mode = !!settings.standalone_mode;
         payload.auto_remove_workspace_artifacts = !!settings.auto_remove_workspace_artifacts;
-        payload.wordspace_artifacts_to_remove = normalizeListFromTextarea(settings.wordspace_artifacts_to_remove);
+        payload.workspace_artifacts_to_remove = normalizeListFromTextarea(settings.workspace_artifacts_to_remove);
         payload.ip_whitelist = normalizeListFromTextarea(settings.ip_whitelist);
         payload.count_plugin_installations = !!settings.count_plugin_installations;
         payload.standalone_redirect_url = settings.standalone_redirect_url || '';
@@ -337,8 +337,8 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
                         }
                     ),
                 ],
-                value: settings.wordspace_artifacts_to_remove,
-                onChange: (val) => setField('wordspace_artifacts_to_remove', val),
+                value: settings.workspace_artifacts_to_remove,
+                onChange: (val) => setField('workspace_artifacts_to_remove', val),
                 rows: 6,
                 __next40pxDefaultSize: true,
             })

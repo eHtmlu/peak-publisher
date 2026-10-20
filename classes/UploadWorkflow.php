@@ -654,7 +654,7 @@ class UploadWorkflow {
                     ],
                     'settings_on_upload' => array_intersect_key($settings, array_flip([
                         'auto_remove_workspace_artifacts',
-                        'wordspace_artifacts_to_remove',
+                        'workspace_artifacts_to_remove',
                     ])),
                 ],
                 'plugin_data' => $plugin_data,
@@ -1634,7 +1634,7 @@ class UploadWorkflow {
      */
     private function find_workspace_artifacts(string $root): array {
         $settings = get_peak_publisher_settings();
-        $patterns = array_values(array_filter(array_map('strval', (array) ($settings['wordspace_artifacts_to_remove'] ?? []))));
+        $patterns = array_values(array_filter(array_map('strval', (array) ($settings['workspace_artifacts_to_remove'] ?? []))));
         if (empty($patterns)) {
             return [];
         }

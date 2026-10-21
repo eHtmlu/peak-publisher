@@ -1233,7 +1233,15 @@ class WporgPluginSvnClient {
             return [];
         }
 
-        if (!self::is_batch_transport_available()) {
+        /**
+         * Filters whether the batch runs through curl_multi. The curl handles bypass the
+         * WordPress HTTP API and its filters; a development site that answers wordpress.org
+         * itself through `pre_http_request` returns false, and the requests go one after the
+         * other through the HTTP API instead — the same answers, slower.
+         *
+         * @param bool $batch Whether curl_multi is used. Default true.
+         */
+        if (!self::is_batch_transport_available() || !apply_filters('pblsh_svn_batch_transport', true)) {
             $responses = [];
             foreach ($paths as $path) {
                 $responses[$path] = $this->request_url($method, $this->build_url($path), $headers, $body);

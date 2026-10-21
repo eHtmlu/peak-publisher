@@ -104,7 +104,7 @@ function upgrade_schema_from_live(): void {
 
 
 /**
- * Schema version 1 (ships with the release after 1.3.1): release drafts become the
+ * Schema version 1 (ships with 2.0.0): release drafts become the
  * plugin's current-release pointer.
  *
  * Why: sites received the highest *published* release, and drafting a release was the way
@@ -201,7 +201,7 @@ function upgrade_release_drafts_to_pointer(): ?array {
 
 
 /**
- * Schema version 1 (ships with the release after 1.3.1): the setting
+ * Schema version 1 (ships with 2.0.0): the setting
  * `readme_txt_convert_to_utf8_without_bom` is gone — every uploaded readme is stored as
  * UTF-8 without a BOM.
  *
@@ -227,7 +227,7 @@ function upgrade_drop_readme_conversion_setting(): ?array {
 
 
 /**
- * Schema version 1 (ships with the release after 1.3.1): the setting
+ * Schema version 1 (ships with 2.0.0): the setting
  * `auto_add_top_level_folder` ("Add top-level folder if missing") is gone — every release ZIP
  * is built at finalize with the plugin's slug as its top-level folder.
  *
@@ -253,7 +253,7 @@ function upgrade_drop_top_level_folder_setting(): ?array {
 
 
 /**
- * Schema version 1 (ships with the release after 1.3.1): the setting
+ * Schema version 1 (ships with 2.0.0): the setting
  * `wordspace_artifacts_to_remove` is spelled `workspace_artifacts_to_remove`.
  *
  * Why: a typo in the stored key since the first release; the name should say what the
@@ -276,7 +276,7 @@ function upgrade_rename_workspace_artifacts_setting(): void {
 
 
 /**
- * Schema version 1 (ships with the release after 1.3.1): the plugin meta
+ * Schema version 1 (ships with 2.0.0): the plugin meta
  * `_pblsh_latest_release_id` is gone.
  *
  * Why: 1.3.1 recorded the newest release's post ID on the plugin with every upload; since the
@@ -299,7 +299,7 @@ function upgrade_drop_latest_release_meta(): void {
 
 
 /**
- * Schema version 1 (ships with the release after 1.3.1): a self-hosted release post's content
+ * Schema version 1 (ships with 2.0.0): a self-hosted release post's content
  * becomes the snapshot {plugin_data, plugin_info, plugin_readme_txt} — regenerable from its
  * ZIP, like a wporg tag's from SVN — and the upload state moves to the meta
  * _pblsh_upload_state.
@@ -354,7 +354,7 @@ function upgrade_self_hosted_release_snapshots(): void {
 
 
 /**
- * Schema version 1 (ships with the release after 1.3.1): an assets manifest entry carries the
+ * Schema version 1 (ships with 2.0.0): an assets manifest entry carries the
  * file's size and pixel dimensions and loses the never-read key `local`.
  *
  * Why: the editor reads size and dimensions from the manifest instead of measuring the disk on

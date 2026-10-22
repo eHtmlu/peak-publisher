@@ -18,7 +18,7 @@ One place for all your plugins: publish to wordpress.org without SVN, self‑hos
 
 Peak Publisher is one place for all your plugins, wherever they are hosted. Plugins on wordpress.org are published by dropping the plugin folder — Peak Publisher talks to SVN for you, builds the tag, sets the Stable tag and commits once. Plugins for clients, teams and products are self‑hosted: your WordPress site becomes their update server, and installed copies receive updates directly from you via a standard `Update URI`.
 
-VIDEO-URL-PLACEHOLDER (a YouTube or Vimeo URL alone on this line becomes an embedded video)
+https://www.youtube.com/watch?v=HtbrkzKiIUE
 
 Both channels share one task‑focused admin UI: add plugins and releases via drag & drop, let every upload be validated, decide with one switch which release your sites receive, manage icons, banners, screenshots and the Live Preview, keep Tested up to current, and see installations, downloads and ratings in one list.
 

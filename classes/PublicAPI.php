@@ -812,7 +812,7 @@ class PublicAPI {
             $color = $m[2];
         }
 
-        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/libs/geopattern-1.1.0/geopattern_loader.php';
+        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/libs/geopattern-1.1.2/geopattern_loader.php';
 
         $icon = new \Pblsh\Vendor\RedeyeVentures\GeoPattern\GeoPattern();
         $icon->setString( $slug );

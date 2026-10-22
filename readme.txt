@@ -263,6 +263,7 @@ Of course, WordPress.org remains the update server and the primary data source. 
 * Requires Plugins: served by the public API in wordpress.org's format; a wordpress.org publish is refused when the import would reject the header
 * The plugin's slug comes from the folder, ZIP or main file name; every release ZIP has the slug as its root (the setting "Add top-level folder if missing" is gone)
 * readme.txt is always stored as UTF-8 without a BOM (the setting is gone)
+* The readme parser and the icon generator are wordpress.org's current code: readmes render as the directory renders them, generated icons match its
 * Daily download counts for self-hosted plugins, served as `downloaded` by the public API
 * "Add New Plugin" starts with the channel and, for wordpress.org, with where the plugin stands; tips explain headers, review, captions, Live Preview and version numbers
 * Status column in the plugin list, the channel and slug of every plugin, figures aligned with the name, the list sorted by name

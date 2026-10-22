@@ -88,6 +88,23 @@ class WporgPluginSvnClient {
         return function_exists('curl_multi_exec') && function_exists('curl_init');
     }
 
+    /**
+     * Whether the client talks to SVN through cURL handles of its own — the batch reads through
+     * curl_multi (request_paths_multi()) and the streaming file uploads of a commit
+     * (stream_put_file()). Those bypass the WordPress HTTP API and its filters; a development
+     * site that answers wordpress.org itself through `pre_http_request` turns them off, and the
+     * requests go through the HTTP API instead — the reads one after the other, an upload with
+     * the file in memory: the same answers, slower.
+     */
+    private function uses_own_curl_handles(): bool {
+        /**
+         * Filters whether the SVN client uses cURL handles of its own (uses_own_curl_handles()).
+         *
+         * @param bool $own Default true.
+         */
+        return (bool) apply_filters('pblsh_svn_curl_transport', true);
+    }
+
     public function list_directories_multi(array $paths, int $depth = 1, int $concurrency = 5): array {
         $depth = max(0, min(1, $depth));
         $responses = $this->request_paths_multi('PROPFIND', $paths, [
@@ -661,6 +678,13 @@ class WporgPluginSvnClient {
     }
 
     private function stream_put_file(string $url, string $local_path): array {
+        $size = filesize($local_path);
+        $size = is_int($size) ? $size : 0;
+        $timeout = max(30, min(300, (int) ceil($size / 100000)));
+        if (!$this->uses_own_curl_handles()) {
+            return $this->request_url('PUT', $url, [ 'Content-Type' => 'application/octet-stream' ], (string) file_get_contents($local_path), [ 'timeout' => $timeout ]);
+        }
+
         // Stream local files to SVN without loading them into memory
         if (!function_exists('curl_init')) {
             throw new WporgSvnException(
@@ -670,9 +694,6 @@ class WporgPluginSvnClient {
             );
         }
 
-        $size = filesize($local_path);
-        $size = is_int($size) ? $size : 0;
-        $timeout = max(30, min(300, (int) ceil($size / 100000)));
         $fh = fopen($local_path, 'rb');
         if (!is_resource($fh)) {
             throw new WporgSvnException(
@@ -1233,15 +1254,7 @@ class WporgPluginSvnClient {
             return [];
         }
 
-        /**
-         * Filters whether the batch runs through curl_multi. The curl handles bypass the
-         * WordPress HTTP API and its filters; a development site that answers wordpress.org
-         * itself through `pre_http_request` returns false, and the requests go one after the
-         * other through the HTTP API instead — the same answers, slower.
-         *
-         * @param bool $batch Whether curl_multi is used. Default true.
-         */
-        if (!self::is_batch_transport_available() || !apply_filters('pblsh_svn_batch_transport', true)) {
+        if (!self::is_batch_transport_available() || !$this->uses_own_curl_handles()) {
             $responses = [];
             foreach ($paths as $path) {
                 $responses[$path] = $this->request_url($method, $this->build_url($path), $headers, $body);

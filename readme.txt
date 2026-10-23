@@ -209,6 +209,8 @@ Only what the checklist tells you: workspace artifacts are removed by the patter
 = Can I restrict access to downloads? =
 Yes. For self‑hosted plugins you can optionally configure a whitelist of IP addresses, CIDR ranges or domain names for the public endpoints. For stricter access control, consider placing your Peak Publisher site behind a VPN or a reverse proxy, or adding your own authentication layer.
 
+The whitelist guards the API; the release ZIPs on disk are guarded by the `.htaccess` Peak Publisher writes into `wp-content/uploads/pblsh-peak-publisher/`, which Apache and LiteSpeed honor. On nginx, add a rule that denies direct access to that directory except for the images under `plugins/*/assets/` and `wporg-plugins/*/mirror/assets/`, which are meant to be served directly.
+
 = Do you support semantic versioning? =
 Yes. The validator recognizes major/minor/patch increments and warns on unexpected jumps.
 

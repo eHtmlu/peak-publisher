@@ -184,7 +184,7 @@ final class UpgradeTest extends TestCase {
             'plugin_readme_txt' => [ 'found' => true, 'file_name' => 'readme.txt', 'content' => [] ],
             'cleanup_info' => [ 'size_after_cleanup' => 1 ],
         ];
-        $release_id = wp_insert_post([ 'post_type' => 'pblsh_release', 'post_status' => 'publish', 'post_title' => '1.4', 'post_parent' => $plugin->ID, 'post_content' => json_encode($upload_state) ]);
+        $release_id = wp_insert_post([ 'post_type' => 'pblsh_release', 'post_status' => 'publish', 'post_title' => '1.4', 'post_parent' => $plugin->ID, 'post_content' => json_encode($upload_state), 'post_modified' => '2026-02-22 05:10:00', 'post_modified_gmt' => '2026-02-22 04:10:00' ]);
         update_post_meta($release_id, '_pblsh_zip_path', 'plugins/my-plugin/releases/my-plugin.1.4.zip');
         update_post_meta($release_id, '_pblsh_directory_content_hash', md5('x'));
 
@@ -196,6 +196,7 @@ final class UpgradeTest extends TestCase {
         self::assertSame('1.4', $content['plugin_info']['normalized_version']);
         self::assertSame($upload_state, json_decode(get_post_meta($release_id, '_pblsh_upload_state', true), true), 'the upload state, verbatim');
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', get_post_meta($release_id, '_pblsh_directory_content_hash', true), 'recomputed from the ZIP');
+        self::assertSame([ '2026-02-22 05:10:00', '2026-02-22 04:10:00' ], [ get_post($release_id)->post_modified, get_post($release_id)->post_modified_gmt ], 'the release was not changed, only stored in another form: sites keep seeing its last update');
 
         $content_before = get_post($release_id)->post_content;
         delete_option('pblsh_schema_version');

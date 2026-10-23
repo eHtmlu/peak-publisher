@@ -83,6 +83,7 @@ namespace {
         public string $post_content = '';
         public string $post_date = '2026-01-01 00:00:00';
         public string $post_date_gmt = '2026-01-01 00:00:00';
+        public string $post_modified = '2026-01-01 00:00:00';
         public string $post_modified_gmt = '2026-01-01 00:00:00';
 
         public function __construct(array $fields = []) {
@@ -192,9 +193,14 @@ namespace {
         }
         // WordPress merges the stored post, slashed, into the update and saves it whole: the
         // content passes the save filters again, even when the update only names another
-        // field, and every field is unslashed before it is stored.
+        // field, every field is unslashed before it is stored, the modified times are now
+        // whatever the update says, and the row passes wp_insert_post_data last.
         $postarr['post_content'] = apply_filters('content_save_pre', $postarr['post_content'] ?? wp_slash($post->post_content));
-        foreach (wp_unslash($postarr) as $field => $value) {
+        $data = wp_unslash($postarr);
+        $data['post_modified'] = gmdate('Y-m-d H:i:s');
+        $data['post_modified_gmt'] = $data['post_modified'];
+        $data = apply_filters('wp_insert_post_data', $data, $postarr, $postarr, true);
+        foreach ($data as $field => $value) {
             if ($field !== 'ID' && property_exists($post, $field)) {
                 $post->$field = $value;
             }

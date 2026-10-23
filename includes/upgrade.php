@@ -312,7 +312,9 @@ function upgrade_drop_latest_release_meta(): void {
  * What, per self-hosted release whose content carries keys beyond the three and whose meta is
  * missing: content → meta; the snapshot from the ZIP (release_snapshot_from_zip()), or — ZIP
  * gone or unreadable without the zip extension — the three keys of the old content; the hash
- * from the ZIP, '' without one. A repeated
+ * from the ZIP, '' without one. The release itself does not change, only its stored form: the
+ * post's modified time stays, so what sites see as "last updated" (post_modified_gmt, the
+ * public API) does not move with the migration. A repeated
  * run finds nothing to do. Nothing for the notice. wporg release posts carry tag snapshots
  * already and are not touched.
  */
@@ -345,8 +347,15 @@ function upgrade_self_hosted_release_snapshots(): void {
             $zip_readable = $zip !== '' && is_file($zip) && release_zip_support();
             $snapshot = $zip_readable ? release_snapshot_from_zip($zip) : null;
             // A failed write is tolerated here, on init: the content stays the old upload state,
-            // which carries the three keys release_snapshot() reads.
-            write_release_snapshot($release, $snapshot ?? release_snapshot($release));
+            // which carries the three keys release_snapshot() reads. wp_update_post() stamps
+            // every update with the current time; the row keeps the release's own.
+            $keep_modified = static fn(array $data): array => [ ...$data, 'post_modified' => $release->post_modified, 'post_modified_gmt' => $release->post_modified_gmt ];
+            add_filter('wp_insert_post_data', $keep_modified, PHP_INT_MAX);
+            try {
+                write_release_snapshot($release, $snapshot ?? release_snapshot($release));
+            } finally {
+                remove_filter('wp_insert_post_data', $keep_modified, PHP_INT_MAX);
+            }
             update_post_meta((int) $release->ID, '_pblsh_directory_content_hash', $zip_readable ? content_hash_from_entries(zip_entries($zip)) : '');
         }
     }

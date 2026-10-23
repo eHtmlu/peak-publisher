@@ -2029,7 +2029,6 @@ class UploadWorkflow {
         $relative = static fn(string $abs): string => $slug . '/' . substr($abs, strlen($content_root));
 
         get_wp_filesystem(); // Ensure the WordPress file functions are initialized
-        wp_zip_file_is_valid($zip_path); // Ensure the respective WordPress zip class is initialized
 
         $created = false;
         $generated_with = '';
@@ -2051,8 +2050,10 @@ class UploadWorkflow {
             }
         }
 
-        // Fallback: use WordPress bundled PclZip if ZipArchive is unavailable or failed
-        if (!$created && class_exists('\\PclZip')) {
+        // Fallback: WordPress's bundled PclZip when ZipArchive is unavailable or failed. The class
+        // ships with every WordPress but is loaded on demand.
+        if (!$created) {
+            require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
             // PclZip adds a listed directory with everything below it, so only the empty ones
             // are listed — the others come with their files.
             $empty_dirs = array_values(array_filter($dirs, static fn(string $dir): bool => count((array) scandir($dir)) === 2));

@@ -284,6 +284,7 @@ Of course, WordPress.org remains the update server and the primary data source. 
 * Plugin header lines crossing the 8 KB boundary are left alone
 * curl_close(), deprecated in PHP 8.5, is no longer called; servers without curl_multi read wordpress.org one request at a time
 * Release ZIPs keep empty folders
+* Self-hosted releases can be built on WordPress before 6.4.4 again; since 1.3.1 the publish failed there
 
 = 1.3.1 - 2026-04-04 =
 * Fixed minor compatibility issues with WordPress 7.0

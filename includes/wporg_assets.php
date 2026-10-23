@@ -26,6 +26,7 @@ function wporg_assets_state_defaults(): array {
         'color_source' => null,  // { filename, revision } the stored banner color was computed from (A10)
         'blueprints' => wporg_blueprints_mirror_defaults(), // the mirror of assets/blueprints/
         'pending' => [],         // the working copy: slot_id → entry, 'blueprint' for the Live Preview
+        'rejected' => [],        // SVN files the mirror refused (check_svg_file()): slot_id → the winner with the refusal's code
     ];
 }
 
@@ -60,6 +61,8 @@ function get_wporg_assets_state(int $marker_id): array {
     }
     $pending = is_array($state['pending']) ? $state['pending'] : [];
     $state['pending'] = array_filter($pending, static fn($entry, $slot_id): bool => is_wporg_asset_entry((string) $slot_id, $entry), ARRAY_FILTER_USE_BOTH);
+    $rejected = is_array($state['rejected']) ? $state['rejected'] : [];
+    $state['rejected'] = array_filter($rejected, static fn($entry, $slot_id): bool => is_wporg_rejected_entry((string) $slot_id, $entry), ARRAY_FILTER_USE_BOTH);
     return $state;
 }
 
@@ -106,16 +109,41 @@ function wporg_asset_base(?array $mirror_entry): ?array {
     return $mirror_entry === null ? null : [ 'filename' => (string) $mirror_entry['filename'], 'revision' => (int) $mirror_entry['revision'] ];
 }
 
+
+/**
+ * A refusal as the pull records it (WporgAssetSync::pull_unlocked()): the slot's winner on SVN
+ * — filename, revision, resolution, filesize — and the code check_svg_file() refused it with.
+ */
+function is_wporg_rejected_entry(string $slot_id, $entry): bool {
+    return is_array($entry) && asset_slot_definition($slot_id) !== null
+        && is_string($entry['filename'] ?? null) && is_int($entry['revision'] ?? null)
+        && array_key_exists('resolution', $entry) && is_int($entry['filesize'] ?? null) && is_string($entry['code'] ?? null);
+}
+
+
+/**
+ * The refusals that still stand: SVN still has the refused file in its slot. A new revision
+ * there is tried again (mirror_diff() fetches it), a slot SVN no longer fills forgets it.
+ *
+ * @param array<string, array> $rejected slot id → refusal (the state's `rejected`)
+ * @param array<string, array> $remote_winners slot id → winner (classify_asset_listing())
+ * @return array<string, array>
+ */
+function rejected_assets_kept(array $rejected, array $remote_winners): array {
+    return array_filter($rejected, static fn(array $entry, $slot_id): bool => wporg_asset_base($remote_winners[$slot_id] ?? null) === wporg_asset_base($entry), ARRAY_FILTER_USE_BOTH);
+}
+
 /**
  * What the pull changes in the mirror: the slots whose winner on SVN differs in name or
- * revision from the mirror's (fetch), and the slots SVN no longer fills (remove).
+ * revision from the mirror's (fetch) — a winner the mirror refused (rejected_assets_kept())
+ * is not asked for again —, and the slots SVN no longer fills (remove).
  *
  * @return array{fetch: string[], remove: string[]}
  */
-function mirror_diff(array $mirror, array $remote_winners): array {
+function mirror_diff(array $mirror, array $remote_winners, array $rejected): array {
     $fetch = [];
     foreach ($remote_winners as $slot_id => $winner) {
-        if (wporg_asset_base($mirror[$slot_id] ?? null) !== wporg_asset_base($winner)) {
+        if (wporg_asset_base($mirror[$slot_id] ?? null) !== wporg_asset_base($winner) && wporg_asset_base($rejected[$slot_id] ?? null) !== wporg_asset_base($winner)) {
             $fetch[] = (string) $slot_id;
         }
     }
@@ -326,10 +354,14 @@ function blueprint_mirror_base(array $state): ?array {
     return $file === null ? null : [ 'filename' => PBLSH_BLUEPRINT_FILENAME, 'revision' => (int) $file['revision'] ];
 }
 
-/** The mirror as slot → state, the Live Preview included — what entries are compared with (asset_conflicts(), resolve). */
+/**
+ * The mirror as slot → state, the Live Preview and the refused files included — what entries
+ * are compared with (asset_conflicts(), resolve) and what the plugin page is judged against
+ * (assets_import_waiting()): a refused file is on SVN and on the page, only not on this disk.
+ */
 function wporg_mirror_slots(array $manifest, array $state): array {
     $blueprint = blueprint_mirror_base($state);
-    return $blueprint === null ? $manifest : [ ...$manifest, 'blueprint' => $blueprint ];
+    return [ ...$manifest, ...array_map('Pblsh\wporg_asset_base', $state['rejected']), ...($blueprint === null ? [] : [ 'blueprint' => $blueprint ]) ];
 }
 
 /** The Live Preview once the working copy is applied: the entry's contents, null after a delete, else the mirror's (null: none, or not read over the limit). */

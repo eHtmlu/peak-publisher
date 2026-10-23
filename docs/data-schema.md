@@ -46,8 +46,11 @@ code in this repository creates today:
   marker: the same
   manifest metas and `assets_banners_color` describing the assets mirror (revision = the SVN
   revision the file was last changed in; regenerable from SVN), `_pblsh_wporg_assets`
-  (`{revision, other_files, color_source, blueprints, pending}` — the revision of `assets/` the
-  mirror holds, `0` = no directory, `null` = never pulled; `blueprints` = the mirror of
+  (`{revision, other_files, color_source, blueprints, pending, rejected}` — the revision of `assets/` the
+  mirror holds, `0` = no directory, `null` = never pulled; `rejected` = the SVN files the mirror
+  refused (an SVG with active content, `check_svg_file()`), regenerable: slot id → the slot's
+  winner `{filename, revision, resolution, filesize}` plus `code`, forgotten once SVN has another
+  file or none in the slot; `blueprints` = the mirror of
   `assets/blueprints/`, regenerable: `{revision, blueprint_files, other_files, file}` — the
   directory's revision, `null` = none; the files wordpress.org's import takes there and the
   others; `file` = `blueprint.json` `{revision, filesize, contents}`, `contents` `null` over

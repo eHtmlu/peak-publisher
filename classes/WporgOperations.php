@@ -738,11 +738,21 @@ class WporgOperations {
     /**
      * Downloads assets/{filename} into $local_path, streamed; a failure leaves no file behind.
      * $filename comes from a list_assets() entry that classify_asset_listing() accepted. With
-     * $revision the file as it was then (a copy source the mirror no longer holds).
+     * $revision the file as it was then (a copy source the mirror no longer holds). An SVG
+     * passes the one SVG rule of both channels (check_svg_file()) before it stays: the files
+     * are served from this site's origin, and this is the one place SVN bytes become a local
+     * file; a refused file is deleted and thrown as its error (asset_svg_active,
+     * asset_svg_unchecked).
      */
     public static function download_asset(string $wporg_slug, string $filename, string $local_path, int $size, ?WporgPluginSvnClient $client = null, ?int $revision = null): void {
         try {
             ($client ?? self::svn_client())->download_file(self::normalize_slug_or_throw($wporg_slug) . '/assets/' . $filename, $local_path, $size, $revision);
+            if (strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'svg') {
+                $refusal = check_svg_file($local_path);
+                if ($refusal !== null) {
+                    throw WporgSvnException::from_wp_error($refusal);
+                }
+            }
         } catch (\Throwable $e) {
             if (file_exists($local_path)) {
                 wp_delete_file($local_path);

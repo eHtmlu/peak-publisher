@@ -4484,12 +4484,14 @@ body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
 .pblsh--assets-band--conflict {
     --pblsh-band-color: var(--color-red);
 }
-.pblsh--assets-band--warning {
+.pblsh--assets-band--warning,
+.pblsh--assets-band--rejected {
     --pblsh-band-color: var(--color-orange);
 }
 .pblsh--assets-band--pending,
 .pblsh--assets-band--conflict,
-.pblsh--assets-band--warning {
+.pblsh--assets-band--warning,
+.pblsh--assets-band--rejected {
     --pblsh-band-background: color-mix(in srgb, var(--pblsh-band-color) 10%, #fff);
     --pblsh-band-border: color-mix(in srgb, var(--pblsh-band-color) 30%, #fff);
 }

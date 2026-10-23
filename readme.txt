@@ -275,6 +275,7 @@ Of course, WordPress.org remains the update server and the primary data source. 
 
 * A readme's content is never read as a path or URL (before, a readme that began with http(s):// was fetched, and one consisting of a single path line was read from disk)
 * Readme sections are rendered under wordpress.org's limits: no oEmbed discovery (before, every URL alone on a line was fetched by the server), embeds only from the provider list, no shortcodes of the site
+* SVG assets must be free of active content — scripts, event handlers, javascript: links — on both channels: an upload is refused, and a file on wordpress.org that fails the rule is kept off this site, which serves its assets from its own origin
 
 **Fixes**
 

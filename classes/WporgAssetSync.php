@@ -89,8 +89,10 @@ class WporgAssetSync {
         $classified = classify_asset_listing($listing['entries'] ?? []);
         $remote = array_map(static fn(array $slot): array => $slot['winner'], $classified['slots']);
         $manifest = read_asset_manifest((int) $marker->ID);
-        $diff = mirror_diff($manifest, $remote);
-        $blueprints = $this->pull_blueprints($marker, $listing, get_wporg_assets_state((int) $marker->ID)['blueprints'], $client);
+        $stored = get_wporg_assets_state((int) $marker->ID);
+        $rejected = rejected_assets_kept($stored['rejected'], $remote);
+        $diff = mirror_diff($manifest, $remote, $rejected);
+        $blueprints = $this->pull_blueprints($marker, $listing, $stored['blueprints'], $client);
         $changed = $diff['fetch'] !== [] || $diff['remove'] !== [] || $blueprints['changed'];
 
         ensure_plugin_assets_dir($marker);
@@ -117,6 +119,17 @@ class WporgAssetSync {
             try {
                 WporgOperations::download_asset($marker->post_name, $winner['filename'], $temp, $winner['filesize'], $client);
             } catch (\Throwable $e) {
+                if ($e instanceof WporgSvnException && in_array($e->get_error_code(), [ 'asset_svg_active', 'asset_svg_unchecked' ], true)) {
+                    // The mirror refuses the file (check_svg_file()): the slot's old file goes —
+                    // SVN no longer has it —, the refusal is kept with the winner, so the pull
+                    // stops asking for this revision and the tab can say what stands there.
+                    if (isset($manifest[$slot_id])) {
+                        $this->unlink($dir, $manifest[$slot_id]['filename']);
+                        unset($manifest[$slot_id]);
+                    }
+                    $rejected[$slot_id] = [ ...$winner, 'code' => $e->get_error_code() ];
+                    continue;
+                }
                 // The slot keeps its previous mirror state.
                 wporg_log_cache_error($marker, 'assets download ' . $winner['filename'], $e);
                 $complete = false;
@@ -139,6 +152,7 @@ class WporgAssetSync {
         write_asset_manifest((int) $marker->ID, $manifest);
 
         $state = get_wporg_assets_state((int) $marker->ID);
+        $state['rejected'] = $rejected;
         // The blueprints mirror has its own anchor (its directory's revision): what arrived stays.
         if ($blueprints['complete']) {
             $state['blueprints'] = $blueprints['mirror'];

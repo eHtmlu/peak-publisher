@@ -3,9 +3,11 @@
 // or where its file stands on the plugin page — decided from the slot's facts alone (the
 // server's wporg.slots[slot]: pending, conflict, on_wporg.imported, shown), in the order of
 // urgency: a conflict (red), an open change (blue) — the two states the user can act on, the
-// Discard in the line —, then, grey, committed and passed over (the page shows the SVG icon in
-// a raster icon's place), committed and not read by wordpress.org's import yet (its forecast
-// while it lasts), removed while the page still shows the file, on the plugin page, empty.
+// Discard in the line —, a file on wordpress.org the mirror refused (orange: the page shows it,
+// this site keeps it out; replacing it is the way out), then, grey, committed and passed over
+// (the page shows the SVG icon in a raster icon's place), committed and not read by
+// wordpress.org's import yet (its forecast while it lasts), removed while the page still shows
+// the file, on the plugin page, empty.
 // Every state has its sign before the text, in the band's colour: the text carries
 // the meaning, the sign lets a grid of boxes be read without reading. The colour changes with
 // the state, the height never does: one line, and beneath it what the caller adds. A fact
@@ -21,11 +23,12 @@ lodash.set(window, 'Pblsh.Components.AssetStatusBand', ({ slot, forecast, disabl
     const { createElement, useState, useEffect, useRef } = wp.element;
     const { Button } = wp.components;
     const { getSvgIcon } = Pblsh.Utils;
-    const { getBandText, getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getShadowedText, getEmptyText, getUncheckedText } = Pblsh.AssetsUtils;
+    const { getBandText, getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getShadowedText, getEmptyText, getUncheckedText, getRejectedText } = Pblsh.AssetsUtils;
 
     const facts = slot || { pending: null, conflict: false, on_wporg: null, shown: null, shadowed: false };
     const state = facts.conflict ? 'conflict'
         : facts.pending ? 'pending'
+        : facts.on_wporg && facts.on_wporg.rejected ? 'rejected'
         : facts.on_wporg && facts.shadowed ? 'shadowed'
         : facts.on_wporg && facts.on_wporg.imported === null ? 'unchecked'
         : facts.on_wporg && !facts.on_wporg.imported ? 'waiting'
@@ -54,6 +57,7 @@ lodash.set(window, 'Pblsh.Components.AssetStatusBand', ({ slot, forecast, disabl
     const stateText = {
         conflict: () => getBandText('conflict'),
         pending: () => getBandText(facts.pending === 'delete' ? 'delete' : facts.on_wporg ? 'replace' : 'add'),
+        rejected: () => getRejectedText(facts.on_wporg.rejected),
         shadowed: getShadowedText,
         unchecked: getUncheckedText,
         waiting: () => getWaitingText(forecast),
@@ -64,6 +68,7 @@ lodash.set(window, 'Pblsh.Components.AssetStatusBand', ({ slot, forecast, disabl
     const stateIcon = {
         conflict: 'alert_outline',
         pending: facts.pending === 'delete' ? 'delete_forever' : 'cloud_upload',
+        rejected: 'alert_outline',
         shadowed: 'information_outline',
         unchecked: 'clock_outline',
         waiting: 'clock_outline',

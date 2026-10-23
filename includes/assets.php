@@ -362,10 +362,7 @@ function validate_asset_upload(string $path, string $original_name, array $slot)
         return $error('asset_too_large', sprintf(__('The file is %1$s — %2$s may be at most %3$s (the wordpress.org limit).', 'peak-publisher'), format_asset_size($filesize), asset_type_plural($slot['type']), format_asset_size($slot['maxBytes'])), 413);
     }
     if ($ext === 'svg') {
-        if (!is_valid_svg_file($path)) {
-            return $error('asset_invalid_type', __('The file does not appear to be a valid SVG.', 'peak-publisher'), 400);
-        }
-        return [ 'ext' => 'svg', 'filesize' => $filesize, 'width' => null, 'height' => null, 'warnings' => [] ];
+        return check_svg_file($path) ?? [ 'ext' => 'svg', 'filesize' => $filesize, 'width' => null, 'height' => null, 'warnings' => [] ];
     }
     $size = @getimagesize($path);
     $detected = $size === false ? null : ([ IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpg', IMAGETYPE_GIF => 'gif' ][$size[2]] ?? null);
@@ -403,34 +400,85 @@ function asset_type_plural(string $type): string {
 
 
 /**
- * A well-formed SVG document (DOMDocument when available, else a root-element check). Structure
- * only — no script sanitizing, like wordpress.org; the images render inside <img>, which never
- * executes scripts.
+ * The one SVG rule of both channels — the upload (validate_asset_upload()) and the files the
+ * mirror takes from wordpress.org (WporgOperations::download_asset()): a well-formed SVG
+ * document without active content. The files are served as static files from this site's
+ * origin, and a browser that opens one as a document runs its scripts with the visitor's
+ * cookies — wordpress.org leaves that to its separate asset origin, this site has none. Refused:
+ * script and foreignObject elements, on* attributes, an href (xlink:href, and the values an
+ * animation gives an href) that is not a fragment of the document, an http(s) URL or an
+ * embedded raster image, an XSLT stylesheet, and entities of the document's own DTD, which the
+ * browser expands and this check would not see. Links and external CSS run nothing and stay.
+ * Without the DOM extension the rule cannot be checked and every SVG is refused.
+ *
+ * @return \WP_Error|null null when accepted; asset_invalid_type (no SVG document),
+ *         asset_svg_active (active content), asset_svg_unchecked (no DOM extension), all 400
  */
-function is_valid_svg_file(string $path): bool {
+function check_svg_file(string $path): ?\WP_Error {
+    $error = static fn(string $code, string $message): \WP_Error => new \WP_Error($code, $message, [ 'status' => 400 ]);
+    if (!class_exists('DOMDocument')) {
+        return $error('asset_svg_unchecked', __('SVG files cannot be checked on this server: the PHP DOM extension is missing.', 'peak-publisher'));
+    }
     $content = @file_get_contents($path);
     if ($content === false || trim($content) === '') {
-        return false;
+        return $error('asset_invalid_type', __('The file does not appear to be a valid SVG.', 'peak-publisher'));
     }
+    $previous_state = libxml_use_internal_errors(true);
+    $doc = new \DOMDocument();
+    $loaded = $doc->loadXML($content, LIBXML_NONET);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous_state);
+    $root = $loaded ? $doc->documentElement : null;
+    if ($root === null || strtolower($root->localName) !== 'svg') {
+        return $error('asset_invalid_type', __('The file does not appear to be a valid SVG.', 'peak-publisher'));
+    }
+    $active = svg_active_content($doc);
+    if ($active !== null) {
+        return $error('asset_svg_active', sprintf(__('The SVG contains active content (%s): a browser that opens the file on this site would run it.', 'peak-publisher'), $active));
+    }
+    return null;
+}
 
-    if (class_exists('DOMDocument')) {
-        $previous_state = libxml_use_internal_errors(true);
-        $doc            = new \DOMDocument();
-        $loaded         = $doc->loadXML($content, LIBXML_NONET);
-        libxml_clear_errors();
-        libxml_use_internal_errors($previous_state);
 
-        if (!$loaded) {
-            return false;
+/** What makes the document active (check_svg_file()), named for the message, or null. */
+function svg_active_content(\DOMDocument $doc): ?string {
+    if ($doc->doctype !== null && $doc->doctype->entities->length > 0) {
+        return 'entity';
+    }
+    foreach ($doc->childNodes as $node) {
+        if ($node instanceof \DOMProcessingInstruction && $node->target === 'xml-stylesheet' && stripos($node->data, 'xsl') !== false) {
+            return 'xml-stylesheet';
         }
-
-        $root = $doc->documentElement;
-        return $root && strtolower($root->localName) === 'svg';
     }
+    $href_names = [ 'href', 'xlink:href' ];
+    foreach ((new \DOMXPath($doc))->query('//*') as $element) {
+        $name = strtolower((string) $element->localName);
+        if ($name === 'script' || $name === 'foreignobject') {
+            return $name === 'script' ? 'script' : 'foreignObject';
+        }
+        $animates_href = in_array($name, [ 'animate', 'set' ], true) && in_array((string) $element->getAttribute('attributeName'), $href_names, true);
+        foreach ($element->attributes as $attribute) {
+            $attr = strtolower((string) $attribute->localName);
+            if (str_starts_with($attr, 'on')) {
+                return $attribute->nodeName;
+            }
+            $values = $attr === 'href' ? [ $attribute->nodeValue ]
+                : ($animates_href && in_array($attr, [ 'from', 'to', 'by', 'values' ], true) ? explode(';', (string) $attribute->nodeValue) : []);
+            foreach ($values as $value) {
+                if (!is_passive_svg_href((string) $value)) {
+                    return $attribute->nodeName;
+                }
+            }
+        }
+    }
+    return null;
+}
 
-    // Fallback: strip XML declaration and whitespace, then check for <svg root element.
-    $trimmed = preg_replace('/^<\?xml[^?]*\?>\s*/si', '', trim($content));
-    return (bool) preg_match('/^<svg[\s>]/i', $trimmed);
+
+/** A fragment of the document, an http(s) URL or an embedded raster image: a reference that runs nothing. */
+function is_passive_svg_href(string $value): bool {
+    $value = trim($value);
+    return $value === '' || $value[0] === '#' || (bool) preg_match('#^(https?://|data:image/(png|jpe?g|gif|webp)[;,])#i', $value);
 }
 
 

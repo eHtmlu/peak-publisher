@@ -6,6 +6,7 @@ namespace Pblsh\Tests\Unit;
 
 use Pblsh\Tests\FakeWordPress;
 
+use function Pblsh\check_svg_file;
 use function Pblsh\get_asset_slots;
 use function Pblsh\get_geopattern_icon_url;
 use function Pblsh\validate_asset_upload;
@@ -50,6 +51,57 @@ final class AssetUploadValidationTest extends TestCase {
 
         $facts = validate_asset_upload($this->file('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'), 'icon.svg', get_asset_slots()['icon_svg']);
         self::assertSame([ 'svg', null, null ], [ $facts['ext'], $facts['width'], $facts['height'] ]);
+    }
+
+    /**
+     * The one SVG rule of both channels (check_svg_file()): the files are served from this
+     * site's origin, so active content is refused — the upload says so, the mirror keeps the
+     * file out.
+     */
+    public function test_an_svg_with_active_content_is_refused(): void {
+        $svg = static fn(string $body, string $root_attributes = ''): string => '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1 1"' . $root_attributes . '>' . $body . '</svg>';
+
+        $active = [
+            'script element' => $svg('<script>alert(1)</script>'),
+            'script element in another namespace' => $svg('<h:script xmlns:h="http://www.w3.org/1999/xhtml">alert(1)</h:script>'),
+            'foreignObject' => $svg('<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject>'),
+            'event handler' => $svg('<rect/>', ' onload="alert(1)"'),
+            'event handler on a child' => $svg('<rect onclick="alert(1)"/>'),
+            'javascript href' => $svg('<a href="javascript:alert(1)"><text>x</text></a>'),
+            'javascript xlink:href' => $svg('<a xlink:href=" JavaScript:alert(1)"><text>x</text></a>'),
+            'data href that is no raster image' => $svg('<use href="data:image/svg+xml,%3Csvg%3E"/>'),
+            'relative href' => $svg('<use href="other.svg#id"/>'),
+            'href animated to javascript' => $svg('<a><animate attributeName="href" values="#a;javascript:alert(1)"/><text>x</text></a>'),
+            'href set to javascript' => $svg('<a><set attributeName="xlink:href" to="javascript:alert(1)"/><text>x</text></a>'),
+            'xslt stylesheet' => '<?xml-stylesheet type="text/xsl" href="https://example.test/x.xsl"?>' . $svg('<rect/>'),
+            'entity in the internal subset' => '<!DOCTYPE svg [<!ENTITY x "&#60;script&#62;alert(1)&#60;/script&#62;">]>' . $svg('&x;'),
+        ];
+        foreach ($active as $case => $content) {
+            $error = check_svg_file($this->file($content));
+            self::assertSame('asset_svg_active', $error === null ? null : $error->get_error_code(), $case);
+            self::assertSame(400, $error->get_error_data()['status'], $case);
+        }
+
+        $passive = [
+            'plain' => $svg('<rect width="1" height="1"/>'),
+            'fragment references' => $svg('<defs><rect id="a"/></defs><use href="#a"/><use xlink:href="#a"/>'),
+            'http link and image' => $svg('<a href="https://example.test/"><image href="HTTPS://example.test/i.png" width="1" height="1"/></a>'),
+            'embedded raster image' => $svg('<image xlink:href="data:image/png;base64,iVBORw0KGgo=" width="1" height="1"/>'),
+            'style with external css' => $svg('<style>@import url(https://example.test/f.css);</style><rect/>'),
+            'public doctype without entities' => '<?xml version="1.0"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">' . $svg('<rect/>'),
+            'href animated between fragments' => $svg('<use><animate attributeName="href" from="#a" to="#b"/></use>'),
+        ];
+        foreach ($passive as $case => $content) {
+            self::assertNull(check_svg_file($this->file($content)), $case);
+        }
+
+        self::assertSame('asset_invalid_type', check_svg_file($this->file('<html></html>'))->get_error_code(), 'well-formed, but no SVG document');
+        self::assertSame('asset_invalid_type', check_svg_file($this->file('<svg'))->get_error_code(), 'not well-formed');
+        self::assertSame('asset_invalid_type', check_svg_file($this->file(''))->get_error_code(), 'empty');
+
+        $error = validate_asset_upload($this->file($active['script element']), 'icon.svg', get_asset_slots()['icon_svg']);
+        self::assertSame([ 'asset_svg_active', 400 ], [ $error->get_error_code(), $error->get_error_data()['status'] ], 'the upload passes the rule\'s error through');
+        self::assertSame('The SVG contains active content (script): a browser that opens the file on this site would run it.', $error->get_error_message());
     }
 
     public function test_a_file_over_the_limit_is_refused_before_anything_is_written(): void {

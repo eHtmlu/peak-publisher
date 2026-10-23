@@ -195,6 +195,11 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         return sprintf(__('Removed · on the plugin page until around %s', 'peak-publisher'), formatForecastTime(forecast));
     }
     const getShownText = () => __('On the plugin page', 'peak-publisher');
+    // The page shows a file this site keeps out (the server's check_svg_file(): active content
+    // would run in the browser that opens the file here, or the server cannot check it).
+    const getRejectedText = (code) => code === 'asset_svg_unchecked'
+        ? __('On the plugin page · kept out here: SVG files cannot be checked on this server', 'peak-publisher')
+        : __('On the plugin page · kept out here: the file contains active content', 'peak-publisher');
     // Committed, and passed over: the page shows the SVG icon in the raster icon's place (wordpress.org's "SVG has priority").
     const getShadowedText = () => __('Committed · the plugin page shows the SVG', 'peak-publisher');
     // An empty slot has no page to lag behind: the slot is what it is.
@@ -219,6 +224,6 @@ lodash.set(window, 'Pblsh.AssetsUtils', (() => {
         getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText, getAssetSections, getAssetSection,
         getPendingChangesText, getPendingCountText, getConflictsText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
         getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
-        getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getShadowedText, getEmptyText, getUncheckedText, getImportWatchAt,
+        getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getShadowedText, getEmptyText, getUncheckedText, getRejectedText, getImportWatchAt,
     };
 })());

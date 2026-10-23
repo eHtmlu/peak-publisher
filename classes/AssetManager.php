@@ -252,8 +252,9 @@ class AssetManager {
      * assets_import_waiting()) and, for every slot with a mirror file, a pending entry or a file
      * the plugin page shows, the entry's action, whether it conflicts, wordpress.org's file (the
      * mirror entry with its URL — the conflict box and the state view show it — and whether the
-     * import has read it, asset_imported()), the file the page shows (`shown`, assets_shown())
-     * and whether the page passes the slot over for another file (`shadowed`,
+     * import has read it, asset_imported(); a file the mirror refused, check_svg_file(), with
+     * the refusal's code as `rejected` and no URL), the file the page shows (`shown`,
+     * assets_shown()) and whether the page passes the slot over for another file (`shadowed`,
      * assets_shadowed()): the slot's band is decided from these facts alone.
      */
     private function wporg_view(\WP_Post $plugin, array $state, array $manifest, array $directory): array {
@@ -270,6 +271,9 @@ class AssetManager {
                 $on_wporg = [ ...$mirror['blueprint'], 'filesize' => (int) $state['blueprints']['file']['filesize'] ];
             } elseif (isset($manifest[$slot_id])) {
                 $on_wporg = [ ...$manifest[$slot_id], 'url' => $this->shipped_url($plugin, $manifest, (string) $slot_id) ];
+            } elseif (isset($state['rejected'][$slot_id])) {
+                $refusal = $state['rejected'][$slot_id];
+                $on_wporg = [ 'filename' => $refusal['filename'], 'revision' => $refusal['revision'], 'resolution' => $refusal['resolution'], 'filesize' => $refusal['filesize'], 'url' => null, 'rejected' => $refusal['code'] ];
             }
             $slots[$slot_id] = [
                 'pending' => $pending[$slot_id]['action'] ?? null,

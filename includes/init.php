@@ -13,14 +13,15 @@ if (is_standalone()) {
     // Disable themes.
     add_filter('wp_using_themes', '__return_false');
 
-    // Redirect frontend visitors to a configured URL.
-    $standalone_redirect_url = get_peak_publisher_boot_settings()['standalone_redirect_url'];
-    if ($standalone_redirect_url !== '') {
-        add_action('wp', function() use ($standalone_redirect_url) {
-            wp_redirect($standalone_redirect_url, 302);
+    // Redirect frontend visitors to the URL of the settings — an external one by design, which
+    // wp_safe_redirect() would refuse; the value passes esc_url_raw() when saved and when read.
+    add_action('wp', static function(): void {
+        $redirect_url = get_peak_publisher_boot_settings()['standalone_redirect_url'];
+        if ($redirect_url !== '') {
+            wp_redirect($redirect_url, 302); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- see above
             exit;
-        }, 9999);
-    }
+        }
+    }, 9999);
 
     // Re-enable redirection from "/admin" to real admin url (because it's disabled by disabling themes)
     add_action('init', function() {

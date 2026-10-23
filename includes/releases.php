@@ -29,7 +29,7 @@ function directory_entries(string $root): iterable {
         yield [
             'path' => str_replace('\\', '/', substr($abs, strlen($root) + 1)),
             'is_file' => $is_file,
-            'stream' => $is_file ? static fn() => fopen($abs, 'rb') : null,
+            'stream' => $is_file ? static fn() => fopen($abs, 'rb') : null, // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- a read stream for hashing and zipping, within the plugin's own directory
         ];
     }
 }
@@ -95,7 +95,7 @@ function content_hash_from_entries(iterable $entries): string {
             $ctx = hash_init('sha256');
             if (is_resource($stream)) {
                 hash_update_stream($ctx, $stream);
-                fclose($stream);
+                fclose($stream); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- the read stream above
             }
             $hashes[] = hash_final($ctx);
         }
@@ -287,8 +287,8 @@ function replace_release_zip_entries(string $zip_path, array $entries): bool|\WP
         }
         $ok = $zip->close() && $ok;
     }
-    if (!$ok || !@rename($copy, $zip_path)) {
-        @unlink($copy);
+    if (!$ok || !@rename($copy, $zip_path)) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- the edited copy replaces the ZIP atomically, within the plugin's own directory
+        wp_delete_file($copy);
         return $failed();
     }
     return true;

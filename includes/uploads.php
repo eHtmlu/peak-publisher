@@ -266,7 +266,7 @@ function record_finalize_status(string $tmp_root, array $status): void {
     $file = $tmp_root . PBLSH_FINALIZE_STATUS_FILE;
     $temp = $file . '.' . bin2hex(random_bytes(4)) . '.tmp';
     if (file_put_contents($temp, json_encode($status)) !== false) {
-        rename($temp, $file);
+        rename($temp, $file); // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- the status file appears whole or not at all, within the plugin's own directory
     }
 }
 

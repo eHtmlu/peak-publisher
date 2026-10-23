@@ -27,5 +27,5 @@ delete_option('pblsh_encryption_context_id');
 
 $pblsh_key_file = Pblsh\get_encryption_key_file_path();
 if (file_exists($pblsh_key_file)) {
-    @unlink($pblsh_key_file);
+    wp_delete_file($pblsh_key_file);
 }

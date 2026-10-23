@@ -469,6 +469,10 @@ namespace {
         return $path === false ? '' : $path;
     }
 
+    function wp_parse_url(string $url, int $component = -1) {
+        return parse_url($url, $component);
+    }
+
     function wp_delete_file(string $file): void {
         if (file_exists($file)) {
             unlink($file);

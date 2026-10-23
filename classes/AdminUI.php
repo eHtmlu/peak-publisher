@@ -86,11 +86,11 @@ class AdminUI {
             . '<div class="wrap"><hr class="wp-header-end"><div id="pblsh-app"></div></div>'
             . '<footer id="pblsh-footer" class="pblsh--footer">'
                 . '<div class="pblsh--footer__identity">'
-                    . '<a class="pblsh--footer__brand" href="https://www.wppeak.com/" target="_blank" rel="noreferrer">' . $brand_mark . 'wppeak.com</a>'
+                    . '<a class="pblsh--footer__brand" href="https://www.wppeak.com/" target="_blank" rel="noreferrer">' . $brand_mark . 'wppeak.com</a>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the plugin's own SVG file
                     . '<span class="pblsh--footer__version">' . esc_html('Peak Publisher ' . get_peak_publisher_version()) . '</span>'
                 . '</div>'
-                . '<div class="pblsh--footer__promo">' . $promos_html . '</div>'
-                . '<nav class="pblsh--footer__nav" aria-label="' . esc_attr__('About Peak Publisher', 'peak-publisher') . '"><ul class="pblsh--footer__links">' . $links_html . '</ul></nav>'
+                . '<div class="pblsh--footer__promo">' . $promos_html . '</div>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from escaped parts
+                . '<nav class="pblsh--footer__nav" aria-label="' . esc_attr__('About Peak Publisher', 'peak-publisher') . '"><ul class="pblsh--footer__links">' . $links_html . '</ul></nav>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from escaped parts
             . '</footer>'
             . '</div>';
     }
@@ -236,8 +236,10 @@ class AdminUI {
                 // Facts of the one-time schema upgrade (includes/upgrade.php), null once dismissed.
                 'upgradeNotice' => is_array($upgrade_notice = get_option('pblsh_upgrade_notice')) ? $upgrade_notice : null,
                 'i18n' => [
-                    'permalinkPlain'      => __('Plain'),
-                    'permalinkDayAndName' => __('Day and name'),
+                    // Core's labels of the permalink settings, in core's text domain on purpose:
+                    // the notice names the options as that screen shows them.
+                    'permalinkPlain'      => __('Plain'), // phpcs:ignore WordPress.WP.I18n.MissingArgDomain -- see above
+                    'permalinkDayAndName' => __('Day and name'), // phpcs:ignore WordPress.WP.I18n.MissingArgDomain -- see above
                 ],
             ]
         );

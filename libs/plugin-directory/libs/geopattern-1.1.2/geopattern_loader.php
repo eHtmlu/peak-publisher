@@ -1,4 +1,5 @@
 <?php
+defined('ABSPATH') || exit;
 // This file should only be used/included if you are not using Composer.
 
 require_once(__DIR__.'/GeoPattern/SVGElements/Base.php');

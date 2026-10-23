@@ -4,6 +4,8 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
 
 /**
  * The blueprint vocabulary of a wordpress.org plugin's Live Preview — assets/blueprints/blueprint.json,
@@ -64,6 +66,7 @@ function validate_blueprint_contents(string $contents): bool|\WP_Error {
     $error = static fn(string $code, string $message, int $status = 400): \WP_Error => new \WP_Error($code, $message, [ 'status' => $status ]);
 
     if (strlen($contents) > PBLSH_BLUEPRINT_MAX_BYTES) {
+        /* translators: 1: the file's size, 2: wordpress.org's limit */
         return $error('blueprint_too_large', sprintf(__('The blueprint is %1$s — wordpress.org ignores blueprints over %2$s.', 'peak-publisher'), format_asset_size(strlen($contents)), format_asset_size(PBLSH_BLUEPRINT_MAX_BYTES)), 413);
     }
     $decoded = json_decode($contents, false);
@@ -643,6 +646,7 @@ function blueprint_warnings(?string $contents, int $blueprint_files): array {
         $warnings[] = [ 'code' => 'empty_object', 'message' => __('The blueprint contains an empty object ({}). wordpress.org stores it as an empty list ([]), and Playground then refuses the blueprint. Remove it or give it a value.', 'peak-publisher') ];
     }
     if ($blueprint_files > 10) {
+        /* translators: %d: the number of blueprint files in assets/blueprints/ */
         $warnings[] = [ 'code' => 'too_many_files', 'message' => sprintf(__('assets/blueprints/ holds %d blueprint files. wordpress.org imports only 10 of them, in no fixed order, so blueprint.json may be left out. Delete the ones you do not need on wordpress.org.', 'peak-publisher'), $blueprint_files) ];
     }
     return $warnings;

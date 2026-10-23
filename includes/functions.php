@@ -318,7 +318,7 @@ function summarize_plugin_downloads(array $days, ?string $today = null): array {
  */
 function raise_wporg_time_limit(): void {
     if (function_exists('set_time_limit')) {
-        @set_time_limit(300);
+        @set_time_limit(300); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- a wordpress.org commit outlasts the default limit, see above
     }
 }
 

@@ -164,6 +164,7 @@ class AssetManager {
                 return $e->to_wp_error();
             }
             if (!$exists) {
+                /* translators: %s: a theme slug */
                 return $error('blueprint_theme_not_found', sprintf(__('wordpress.org has no theme with the slug %s.', 'peak-publisher'), $value), 404);
             }
         }
@@ -179,7 +180,9 @@ class AssetManager {
             }
             if ($state !== 'ok') {
                 return $error('blueprint_plugin_not_found', $state === 'closed'
+                    /* translators: %s: a plugin slug */
                     ? sprintf(__('wordpress.org has closed the plugin %s — Playground could not install it.', 'peak-publisher'), $value)
+                    /* translators: %s: a plugin slug */
                     : sprintf(__('wordpress.org has no plugin with the slug %s.', 'peak-publisher'), $value), 404);
             }
         }

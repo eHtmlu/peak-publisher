@@ -4,6 +4,9 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+// phpcs:disable WordPress.WP.AlternativeFunctions -- the transport speaks WebDAV through cURL (streamed uploads, curl_multi reads) and reads the upload through a file handle; the HTTP API offers neither.
+
 require_once __DIR__ . '/WporgSvnException.php';
 
 
@@ -743,6 +746,7 @@ class WporgPluginSvnClient {
                 $this->log_request('PUT', $url, 0, $started, curl_error($ch));
                 throw new WporgSvnException(
                     'svn_unavailable',
+                    /* translators: %s: the transport's error message */
                     sprintf(__('wordpress.org SVN is not reachable: %s', 'peak-publisher'), curl_error($ch) ?: __('connection failed', 'peak-publisher')),
                     503
                 );
@@ -825,6 +829,7 @@ class WporgPluginSvnClient {
         if ($code === 'no_write_access') {
             // wordpress.org takes the password regardless of the username's case, but its
             // pre-commit hook checks the commit rights against the exact spelling.
+            /* translators: %s: the wordpress.org username */
             return sprintf(__('The wordpress.org account "%s" has no write access to this plugin. Check the account\'s spelling, including capitalization.', 'peak-publisher'), (string) $this->username);
         }
         if ($code === 'wporg_concurrent_external_change') {
@@ -1180,6 +1185,7 @@ class WporgPluginSvnClient {
             $this->log_request($args['method'], $url, 0, $started, $response->get_error_message());
             throw new WporgSvnException(
                 'svn_unavailable',
+                /* translators: %s: the HTTP API's error message */
                 sprintf(__('wordpress.org SVN is not reachable: %s', 'peak-publisher'), $response->get_error_message()),
                 503
             );
@@ -1204,10 +1210,10 @@ class WporgPluginSvnClient {
             return;
         }
         $excerpt = $detail === null || $detail === '' ? '' : ' ' . $this->response_excerpt($detail);
-        error_log(sprintf(
+        error_log(sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- under WP_DEBUG only, see above
             'Peak Publisher SVN: %s %s -> %s in %d ms%s',
             strtoupper($method),
-            (string) parse_url($url, PHP_URL_PATH),
+            (string) wp_parse_url($url, PHP_URL_PATH),
             $status > 0 ? (string) $status : 'no response',
             (int) round((microtime(true) - $started) * 1000),
             $excerpt
@@ -1237,7 +1243,9 @@ class WporgPluginSvnClient {
         $status = (int) ($response['status'] ?? 0);
         $excerpt = $this->response_excerpt((string) ($response['body'] ?? ''));
         return $fallback . ' ' . ($excerpt === ''
+            /* translators: %d: the HTTP status */
             ? sprintf(__('(HTTP %d)', 'peak-publisher'), $status)
+            /* translators: 1: the HTTP status, 2: an excerpt of the response */
             : sprintf(__('(HTTP %1$d: %2$s)', 'peak-publisher'), $status, $excerpt));
     }
 
@@ -1393,7 +1401,7 @@ class WporgPluginSvnClient {
             }
 
             $props = is_array($entry['props'] ?? null) ? $entry['props'] : [];
-            $is_collection = (($props['resourcetype'] ?? '') === 'collection') || str_ends_with((string) parse_url($href, PHP_URL_PATH), '/');
+            $is_collection = (($props['resourcetype'] ?? '') === 'collection') || str_ends_with((string) wp_parse_url($href, PHP_URL_PATH), '/');
             $entries[] = [
                 'path' => $relative_path,
                 'name' => basename(rtrim($relative_path, '/')),
@@ -1426,15 +1434,15 @@ class WporgPluginSvnClient {
             return $href;
         }
 
-        $parts = parse_url(self::REPO_URL);
+        $parts = wp_parse_url(self::REPO_URL);
         $scheme = (string) ($parts['scheme'] ?? 'https');
         $host = (string) ($parts['host'] ?? 'plugins.svn.wordpress.org');
         return $scheme . '://' . $host . '/' . ltrim($href, '/');
     }
 
     private function align_url_origin(string $url, string $origin_url): string {
-        $url_parts = parse_url($url);
-        $origin_parts = parse_url($origin_url);
+        $url_parts = wp_parse_url($url);
+        $origin_parts = wp_parse_url($origin_url);
         if (!is_array($url_parts) || !is_array($origin_parts) || empty($url_parts['path']) || empty($origin_parts['host'])) {
             return $url;
         }
@@ -1447,13 +1455,13 @@ class WporgPluginSvnClient {
     }
 
     private function dav_href(string $url): string {
-        $path = parse_url($url, PHP_URL_PATH);
+        $path = wp_parse_url($url, PHP_URL_PATH);
         $path = is_string($path) && $path !== '' ? $path : '/';
         if (!str_starts_with($path, '/')) {
             $path = '/' . ltrim($path, '/');
         }
 
-        $query = parse_url($url, PHP_URL_QUERY);
+        $query = wp_parse_url($url, PHP_URL_QUERY);
         if (is_string($query) && $query !== '') {
             $path .= '?' . $query;
         }
@@ -1476,7 +1484,7 @@ class WporgPluginSvnClient {
     private function first_prop(string $xml, string $property): string {
         [ $open, $close ] = $this->element_tags($property);
         if (preg_match('~' . $open . '(.*?)' . $close . '~s', $xml, $m)) {
-            return trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_XML1));
+            return trim(html_entity_decode(wp_strip_all_tags($m[1]), ENT_QUOTES | ENT_XML1));
         }
         return '';
     }
@@ -1485,7 +1493,7 @@ class WporgPluginSvnClient {
         [ $open ] = $this->element_tags($property);
         [ $href_open, $href_close ] = $this->element_tags('href');
         if (preg_match('~' . $open . '.*?' . $href_open . '(.*?)' . $href_close . '~s', $xml, $m)) {
-            return trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_XML1));
+            return trim(html_entity_decode(wp_strip_all_tags($m[1]), ENT_QUOTES | ENT_XML1));
         }
         return '';
     }
@@ -1554,7 +1562,7 @@ class WporgPluginSvnClient {
     }
 
     private function href_to_repo_path(string $href): string {
-        $path = parse_url($href, PHP_URL_PATH);
+        $path = wp_parse_url($href, PHP_URL_PATH);
         $path = is_string($path) ? $path : $href;
         $path = rawurldecode($path);
         $path = preg_replace('~/+~', '/', $path) ?? $path;

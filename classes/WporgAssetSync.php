@@ -4,6 +4,8 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
 require_once __DIR__ . '/WporgOperations.php';
 
 
@@ -140,7 +142,7 @@ class WporgAssetSync {
             if (isset($manifest[$slot_id])) {
                 $this->unlink($dir, $manifest[$slot_id]['filename']);
             }
-            if (!rename($temp, $dir . '/' . $winner['filename'])) {
+            if (!rename($temp, $dir . '/' . $winner['filename'])) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- within the plugin's own uploads directory, atomic on the same file system
                 $this->unlink($dir, basename($temp));
                 unset($manifest[$slot_id]);
                 $complete = false;
@@ -292,7 +294,7 @@ class WporgAssetSync {
             $fs = get_wp_filesystem();
             if ($change['action'] === 'put') {
                 $target = $dir . '/' . $result['pending'][$change['slot']]['file'];
-                $moved = is_uploaded_file((string) $local_path) ? @move_uploaded_file((string) $local_path, $target) : false;
+                $moved = is_uploaded_file((string) $local_path) ? @move_uploaded_file((string) $local_path, $target) : false; // phpcs:ignore Generic.PHP.ForbiddenFunctions.Found -- the file passed validate_asset_upload(), the target is the canonical name in the plugin's own directory
                 if (!$moved && !$fs->move((string) $local_path, $target, true)) {
                     return new \WP_Error('asset_write_failed', __('Failed to save the uploaded file. Please check server permissions.', 'peak-publisher'), [ 'status' => 500 ]);
                 }

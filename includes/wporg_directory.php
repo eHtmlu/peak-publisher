@@ -4,6 +4,8 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
 // The module's error type — the client's failures and its own arrive as WporgSvnException.
 require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
 
@@ -90,7 +92,7 @@ function wporg_live_preview_public_from_response(int $status, string $location):
     if ($status === 200) {
         return false;
     }
-    $host = parse_url($location, PHP_URL_HOST);
+    $host = wp_parse_url($location, PHP_URL_HOST);
     return in_array($status, [ 301, 302, 303, 307 ], true) && $host === 'playground.wordpress.net' ? true : null;
 }
 

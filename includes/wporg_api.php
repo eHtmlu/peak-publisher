@@ -4,6 +4,8 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
 // The module's error type — every failure it reports is a WporgSvnException.
 require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
 
@@ -185,7 +187,7 @@ function wporg_api_query_plugins_by_author(string $username): array {
  */
 function wporg_api_asset_revisions(array $listing): array {
     $revision_of = static function($url): ?int {
-        parse_str((string) parse_url((string) $url, PHP_URL_QUERY), $query);
+        parse_str((string) wp_parse_url((string) $url, PHP_URL_QUERY), $query);
         return is_string($url) && is_numeric($query['rev'] ?? null) ? (int) $query['rev'] : null;
     };
     $revisions = [];
@@ -205,7 +207,7 @@ function wporg_api_asset_revisions(array $listing): array {
     foreach ($urls as $url) {
         $revision = $revision_of($url);
         if ($revision !== null) {
-            $revisions[basename((string) parse_url($url, PHP_URL_PATH))] = $revision;
+            $revisions[basename((string) wp_parse_url($url, PHP_URL_PATH))] = $revision;
         }
     }
     ksort($revisions, SORT_STRING);

@@ -4,6 +4,8 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
 // The module's error type — a refresh that could not complete says so as a WporgSvnException.
 require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
 
@@ -751,7 +753,7 @@ function wporg_persisted_release_id($release_id) {
 
 function wporg_log_import_error(string $wporg_slug, \Throwable $error): void {
     if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log(sprintf(
+        error_log(sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- under WP_DEBUG only
             'Peak Publisher wporg import failed for %s: %s',
             $wporg_slug,
             $error->getMessage()
@@ -807,7 +809,7 @@ function wporg_has_cached_revision(array $cached): bool {
 
 function wporg_log_cache_error(\WP_Post $plugin_post, string $stage, \Throwable $error): void {
     if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log(sprintf(
+        error_log(sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- under WP_DEBUG only
             'Peak Publisher wporg cache refresh failed for %s (%d) during %s: %s',
             $plugin_post->post_name,
             (int) $plugin_post->ID,

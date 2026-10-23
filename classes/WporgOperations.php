@@ -4,6 +4,8 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
 require_once __DIR__ . '/WporgSvnException.php';
 
 
@@ -1052,7 +1054,9 @@ class WporgOperations {
                 // situation's own — the catalog's "changed in the meantime" would be wrong,
                 // the pointer never moved, the dialog never knew it.
                 throw new WporgSvnException('current_release_changed', $names_this_version
+                    /* translators: %s: a version number */
                     ? sprintf(__('The current release on wordpress.org could now be read: it is %s already. Reload the upload facts and check the decision again.', 'peak-publisher'), $live_pointer)
+                    /* translators: 1: the current version on wordpress.org, 2: the uploaded version */
                     : sprintf(__('The current release on wordpress.org could now be read: it is %1$s, newer than %2$s. Reload the upload facts and check the decision again.', 'peak-publisher'), $live_pointer, $version), 409);
             }
         }
@@ -1221,7 +1225,7 @@ class WporgOperations {
             $directory_owner = '';
             $author_profile = wporg_string_from_value($data['author_profile'] ?? '');
             if ($author_profile !== '') {
-                $profile_path = trim((string) parse_url($author_profile, PHP_URL_PATH), '/');
+                $profile_path = trim((string) wp_parse_url($author_profile, PHP_URL_PATH), '/');
                 $directory_owner = $profile_path !== '' ? basename($profile_path) : '';
             }
             $hint['owner'] = $directory_owner !== '' ? $directory_owner : null;

@@ -1055,16 +1055,18 @@ class AdminAPI {
         if ($post instanceof \WP_REST_Response) {
             return $post;
         }
-        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated by the facade.
-        if (empty($_FILES['file']) || (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            return $this->rest_error_response($this->make_rest_error('asset_no_file', sprintf(__('No file uploaded (error code %d).', 'peak-publisher'), (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE)), 400));
+        $file = $request->get_file_params()['file'] ?? null;
+        $upload_error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if (!is_array($file) || $upload_error !== UPLOAD_ERR_OK) {
+            /* translators: %d: PHP's upload error code */
+            return $this->rest_error_response($this->make_rest_error('asset_no_file', sprintf(__('No file uploaded (error code %d).', 'peak-publisher'), $upload_error), 400));
         }
         $screenshot_n = $request->get_param('screenshot_n');
         $result = $this->assets()->upload(
             $post,
             sanitize_key((string) ($request->get_param('slot') ?? '')),
             $screenshot_n === null || $screenshot_n === '' ? null : (int) $screenshot_n,
-            $_FILES['file'] // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+            $file // validated by the facade (validate_asset_upload())
         );
         return $this->asset_write_response($result);
     }
@@ -1616,6 +1618,7 @@ class AdminAPI {
             return $this->make_rest_error(
                 'too_many_slugs',
                 sprintf(
+                    /* translators: %d: the maximum number of plugins per import request */
                     __('Import at most %d plugins per request.', 'peak-publisher'),
                     PBLSH_WPORG_IMPORT_CHUNK_SIZE
                 ),

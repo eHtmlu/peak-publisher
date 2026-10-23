@@ -352,6 +352,7 @@ function validate_asset_upload(string $path, string $original_name, array $slot)
     $ext = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
     $ext = $ext === 'jpeg' ? 'jpg' : $ext;
     if (!in_array($ext, $slot['exts'], true)) {
+        /* translators: 1: the file's extension, 2: the allowed extensions */
         return $error('asset_invalid_type', sprintf(__('File type .%1$s is not allowed for this slot. Allowed types: %2$s.', 'peak-publisher'), $ext, implode(', ', $slot['exts'])), 400);
     }
     $filesize = (int) @filesize($path);
@@ -359,6 +360,7 @@ function validate_asset_upload(string $path, string $original_name, array $slot)
         return $error('asset_empty', __('The file is empty.', 'peak-publisher'), 400);
     }
     if ($filesize > $slot['maxBytes']) {
+        /* translators: 1: the file's size, 2: icons, banners or screenshots, 3: the limit */
         return $error('asset_too_large', sprintf(__('The file is %1$s — %2$s may be at most %3$s (the wordpress.org limit).', 'peak-publisher'), format_asset_size($filesize), asset_type_plural($slot['type']), format_asset_size($slot['maxBytes'])), 413);
     }
     if ($ext === 'svg') {
@@ -370,6 +372,7 @@ function validate_asset_upload(string $path, string $original_name, array $slot)
         return $error('asset_invalid_type', __('The file does not appear to be a valid image (PNG, JPG, or GIF).', 'peak-publisher'), 400);
     }
     if (!in_array($detected, $slot['exts'], true)) {
+        /* translators: 1: the image type found in the file, 2: the allowed extensions */
         return $error('asset_invalid_type', sprintf(__('Detected image type .%1$s is not allowed for this slot. Allowed types: %2$s.', 'peak-publisher'), $detected, implode(', ', $slot['exts'])), 400);
     }
     $facts = [ 'ext' => $detected, 'filesize' => $filesize, 'width' => (int) $size[0], 'height' => (int) $size[1] ];
@@ -434,6 +437,7 @@ function check_svg_file(string $path): ?\WP_Error {
     }
     $active = svg_active_content($doc);
     if ($active !== null) {
+        /* translators: %s: what makes the SVG active — an element or attribute name such as script or onload */
         return $error('asset_svg_active', sprintf(__('The SVG contains active content (%s): a browser that opens the file on this site would run it.', 'peak-publisher'), $active));
     }
     return null;

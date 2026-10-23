@@ -103,16 +103,17 @@ function get_file_encryption_key(bool $create) {
         $content = "<?php\n"
             . "defined('ABSPATH') || exit;\n"
             . "return 'base64:" . base64_encode(random_bytes(32)) . "';\n";
-        // Exclusive create keeps concurrent first-time saves from overwriting each other's key.
-        $handle = @fopen($path, 'x');
+        // Exclusive create keeps concurrent first-time saves from overwriting each other's key —
+        // a mode WP_Filesystem has not, like the 0600 below: the key file is written directly.
+        $handle = @fopen($path, 'x'); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- see above
         if ($handle !== false) {
             // A partial write (e.g. disk full) must not leave a fragment behind —
             // it would fail every later read permanently. Removed is only what
             // this call just created; the next save retries cleanly.
-            $written = fwrite($handle, $content);
-            $closed = fclose($handle);
+            $written = fwrite($handle, $content); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- see above
+            $closed = fclose($handle); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- see above
             if ($written !== strlen($content) || !$closed) {
-                @unlink($path);
+                wp_delete_file($path);
                 return wporg_credentials_error(
                     'credential_storage_unavailable',
                     __('The credential encryption key file could not be created.', 'peak-publisher'),
@@ -120,7 +121,7 @@ function get_file_encryption_key(bool $create) {
                     'wporg_credentials.storage'
                 );
             }
-            @chmod($path, 0600);
+            @chmod($path, 0600); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- see above
         } elseif (!file_exists($path)) {
             return wporg_credentials_error(
                 'credential_storage_unavailable',

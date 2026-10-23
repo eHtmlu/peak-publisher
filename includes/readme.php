@@ -4,6 +4,8 @@ namespace Pblsh;
 
 defined('ABSPATH') || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
 
 /**
  * The readme vocabulary of both channels: the one access to wordpress.org's parser
@@ -152,7 +154,7 @@ function render_readme_sections(array $sections): array {
     try {
         $rendered = [];
         foreach ($sections as $section_key => $section_content) {
-            $rendered[$section_key] = apply_filters('the_content', $section_content, $section_key);
+            $rendered[$section_key] = apply_filters('the_content', $section_content, $section_key); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core's filter on purpose: the sections render as wordpress.org renders them
         }
         return $rendered;
     } finally {
@@ -597,6 +599,7 @@ function plan_tested_up_to_edit(?string $readme, ?string $main, array $effective
         return new \WP_Error('tested_up_to_changed', __('Tested up to of this release changed in the meantime. Reload the plugin and check again.', 'peak-publisher'), [ 'status' => 409 ]);
     }
     if ($effective['value'] === $value) {
+        /* translators: %s: a WordPress version */
         return new \WP_Error('invalid_tested_up_to_target', sprintf(__('Tested up to is %s already.', 'peak-publisher'), $value), [ 'status' => 400 ]);
     }
     $changes = tested_up_to_line_changes($readme, $main, $value, true);

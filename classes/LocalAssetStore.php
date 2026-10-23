@@ -25,7 +25,7 @@ class LocalAssetStore {
         $dir = get_plugin_assets_dir($plugin);
 
         $temp = $dir . '/.upload-' . wp_generate_password(8, false);
-        $moved = is_uploaded_file($local_path) ? @move_uploaded_file($local_path, $temp) : false;
+        $moved = is_uploaded_file($local_path) ? @move_uploaded_file($local_path, $temp) : false; // phpcs:ignore Generic.PHP.ForbiddenFunctions.Found -- the file passed validate_asset_upload(), the target is a temp name in the plugin's own directory
         if (!$moved && !get_wp_filesystem()->move($local_path, $temp, true)) {
             return new \WP_Error('asset_write_failed', __('Failed to save the uploaded file. Please check server permissions.', 'peak-publisher'), [ 'status' => 500 ]);
         }

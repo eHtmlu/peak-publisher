@@ -130,3 +130,53 @@ function sanitize_peak_publisher_settings(array $settings): array {
     $out['standalone_redirect_url'] = $redirect_url !== '' ? esc_url_raw($redirect_url) : '';
     return $out;
 }
+
+
+/**
+ * The whitelist's entries by kind — the one reading of the setting, for the public API's
+ * check (PublicAPI::check_permission()) and the save's requirements
+ * (whitelist_requirements_error()): IPv4 and IPv6 addresses, CIDR ranges of either family as
+ * [address, prefix length] with a numeric prefix within the family's bounds, and domain names.
+ * An entry that is none of these is dropped.
+ *
+ * @return array{4: array{addresses: string[], ranges: array<array{string, int}>}, 6: array{addresses: string[], ranges: array<array{string, int}>}, domains: string[]}
+ */
+function classify_ip_whitelist(array $entries): array {
+    $lists = [ 4 => [ 'addresses' => [], 'ranges' => [] ], 6 => [ 'addresses' => [], 'ranges' => [] ], 'domains' => [] ];
+    foreach ($entries as $entry) {
+        $entry = trim((string) $entry);
+        if (str_contains($entry, '/')) {
+            [ $address, $prefix ] = explode('/', $entry, 2);
+            if (!ctype_digit($prefix)) {
+                continue;
+            }
+            $bits = (int) $prefix;
+            if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && $bits <= 32) {
+                $lists[4]['ranges'][] = [ $address, $bits ];
+            } elseif (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) && $bits <= 128) {
+                $lists[6]['ranges'][] = [ $address, $bits ];
+            }
+        } elseif (filter_var($entry, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $lists[4]['addresses'][] = $entry;
+        } elseif (filter_var($entry, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $lists[6]['addresses'][] = $entry;
+        } elseif (filter_var($entry, FILTER_VALIDATE_DOMAIN)) {
+            $lists['domains'][] = $entry;
+        }
+    }
+    return $lists;
+}
+
+
+/**
+ * What the server lacks for the whitelist as entered, or null. A domain name is confirmed
+ * through its IDN form and DNS (PublicAPI::get_untrusted_client_domain_from_user_agent()),
+ * which needs the intl extension: without it the entry is refused at the save instead of
+ * never matching.
+ */
+function whitelist_requirements_error(array $entries): ?\WP_Error {
+    if (classify_ip_whitelist($entries)['domains'] !== [] && !function_exists('idn_to_ascii')) {
+        return new \WP_Error('settings_intl_missing', __('Domain names in the whitelist need the PHP intl extension, which this server lacks. Enter IP addresses instead.', 'peak-publisher'), [ 'status' => 400, 'field' => 'ip_whitelist' ]);
+    }
+    return null;
+}

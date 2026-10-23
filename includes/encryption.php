@@ -203,6 +203,11 @@ function get_encryption_key(bool $create) {
  * @return \WP_Error|null
  */
 function get_credential_storage_error(): ?\WP_Error {
+    $missing_extension = encryption_extension_error();
+    if ($missing_extension !== null) {
+        return $missing_extension;
+    }
+
     if (file_exists(get_encryption_key_file_path())) {
         $file_key = get_file_encryption_key(false);
         if (is_wp_error($file_key)) {
@@ -216,6 +221,25 @@ function get_credential_storage_error(): ?\WP_Error {
     }
 
     return null;
+}
+
+
+/**
+ * The extension the credential storage runs on, or the error when it is missing: openssl
+ * encrypts and decrypts the SVN password (encrypt_wporg_password(), decrypt_wporg_password()),
+ * so without it no account can be connected or used. The account form shows the error and
+ * locks its submit (get_credential_storage_status()), the save and the test refuse.
+ */
+function encryption_extension_error(): ?\WP_Error {
+    if (function_exists('openssl_encrypt')) {
+        return null;
+    }
+    return wporg_credentials_error(
+        'credential_storage_unavailable',
+        __('Connecting a wordpress.org account needs the PHP openssl extension, which this server lacks.', 'peak-publisher'),
+        500,
+        'wporg_credentials.storage'
+    );
 }
 
 
@@ -298,6 +322,11 @@ function derive_site_encryption_key(string $base_key, string $context_id): strin
  * @return string|\WP_Error
  */
 function encrypt_wporg_password(string $plain) {
+    $missing_extension = encryption_extension_error();
+    if ($missing_extension !== null) {
+        return $missing_extension;
+    }
+
     // Validate the configured base key before creating any ciphertext.
     $base_key = get_encryption_key(true);
     if (is_wp_error($base_key)) {
@@ -353,6 +382,11 @@ function encrypt_wporg_password(string $plain) {
  * @return string|\WP_Error
  */
 function decrypt_wporg_password(string $encrypted) {
+    $missing_extension = encryption_extension_error();
+    if ($missing_extension !== null) {
+        return $missing_extension;
+    }
+
     // Decryption must not create a missing key file behind the user's back.
     $base_key = get_encryption_key(false);
     if (is_wp_error($base_key)) {

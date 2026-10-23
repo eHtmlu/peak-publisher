@@ -65,53 +65,11 @@ class PublicAPI {
     }
 
     public function check_permission(): bool {
-        $settings = get_peak_publisher_settings();
-        $ip_whitelist = $settings['ip_whitelist'];
-
+        $ip_whitelist = get_peak_publisher_settings()['ip_whitelist'];
         if (empty($ip_whitelist)) {
             return true;
         }
-
-        $ip_types = [
-            4 => ['dns_type' => DNS_A, 'allowed_ips' => [], 'cidr_ranges' => []],
-            6 => ['dns_type' => DNS_AAAA, 'allowed_ips' => [], 'cidr_ranges' => []],
-        ];
-
-        // split into ip addresses, cidr ranges and domain names
-        $domain_names = [];
-        foreach ($ip_whitelist as $item) {
-
-            // cidr range
-            if (str_contains($item, '/')) {
-                [$ip, $subnet] = explode('/', $item, 2);
-
-                // only a numeric prefix counts
-                if (ctype_digit($subnet)) {
-                    $subnet = (int) $subnet;
-                    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && $subnet >= 0 && $subnet <= 32) {
-                        $ip_types[4]['cidr_ranges'][] = [$ip, $subnet];
-                    } else if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) && $subnet >= 0 && $subnet <= 128) {
-                        $ip_types[6]['cidr_ranges'][] = [$ip, $subnet];
-                    }
-                }
-                continue;
-            }
-        
-            if (filter_var($item, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-                $ip_types[4]['allowed_ips'][] = $item;
-                continue;
-            }
-            
-            if (filter_var($item, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-                $ip_types[6]['allowed_ips'][] = $item;
-                continue;
-            }
-            
-            if (filter_var($item, FILTER_VALIDATE_DOMAIN)) {
-                $domain_names[] = $item;
-                continue;
-            }
-        }
+        $lists = classify_ip_whitelist($ip_whitelist);
 
         // get client ip and determine ip type
         if (!isset($_SERVER['REMOTE_ADDR'])) {
@@ -119,21 +77,21 @@ class PublicAPI {
         }
         $client_ip = filter_var(wp_unslash($_SERVER['REMOTE_ADDR']), FILTER_VALIDATE_IP);
         if (filter_var($client_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            $ip_type = $ip_types[4];
+            [ $family, $dns_type, $record_key ] = [ $lists[4], DNS_A, 'ip' ];
         } else if (filter_var($client_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            $ip_type = $ip_types[6];
+            [ $family, $dns_type, $record_key ] = [ $lists[6], DNS_AAAA, 'ipv6' ];
         } else {
             return false;
         }
-        
+
         // check if client ip is in any of the allowed ip addresses
-        if (in_array($client_ip, $ip_type['allowed_ips'])) {
+        if (in_array($client_ip, $family['addresses'], true)) {
             return true;
         }
 
         // check if client ip is in any of the allowed cidr ranges
-        foreach ($ip_type['cidr_ranges'] as $cidr_range) {
-            if ($this->ip_in_range($client_ip, $cidr_range[0], $cidr_range[1])) {
+        foreach ($family['ranges'] as [ $subnet, $bits ]) {
+            if ($this->ip_in_range($client_ip, $subnet, $bits)) {
                 return true;
             }
         }
@@ -145,19 +103,20 @@ class PublicAPI {
         }
 
         // check if domain is in any of the allowed domain names
-        if (in_array($untrusted_client_domain, $domain_names)) {
+        if (in_array($untrusted_client_domain, $lists['domains'], true)) {
 
-            // resolve domain to ip addresses to get trustworthy values
-            $dns_records = dns_get_record($untrusted_client_domain, $ip_type['dns_type']);
+            // resolve domain to ip addresses to get trustworthy values; dns_get_record() names
+            // an A record's address `ip` and an AAAA record's `ipv6`
+            $dns_records = dns_get_record($untrusted_client_domain, $dns_type);
 
             // check if any of the trustworthy ip addresses matches the client ip
             foreach ($dns_records as $dns_record) {
-                if ($client_ip === $dns_record['ip']) {
+                if ($client_ip === ($dns_record[$record_key] ?? null)) {
                     return true;
                 }
             }
         }
-        
+
         return false;
     }
 
@@ -171,6 +130,12 @@ class PublicAPI {
     }
 
     private function get_untrusted_client_domain_from_user_agent() {
+
+        // The IDN conversion below needs the intl extension; without it no domain can be
+        // confirmed (the settings refuse domain entries then, whitelist_requirements_error()).
+        if (!function_exists('idn_to_ascii')) {
+            return false;
+        }
 
         // Get a sanitized user agent
         $sanitized_user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';

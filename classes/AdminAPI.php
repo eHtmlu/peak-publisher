@@ -1204,9 +1204,13 @@ class AdminAPI {
         return get_peak_publisher_settings();
     }
 
-    public function save_peak_publisher_settings_rest(\WP_REST_Request $request): array {
+    public function save_peak_publisher_settings_rest(\WP_REST_Request $request): array|\WP_REST_Response {
         $params = $request->get_json_params();
         if (!is_array($params)) { $params = []; }
+        $requirements = whitelist_requirements_error((array) ($params['ip_whitelist'] ?? []));
+        if ($requirements !== null) {
+            return $this->rest_error_response($requirements);
+        }
         update_peak_publisher_settings($params);
         return get_peak_publisher_settings();
     }

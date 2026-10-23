@@ -172,6 +172,22 @@ No — it works with it. For plugins on wordpress.org, Peak Publisher is the SVN
 = How do client sites find updates? =
 Self‑hosted: your plugin includes an `Update URI` header that points to your Peak Publisher site, and the bootstrap code makes WordPress core ask its endpoints for update metadata and packages. wordpress.org: as always, through wordpress.org.
 
+= What does my server need? =
+PHP 8.1 and WordPress 5.8 or newer, and these PHP extensions:
+
+* **openssl** — to connect a wordpress.org account; the SVN password is encrypted with it.
+* **xml** with its dom and simplexml parts — for wordpress.org (the SVN listings) and for SVG assets on both channels.
+* **mbstring** — for readme.txt; the parser reads multibyte text.
+* **curl** — to publish to wordpress.org; the upload is streamed through it, reading works without.
+* **intl** — for domain names in the whitelist; IP addresses need nothing.
+
+Recommended:
+
+* **zip** — releases are built with ZipArchive and can be edited after the upload (Tested up to); without it WordPress's own ZIP code builds them and the edit is refused.
+* **gd** — for the banner color of generated icons.
+
+Most hosts ship all of these. Where openssl, intl, dom, zip or curl is missing, Peak Publisher says so at the place that needs it.
+
 = What data is collected? =
 Nothing about people. Peak Publisher sends no telemetry, and its requests never carry your site's address. What it stores about the client sites of self‑hosted plugins and what it sends to wordpress.org is described under "Privacy" and "External services".
 

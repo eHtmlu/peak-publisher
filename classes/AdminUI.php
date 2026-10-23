@@ -189,6 +189,9 @@ class AdminUI {
                 filemtime(PBLSH_PLUGIN_DIR . 'assets/js/' . $file),
                 true
             );
+            // The strings of the file reach wp.i18n through the JSON translate.wordpress.org
+            // builds per script handle.
+            wp_set_script_translations($handle, 'peak-publisher');
             $previous_handle = $handle;
         }
         

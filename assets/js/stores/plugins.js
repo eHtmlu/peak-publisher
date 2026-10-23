@@ -3,7 +3,6 @@
     'use strict';
     var registerStore = wp.data.registerStore;
     var assign = Object.assign;
-    var createSelector = function(fn) { return fn; };
     var initialState = {
         ids: [],
         byId: {},
@@ -146,9 +145,6 @@
         },
         getById: function(state, id) {
             return state.byId[id] || null;
-        },
-        isPending: function(state, id) {
-            return state.pendingIds.indexOf(id) !== -1;
         },
         getPendingIds: function(state) {
             return state.pendingIds.slice();

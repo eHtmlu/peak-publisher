@@ -70,6 +70,13 @@ function get_asset_slots(): array {
         'banner_sd' => $slot('banner', '772x250', 'banner-772x250', PBLSH_ASSET_RASTER_EXTS, 772, 250, __('772×250', 'peak-publisher'), 'banners'),
         'screenshot' => $slot('screenshot', null, 'screenshot', PBLSH_ASSET_RASTER_EXTS, null, null, __('Screenshot', 'peak-publisher'), 'screenshots'),
     ];
+    /**
+     * Whether the assets tab offers a slot for banner.svg.
+     *
+     * Off by default: wordpress.org's import takes the file but the plugin page never shows it.
+     *
+     * @param bool $enabled
+     */
     if (!apply_filters('pblsh_enable_banner_svg', false)) {
         unset($slots['banner_svg']);
     }

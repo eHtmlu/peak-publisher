@@ -356,8 +356,8 @@ lodash.set(window, 'Pblsh.Components.LivePreview', (() => {
         // its page where there is one —, the fact beside it: the default, set in the JSON (with the
         // way to the editor), red when the directory lacks it; nothing to name for a theme from elsewhere or an unknown
         // default. Change opens the field beneath, focused with the slug selected — a slug, or the
-        // theme's wordpress.org address (wporgSlugFromInput()); Enter or leaving saves, Escape
-        // closes, an empty field returns to the default.
+        // theme's wordpress.org address (wporgSlugFromInput()); Enter or the button saves, Escape
+        // closes, leaving the field alone does nothing, an empty field returns to the default.
         const renderTheme = () => {
             const field = view.fields.theme;
             const theme = view.theme;

@@ -290,7 +290,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             ],
             checked: settings.standalone_mode,
             onChange: (val) => setField('standalone_mode', val),
-            __next40pxDefaultSize: true,
         }),
         settings.standalone_mode ? createElement('div', {
                 style: {
@@ -317,7 +316,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             ],
             checked: settings.auto_remove_workspace_artifacts,
             onChange: (val) => setField('auto_remove_workspace_artifacts', val),
-            __next40pxDefaultSize: true,
         }),
         createElement('div', {
                 style: {
@@ -340,7 +338,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
                 value: settings.workspace_artifacts_to_remove,
                 onChange: (val) => setField('workspace_artifacts_to_remove', val),
                 rows: 6,
-                __next40pxDefaultSize: true,
             })
         ),
     );
@@ -353,11 +350,10 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
         createElement(ToggleControl, {
             label: __('Count installations', 'peak-publisher'),
             help: [
-                __('Counts unique plugin installations based on update checks. For technical reasons, there is always a delay of up to 24 hours in the displayed number of installations.', 'peak-publisher'),
+                __('Counts unique installations by the update checks of the last 24 hours: a site counts as soon as it checks for updates and leaves the count 24 hours after its last check.', 'peak-publisher'),
             ],
             checked: !!settings.count_plugin_installations,
             onChange: (val) => setField('count_plugin_installations', val),
-            __next40pxDefaultSize: true,
         }),
     );
 
@@ -376,7 +372,6 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } 
             placeholder: __('Leave blank to allow access from anywhere', 'peak-publisher'),
             onChange: (val) => setField('ip_whitelist', val),
             rows: 6,
-            __next40pxDefaultSize: true,
         }),
     );
 

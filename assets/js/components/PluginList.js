@@ -3,7 +3,7 @@ lodash.set(window, 'Pblsh.Components.PluginList', ({ plugins, onEdit, onDelete, 
     const { __, _n, sprintf } = wp.i18n;
     const { createElement } = wp.element;
     const { useSelect } = wp.data;
-    const { Button, DropdownMenu, MenuItem, Icon, Tooltip } = wp.components;
+    const { Button, DropdownMenu, MenuItem, Tooltip } = wp.components;
     const { showAlert, getSvgIcon } = Pblsh.Utils;
     const { ChannelPath, CurrentVersion, InstallationsCount, WporgCheckStatus, RelativeTime } = Pblsh.Components;
     const { getCheck } = Pblsh.WporgCheckUtils;

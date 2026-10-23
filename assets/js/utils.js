@@ -119,27 +119,6 @@ lodash.set(window, 'Pblsh.Utils', {
         if (type === 'error' || type === 'warning') {
             alert(message);
         }
-        // For success messages, use the SuccessMessage component instead
-    },
-
-    // Get default theme configuration
-    getDefaultConfig: () => {
-        return {
-            name: '',
-            plugin_uri: '',
-            author: '',
-            author_uri: '',
-            description: '',
-            requires_at_least: '',
-            tested_up_to: '',
-            requires_php: '',
-            version: '1.0.0',
-            license: '',
-            license_uri: '',
-            text_domain: '',
-            slug: '',
-            icon: '',
-        };
     },
 
     // SVG Icons for theme settings

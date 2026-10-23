@@ -1166,8 +1166,16 @@ class WporgOperations {
         $wporg_slug = self::normalize_slug_or_throw($wporg_slug);
         $hint = self::compute_directory_hint($wporg_slug, $username);
 
-        // Extension/override point (also used to simulate states in development —
-        // some, like a freshly approved own plugin, cannot occur on demand).
+        /**
+         * Filters the directory hint of a wordpress.org slug before the add-plugin flow reads it.
+         *
+         * The flow's extension point; a development site simulates states through it that cannot
+         * occur on demand, such as a freshly approved own plugin. Only the hint's own keys are taken.
+         *
+         * @param array  $hint       The hint, see above.
+         * @param string $wporg_slug The slug looked up.
+         * @param string $username   The account the lookup is made for.
+         */
         $filtered = apply_filters('pblsh_wporg_directory_hint', $hint, $wporg_slug, $username);
         return is_array($filtered) ? array_merge($hint, array_intersect_key($filtered, $hint)) : $hint;
     }

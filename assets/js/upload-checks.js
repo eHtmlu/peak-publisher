@@ -91,8 +91,6 @@ lodash.set(window, 'Pblsh.Hooks.useUploadChecks', () => {
         const nextRelease = releaseContext.nextRelease;
         const latestRelease = releaseContext.latestRelease;
         const existingRelease = releaseContext.existingRelease;
-        const previousReleaseVersion = releaseContext.previousReleaseVersion;
-        const pluginVersion = releaseContext.pluginVersion;
         const naturalSuccessors = releaseContext.naturalSuccessors;
         const isNaturalSuccessor = releaseContext.isNaturalSuccessor;
 

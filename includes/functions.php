@@ -858,37 +858,3 @@ function get_image_average_color( string $file_path ) {
 function geopattern_icon_base_url(): string {
     return rest_url( 'pblsh/v1/plugins/geopattern-icon/' );
 }
-
-
-/**
- * Polyfills for PHP 8.0 functions.
- */
-if (!function_exists('str_starts_with')) {
-    function str_starts_with( $haystack, $needle ) {
-		if ( '' === $needle ) {
-			return true;
-		}
-
-		return 0 === strpos( $haystack, $needle );
-	}
-}
-if (!function_exists('str_contains')) {
-    function str_contains( $haystack, $needle ) {
-		if ( '' === $needle ) {
-			return true;
-		}
-
-		return false !== strpos( $haystack, $needle );
-	}
-}
-if (!function_exists('str_ends_with')) {
-    function str_ends_with( $haystack, $needle ) {
-		if ( '' === $haystack ) {
-			return '' === $needle;
-		}
-
-		$len = strlen( $needle );
-
-		return substr( $haystack, -$len, $len ) === $needle;
-	}
-}

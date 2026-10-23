@@ -6,8 +6,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const { useState, useEffect, useRef, createElement, createPortal, Fragment, render } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
-    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings, TipDialog, UpgradeNotice, NoticeBox } = window.Pblsh.Components;
-    const { showAlert, getDefaultConfig } = Pblsh.Utils;
+    const { PluginList, PluginAdditionProcess, PluginEditor, GlobalDropOverlay, Settings, TipDialog, UpgradeNotice, NoticeBox } = window.Pblsh.Components;
+    const { showAlert } = Pblsh.Utils;
     const { getImportWatchAt } = Pblsh.AssetsUtils;
     const IMPORT_WATCH_INTERVAL = 60000;   // ms between two looks of the import watch
 

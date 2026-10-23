@@ -73,8 +73,8 @@ class PublicAPI {
         }
 
         $ip_types = [
-            4 => ['dns_type' => DNS_A, 'filter_option' => FILTER_FLAG_IPV4, 'allowed_ips' => [], 'cidr_ranges' => []],
-            6 => ['dns_type' => DNS_AAAA, 'filter_option' => FILTER_FLAG_IPV6, 'allowed_ips' => [], 'cidr_ranges' => []],
+            4 => ['dns_type' => DNS_A, 'allowed_ips' => [], 'cidr_ranges' => []],
+            6 => ['dns_type' => DNS_AAAA, 'allowed_ips' => [], 'cidr_ranges' => []],
         ];
 
         // split into ip addresses, cidr ranges and domain names
@@ -84,8 +84,8 @@ class PublicAPI {
             // cidr range
             if (str_contains($item, '/')) {
                 [$ip, $subnet] = explode('/', $item, 2);
-        
-                // Prüfen, ob Prefix eine Zahl ist
+
+                // only a numeric prefix counts
                 if (ctype_digit($subnet)) {
                     $subnet = (int) $subnet;
                     if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && $subnet >= 0 && $subnet <= 32) {
@@ -726,7 +726,9 @@ class PublicAPI {
 	protected function get_simplified_faq_markup( $markup ) {
 
         /*
-        // Original wordpress.org implementation.
+        // Original wordpress.org implementation, kept for the diff until wordpress.org fixes it
+        // (Meta Trac ticket in preparation, 2026-10-23): it misses the <dt id="..."> the parser
+        // writes since the FAQ topics became linkable.
         $markup = str_replace(
             array( '<dl>', '</dl>', '<dt>', '</dt>', '<h3>', '</h3>', '<dd>', '</dd>' ),
             array( '',     '',      '<h4>', '</h4>', '',      '',     '<p>',  '</p>'  ),

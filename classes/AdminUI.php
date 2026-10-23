@@ -156,7 +156,6 @@ class AdminUI {
             'components/GlobalDropOverlay.js',
             'admin.js',
             'footer-promo.js',
-            //'highlightjs/highlight.js',
         ];
 
         // WordPress's code editor for the Live Preview's JSON (CodeMirror with JSON lint) — false

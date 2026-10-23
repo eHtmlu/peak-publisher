@@ -91,7 +91,7 @@ class PublicAPI {
 
         // check if client ip is in any of the allowed cidr ranges
         foreach ($family['ranges'] as [ $subnet, $bits ]) {
-            if ($this->ip_in_range($client_ip, $subnet, $bits)) {
+            if (ip_in_cidr($client_ip, $subnet, $bits)) {
                 return true;
             }
         }
@@ -169,34 +169,6 @@ class PublicAPI {
 
         // Return UTF-8 domain name if it is a valid domain name
         return $validated_untrusted_client_domain;
-    }
-
-    public function ip_in_range(string $ip, string $subnet, int $bits): bool {
-
-        // not yet implemented, so we return always false to deny access
-        return false;
-        
-        /* if (strpos($range, '/') === false) {
-            return $ip === $range;
-        }
-        list($subnet, $bits) = explode('/', $range, 2);
-        $bits = (int) $bits;
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            $ip_long = ip2long($ip);
-            $subnet_long = ip2long($subnet);
-            $mask = -1 << (32 - $bits);
-            $subnet_long &= $mask;
-            return ($ip_long & $mask) === $subnet_long;
-        }
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) && filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            $ip_bin = self::inet6_to_bits($ip);
-            $subnet_bin = self::inet6_to_bits($subnet);
-            return substr($ip_bin, 0, $bits) === substr($subnet_bin, 0, $bits);
-        } */
-    }
-
-    public function checkdnsrr(string $domain, string $type): bool {
-        return gethostbyname($domain) !== $domain;
     }
 
     /**

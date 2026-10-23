@@ -56,8 +56,8 @@ Self‑hosted: unique installations of the last 24 hours and downloads per day. 
 🧽🫧 **Auto‑cleanup of workspace artifacts (e.g. .git, node_modules)**
 To provide clean packages and reduce package size, Peak Publisher removes development files and operating system artifacts from your uploads using patterns that you can configure. (optional)
 
-🔐 **Optional restriction via IP/domain whitelist**
-Self‑hosted packages are stored in a private, server‑protected directory with no direct web access. By default the API is reachable from anywhere; with an IP or domain whitelist you restrict access to update metadata and downloads.
+🔐 **Optional restriction via IP, CIDR or domain whitelist**
+Self‑hosted packages are stored in a private, server‑protected directory with no direct web access. By default the API is reachable from anywhere; with a whitelist of IP addresses, CIDR ranges or domain names you restrict access to update metadata and downloads.
 
 🔑 **Encrypted wordpress.org credentials**
 The SVN password is stored encrypted (AES‑256‑GCM) with a key outside the database — see the FAQ.
@@ -207,7 +207,7 @@ A button on your plugin's wordpress.org page that opens WordPress Playground wit
 Only what the checklist tells you: workspace artifacts are removed by the patterns in the settings (optional), readme.txt is stored as UTF‑8 without a BOM, the release ZIP gets the plugin's slug as its top‑level folder, a lower Tested up to is raised to the highest known value in the lines that already carry one, and on wordpress.org the Stable tag in trunk/readme.txt is set when the release becomes current.
 
 = Can I restrict access to downloads? =
-Yes. For self‑hosted plugins you can optionally configure an IP/domain whitelist for the public endpoints. For stricter access control, consider placing your Peak Publisher site behind a VPN or a reverse proxy, or adding your own authentication layer.
+Yes. For self‑hosted plugins you can optionally configure a whitelist of IP addresses, CIDR ranges or domain names for the public endpoints. For stricter access control, consider placing your Peak Publisher site behind a VPN or a reverse proxy, or adding your own authentication layer.
 
 = Do you support semantic versioning? =
 Yes. The validator recognizes major/minor/patch increments and warns on unexpected jumps.
@@ -222,7 +222,7 @@ WordPress compares versions with PHP's version_compare(). Its documentation list
 = Which distribution channel should I choose? =
 Choose wordpress.org if your plugin is free and open-source and you want it listed in the official WordPress plugin directory so that it can be easily found and installed by everyone — however, your plugin must first be [reviewed and approved](https://developer.wordpress.org/plugins/wordpress-org/) by the WordPress.org plugin team.
 
-Otherwise choose Self-hosted — releases are then distributed directly from your own server, without any review process, and go live instantly. Note that self-hosted plugins are also publicly accessible via the update API by default; you can restrict access with the IP/domain whitelist in the settings.
+Otherwise choose Self-hosted — releases are then distributed directly from your own server, without any review process, and go live instantly. Note that self-hosted plugins are also publicly accessible via the update API by default; you can restrict access with the whitelist in the settings.
 
 = Can I use both distribution channels for one plugin? =
 No. A plugin uses exactly one distribution channel — either wordpress.org or self-hosted — and this choice applies to all future releases.
@@ -270,6 +270,11 @@ Of course, WordPress.org remains the update server and the primary data source. 
 * The list and the editor follow changes made on wordpress.org through the directory, without touching SVN
 * Publishing shows its steps and survives gateway timeouts; a second publish while one runs is refused and the running one followed instead
 
+**Self-hosted**
+
+* Daily download counts, served as `downloaded` by the public API
+* The whitelist of the public API takes CIDR ranges, e.g. 203.0.113.0/24 or 2001:db8::/32
+
 **Both channels**
 
 * Release drafts are gone: every release is listed and downloadable by version; the current release — the one sites receive — is decided on every upload and changed with "Make current release" (see Upgrade Notice)
@@ -280,7 +285,6 @@ Of course, WordPress.org remains the update server and the primary data source. 
 * The plugin's slug comes from the folder, ZIP or main file name; every release ZIP has the slug as its root (the setting "Add top-level folder if missing" is gone)
 * readme.txt is always stored as UTF-8 without a BOM (the setting is gone)
 * The readme parser and the icon generator are wordpress.org's current code: readmes render as the directory renders them, generated icons match its
-* Daily download counts for self-hosted plugins, served as `downloaded` by the public API
 * "Add New Plugin" starts with the channel and, for wordpress.org, with where the plugin stands; tips explain headers, review, captions, Live Preview and version numbers
 * Status column in the plugin list, the channel and slug of every plugin, figures aligned with the name, the list sorted by name
 * New page header and footer, the logo in the admin menu, relative times, settings grouped into General, Uploads, wordpress.org and Self-hosted
@@ -302,6 +306,7 @@ Of course, WordPress.org remains the update server and the primary data source. 
 * curl_close(), deprecated in PHP 8.5, is no longer called; servers without curl_multi read wordpress.org one request at a time
 * Release ZIPs keep empty folders
 * Self-hosted releases can be built on WordPress before 6.4.4 again; since 1.3.1 the publish failed there
+* An IPv6 client passes through a domain entry of the whitelist
 
 = 1.3.1 - 2026-04-04 =
 * Fixed minor compatibility issues with WordPress 7.0

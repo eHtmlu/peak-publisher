@@ -180,3 +180,28 @@ function whitelist_requirements_error(array $entries): ?\WP_Error {
     }
     return null;
 }
+
+
+/**
+ * Whether $ip lies in the CIDR range $subnet/$bits — a range of the whitelist
+ * (classify_ip_whitelist()) against the asking site's address. Both families through their
+ * packed form: the first $bits bits must agree. An address of the other family, an invalid
+ * one or a prefix beyond the family's length is never in the range.
+ */
+function ip_in_cidr(string $ip, string $subnet, int $bits): bool {
+    $ip_packed = @inet_pton($ip);
+    $subnet_packed = @inet_pton($subnet);
+    if ($ip_packed === false || $subnet_packed === false || strlen($ip_packed) !== strlen($subnet_packed) || $bits < 0 || $bits > strlen($ip_packed) * 8) {
+        return false;
+    }
+    $whole_bytes = intdiv($bits, 8);
+    if (substr($ip_packed, 0, $whole_bytes) !== substr($subnet_packed, 0, $whole_bytes)) {
+        return false;
+    }
+    $remaining_bits = $bits % 8;
+    if ($remaining_bits === 0) {
+        return true;
+    }
+    $mask = (0xFF << (8 - $remaining_bits)) & 0xFF;
+    return (ord($ip_packed[$whole_bytes]) & $mask) === (ord($subnet_packed[$whole_bytes]) & $mask);
+}

@@ -259,7 +259,7 @@ Of course, WordPress.org remains the update server and the primary data source. 
 
 == Changelog ==
 
-= 2.0.0 - 2026-10-22 =
+= 2.0.0 - 2026-10-24 =
 **wordpress.org as a distribution channel**
 
 * Connect a wordpress.org account (username and SVN password, stored encrypted) and import your published plugins with their releases, assets and figures

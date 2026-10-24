@@ -101,7 +101,7 @@ final class AssetUploadValidationTest extends TestCase {
 
         $error = validate_asset_upload($this->file($active['script element']), 'icon.svg', get_asset_slots()['icon_svg']);
         self::assertSame([ 'asset_svg_active', 400 ], [ $error->get_error_code(), $error->get_error_data()['status'] ], 'the upload passes the rule\'s error through');
-        self::assertSame('The SVG contains active content (script): a browser that opens the file on this site would run it.', $error->get_error_message());
+        self::assertSame('The SVG contains active content (script) and is therefore refused for security reasons. Since WordPress shows it only as an image element, the active content would not run there anyway.', $error->get_error_message());
     }
 
     public function test_a_file_over_the_limit_is_refused_before_anything_is_written(): void {

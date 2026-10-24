@@ -445,7 +445,7 @@ function check_svg_file(string $path): ?\WP_Error {
     $active = svg_active_content($doc);
     if ($active !== null) {
         /* translators: %s: what makes the SVG active — an element or attribute name such as script or onload */
-        return $error('asset_svg_active', sprintf(__('The SVG contains active content (%s): a browser that opens the file on this site would run it.', 'peak-publisher'), $active));
+        return $error('asset_svg_active', sprintf(__('The SVG contains active content (%s) and is therefore refused for security reasons. Since WordPress shows it only as an image element, the active content would not run there anyway.', 'peak-publisher'), $active));
     }
     return null;
 }

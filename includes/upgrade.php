@@ -77,10 +77,11 @@ function acquire_schema_migration_lock(): bool {
  * reports under its topic key, or null when it has nothing to say this time; a section that
  * never concerns the operator returns nothing.
  *
- * Left alone on purpose: the installations cache `_pblsh_installations`, which 1.3.1 keyed
- * by the whole user agent and the current code keys by the site. Its rows expire within
- * their day; until then a site counts twice — what every WordPress update did under 1.3.1,
- * as the user agent carried the WordPress version. Dropping it would show zero instead.
+ * Not a section: the installations cache `_pblsh_installations`, which 1.3.1 keyed by the
+ * whole user agent and the current code keys by the site. The site key cannot be computed
+ * from the old one, only from the site's next request — so the row moves there, on the
+ * site's first update check (legacy_installation_key(), record_plugin_installation()); rows no
+ * site renews expire within their day.
  */
 function upgrade_schema_from_live(): void {
     upgrade_asset_manifest_entries();
@@ -412,4 +413,16 @@ function upgrade_asset_manifest_entries(): void {
             }
         }
     }
+}
+
+
+/**
+ * Schema version 1 (ships with 2.0.0): the key 1.3.1 gave a site in the installations cache
+ * `_pblsh_installations` — the hash of its whole user agent, under the secret salt —, for the one
+ * place that still meets such a row: record_plugin_installation() moves it to the site's key on
+ * the site's first update check after the update, so nothing counts twice and nothing starts at
+ * zero. Goes with this migration.
+ */
+function legacy_installation_key(string $user_agent): string {
+    return substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|' . $user_agent, true))), 0, 14);
 }

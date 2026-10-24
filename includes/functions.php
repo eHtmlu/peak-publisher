@@ -156,6 +156,13 @@ function record_plugin_installation(int $plugin_post_id, string $user_agent, str
 
     // Update the installations list.
     $list = get_plugin_installations_list($plugin_post_id);
+    // Transitional, goes with the migration from 1.3.1: the row 1.3.1 kept under the whole user
+    // agent moves to the site's key, its history with it (legacy_installation_key()).
+    $legacy_key = legacy_installation_key($user_agent);
+    if ($legacy_key !== $key && isset($list[$legacy_key])) {
+        $list[$key] = $list[$key] ?? $list[$legacy_key];
+        unset($list[$legacy_key]);
+    }
     $now = time();
     $installed_version_normalized = $installed_version !== '' ? normalize_version_number($installed_version) : '';
     if (!isset($list[$key]) || !is_array($list[$key])) {

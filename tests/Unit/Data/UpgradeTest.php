@@ -7,8 +7,11 @@ namespace Pblsh\Tests\Unit\Data;
 use Pblsh\Tests\FakeWordPress;
 use Pblsh\Tests\Unit\TestCase;
 
+use function Pblsh\get_plugin_installations_list;
+use function Pblsh\get_secret_salt;
 use function Pblsh\maybe_upgrade_schema;
 use function Pblsh\peak_publisher_upload_basedir;
+use function Pblsh\record_plugin_installation;
 
 use const Pblsh\PBLSH_SCHEMA_VERSION;
 
@@ -233,5 +236,31 @@ final class UpgradeTest extends TestCase {
 
         self::assertFalse(metadata_exists('post', $wporg_release->ID, '_pblsh_upload_state'), 'a wporg tag snapshot was never an upload state');
         self::assertFalse(metadata_exists('post', $migrated->ID, '_pblsh_upload_state'), 'a snapshot-shaped content has nothing to move');
+    }
+
+    /**
+     * 1.3.1 keyed a site's row in the installations cache by its whole user agent, the current
+     * code keys it by the site. The row moves on the site's first update check after the update
+     * (legacy_installation_key()): one row, its history kept, nothing counted twice.
+     */
+    public function test_a_sites_first_update_check_moves_its_installation_row_to_the_site_key(): void {
+        $plugin = $this->create_plugin('pblsh_plugin', 'my-plugin');
+        update_option('pblsh_secret_salt', 'the salt of the site, kept by the migration');
+        $user_agent = 'PeakPublisherBootstrapCode/basicV2; WordPress/6.8.2; https://Client.example/';
+        $key_131 = substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|' . $user_agent, true))), 0, 14);
+        $key_now = substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|client.example/', true))), 0, 14);
+        self::assertNotSame($key_131, $key_now);
+        update_post_meta($plugin->ID, '_pblsh_installations', [
+            $key_131 => [ 'first_seen' => 1000, 'last_seen' => time() - 60, 'count' => 5, 'last_version' => '1.0.0', 'last_version_normalized' => '1.0.0' ],
+        ]);
+
+        record_plugin_installation($plugin->ID, $user_agent, '1.0.1');
+
+        $list = get_plugin_installations_list($plugin->ID);
+        self::assertSame([ $key_now ], array_keys($list), 'one row, under the site key');
+        self::assertSame([ 1000, 6, '1.0.1' ], [ $list[$key_now]['first_seen'], $list[$key_now]['count'], $list[$key_now]['last_version'] ], 'the history moved with the row');
+
+        record_plugin_installation($plugin->ID, $user_agent, '1.0.1');
+        self::assertSame(7, get_plugin_installations_list($plugin->ID)[$key_now]['count'], 'the next check finds the row where it is');
     }
 }

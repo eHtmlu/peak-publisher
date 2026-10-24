@@ -1,0 +1,229 @@
+// Pure helpers for the assets tab (Pblsh.AssetsUtils): the vocabulary of the slots, their
+// limits and files — shared by the boxes and the alerts; no state, like
+// utils-installations.js. Sizes and limits are binary units, like wordpress.org's.
+lodash.set(window, 'Pblsh.AssetsUtils', (() => {
+    const { __, _n, sprintf } = wp.i18n;
+
+    const MB = 1048576;
+    // A limit: '1 MB', '4 MB', '10 MB' (whole binary MB).
+    const formatLimit = (bytes) => (bytes / MB) + ' MB';
+    // A file size for the box: '820 B', '12.3 KB', '1.4 MB'.
+    const formatSize = (bytes) => {
+        if (!bytes || bytes <= 0) return null;
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < MB) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / MB).toFixed(1) + ' MB';
+    };
+    // A file size against a limit, rounded up to one decimal like the server's message, so a
+    // file just over the limit never reads as the limit itself: '1.1 MB', '820 KB'.
+    const formatSizeOverLimit = (bytes) => {
+        if (bytes < MB) return Math.ceil(bytes / 1024) + ' KB';
+        const tenths = Math.ceil(bytes * 10 / MB);
+        return (tenths % 10 === 0 ? String(tenths / 10) : (tenths / 10).toFixed(1)) + ' MB';
+    };
+    const typePlural = (type) => ({ icon: __('icons', 'peak-publisher'), banner: __('banners', 'peak-publisher'), screenshot: __('screenshots', 'peak-publisher') })[type];
+
+    // The empty box's one line: "Expected: PNG/JPG/GIF · 128×128 px · max 1 MB" — the slash
+    // joins the alternatives, the middle dot separates the requirements.
+    function getExpectedText(slotDef) {
+        const parts = [ (slotDef.exts || []).map((ext) => ext.toUpperCase()).join('/') ];
+        if (slotDef.expectedW && slotDef.expectedH) parts.push(slotDef.expectedW + '×' + slotDef.expectedH + ' px');
+        parts.push(sprintf(__('max %s', 'peak-publisher'), formatLimit(slotDef.maxBytes)));
+        return __('Expected:', 'peak-publisher') + ' ' + parts.join(' · ');
+    }
+
+    // The client's check before an upload; the server keeps the same limit (asset_too_large).
+    function getTooLargeText(slotDef, fileSize) {
+        return sprintf(__('The file is %1$s — %2$s may be at most %3$s (the wordpress.org limit).', 'peak-publisher'), formatSizeOverLimit(fileSize), typePlural(slotDef.type), formatLimit(slotDef.maxBytes));
+    }
+
+    // The box's figures: "128×128 px · 12.3 KB" — muted fragments, · separated.
+    function getMetaLine(entry) {
+        const parts = [];
+        if (entry.width && entry.height) parts.push(entry.width + '×' + entry.height + ' px');
+        const size = formatSize(entry.filesize);
+        if (size) parts.push(size);
+        return parts.join(' · ');
+    }
+
+    // A drop onto an occupied position swaps the two screenshots — nothing is lost.
+    function getSwapConfirmText(fromN, toN) {
+        return sprintf(__('Swap screenshots %1$d and %2$d?', 'peak-publisher'), fromN, toN);
+    }
+
+    // Where the screenshot captions come from (the server's captions_source: state, version,
+    // fallback): the readme of the current release; on wordpress.org without a tag pointer the
+    // trunk readme, which is what the plugin page shows then; else the latest release's, a
+    // fallback. The pointer wording follows the editor header (utils-current-release.js).
+    function getCaptionsSourceText(plugin, source) {
+        const isWporg = plugin.hosting_type === 'wporg';
+        switch (source.state) {
+            case 'current':
+                return sprintf(__('Captions from readme.txt of %s (current release)', 'peak-publisher'), source.version);
+            case 'trunk':
+            case 'none':
+                if (isWporg) return __('Captions from readme.txt of trunk (wordpress.org distributes trunk)', 'peak-publisher');
+                break;
+            case 'tag_missing':
+                if (isWporg) return sprintf(__('Captions from readme.txt of trunk (Stable tag %s does not exist — wordpress.org distributes trunk)', 'peak-publisher'), plugin.pointer);
+                break;
+            case 'unknown':
+                if (source.version) return sprintf(__('Captions from readme.txt of %s (latest — trunk/readme.txt could not be read)', 'peak-publisher'), source.version);
+                break;
+        }
+        // Self-hosted without a current release, and wordpress.org with an unreadable pointer and no tag.
+        return source.version
+            ? sprintf(__('Captions from readme.txt of %s (latest — no current release)', 'peak-publisher'), source.version)
+            : __('Captions appear once a release with a readme.txt is published.', 'peak-publisher');
+    }
+
+    // wordpress.org renders captions by position: moving a screenshot leaves its caption behind.
+    const getPositionsHint = () => __('Captions are bound to positions, not images — reordering screenshots does not move their captions.', 'peak-publisher');
+
+    // Screenshots without a single caption: one line instead of the caption details.
+    const getNoCaptionsText = () => __('No captions in readme.txt yet', 'peak-publisher');
+
+    // A wordpress.org plugin whose assets were never read from SVN (the first pull failed):
+    // nothing can be built on them, the tab only shows — the notice says so beside its
+    // Refresh link.
+    const getNotSyncedNotice = () => __('The assets of this plugin have not been read from wordpress.org yet, so they cannot be changed here.', 'peak-publisher');
+
+    // Files of assets/ that no slot of the tab shows — they stay on wordpress.org untouched.
+    // blueprints/ is the Live Preview's.
+    function getOtherFilesText(count) {
+        return sprintf(_n(
+            '%d other file in assets/ is not managed here (localized or right-to-left variants, unused sizes)',
+            '%d other files in assets/ are not managed here (localized or right-to-left variants, unused sizes)',
+            count, 'peak-publisher'
+        ), count);
+    }
+
+    // The tab's sections, in their order: the Live Preview only on wordpress.org, which serves
+    // it — a self-hosted plugin's API has no blueprints.
+    function getAssetSections(isWporg) {
+        return [
+            { key: 'icons', label: __('Icon & Banner', 'peak-publisher') },
+            { key: 'screenshots', label: __('Screenshots', 'peak-publisher') },
+            ...(isWporg ? [ { key: 'live-preview', label: __('Live Preview', 'peak-publisher') } ] : []),
+        ];
+    }
+
+    // The section a slot of the working copy belongs to — where its pending change shows.
+    function getAssetSection(slotKey) {
+        if (slotKey === 'blueprint') return 'live-preview';
+        return /^screenshot-\d+$/.test(slotKey) ? 'screenshots' : 'icons';
+    }
+
+    // The working copy of a wordpress.org plugin — the editor's status line while it holds changes.
+    const getPendingChangesText = (count) => sprintf(_n('%d change not committed to wordpress.org yet', '%d changes not committed to wordpress.org yet', count, 'peak-publisher'), count);
+    const getConflictsText = (count) => sprintf(_n('%d conflict — resolve it to commit', '%d conflicts — resolve them to commit', count, 'peak-publisher'), count);
+    // The row's count beside the Commit button, which says the rest.
+    const getPendingCountText = (count) => sprintf(_n('%d change', '%d changes', count, 'peak-publisher'), count);
+    const getCommittingText = () => __('Committing to wordpress.org…', 'peak-publisher');
+    const getNoAccountCommitText = () => __('Committing assets needs your wordpress.org account — connect one under Settings › wordpress.org. Your changes are kept until then.', 'peak-publisher');
+    // The closed box's second line in this tab, under the closed notice every tab shares
+    // (getWporgClosedNotice()): what the closure means for the assets.
+    const getClosedAssetsNotice = () => __('Its page shows a generated icon and no banner until it is reopened.', 'peak-publisher');
+    // The commit's receipt, in the row where its button stood — a fragment of the row, no period;
+    // <revision /> is the WporgRevisionLink's slot (createInterpolateElement).
+    const getCommittedText = () => __('Committed to wordpress.org in <revision />', 'peak-publisher');
+    const getShowWporgStateText = (showing) => showing ? __('Show my changes', 'peak-publisher') : __("Show wordpress.org's state", 'peak-publisher');
+
+    // The commit's confirm, the last word before the write: the account that commits — the
+    // one place the editor names it — and the tally the commit message will carry: puts are
+    // updated, copies (move, swap) moved, deletes deleted — counted from the server's wporg.slots.
+    function getCommitConfirmText(slots, username) {
+        const counts = { put: 0, copy: 0, delete: 0 };
+        Object.values(slots || {}).forEach((slot) => { if (slot.pending) counts[slot.pending]++; });
+        const total = counts.put + counts.copy + counts.delete;
+        const parts = [
+            counts.put && sprintf(_n('%d updated', '%d updated', counts.put, 'peak-publisher'), counts.put),
+            counts.copy && sprintf(_n('%d moved', '%d moved', counts.copy, 'peak-publisher'), counts.copy),
+            counts.delete && sprintf(_n('%d deleted', '%d deleted', counts.delete, 'peak-publisher'), counts.delete),
+        ].filter(Boolean);
+        return sprintf(_n('Commit %d change to wordpress.org as "%s"?', 'Commit %d changes to wordpress.org as "%s"?', total, 'peak-publisher'), total, username) + '\n' + parts.join(', ');
+    }
+
+    const getDiscardConfirmText = (count) => sprintf(_n('Discard %d change? The assets return to their state on wordpress.org.', 'Discard %d changes? The assets return to their state on wordpress.org.', count, 'peak-publisher'), count);
+
+    // The band's Discard of an upload: the file is lost with its change — a move or a delete is only taken back, unasked.
+    const getDiscardUploadConfirmText = () => __('Discard the uploaded file? The slot returns to its state on wordpress.org.', 'peak-publisher');
+
+    // A wordpress.org plugin's delete waits for the commit; a self-hosted one is gone at once.
+    const getDeleteConfirmText = (isWporg) => isWporg
+        ? __('Delete this asset? It is removed from wordpress.org with the next commit.', 'peak-publisher')
+        : __('Delete this asset?', 'peak-publisher');
+
+    // A slot's band (AssetStatusBand), the open change: what the commit will do with the slot on
+    // wordpress.org, said from the picture the box shows — or that both sides changed the slot.
+    // wordpress.org is where a commit goes; what visitors see is "the plugin page" (the texts
+    // beneath) — not "your": a committer need not own the plugin —, never "imported".
+    function getBandText(kind) {
+        return {
+            add: __('Will be added on wordpress.org', 'peak-publisher'),
+            replace: __('Will replace the one on wordpress.org', 'peak-publisher'),
+            delete: __('Will be deleted on wordpress.org', 'peak-publisher'),
+            conflict: __('Changed here and on wordpress.org', 'peak-publisher'),
+        }[kind];
+    }
+
+    // The import forecast (the detail's wporg_import: expected_at, reason) ends three minutes
+    // past its time — the import's own duration, like the server's PBLSH_WPORG_IMPORT_SHOWN_AFTER
+    // —, or earlier, when the server saw the import land and dropped it. Its end as ms, null
+    // without one. Tags and flips are imported within seconds: no clock time for them, it would
+    // only read as precision.
+    const FORECAST_SHOWN_AFTER = 180000;
+    function getForecastEnd(forecast) {
+        const expected = forecast ? Date.parse(forecast.expected_at) : NaN;
+        return isNaN(expected) ? null : expected + FORECAST_SHOWN_AFTER;
+    }
+    const isForecastSoon = (forecast) => forecast.reason === 'tag' || forecast.reason === 'flip';
+    const formatForecastTime = (forecast) => new Date(Date.parse(forecast.expected_at)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // The band of a committed slot the plugin page does not show yet: the forecast's time while
+    // it lasts, after it the plain fact.
+    function getWaitingText(forecast) {
+        const end = getForecastEnd(forecast);
+        if (end === null || Date.now() >= end) return __('Committed · not on the plugin page yet', 'peak-publisher');
+        if (isForecastSoon(forecast)) return __('Committed · on the plugin page within a few minutes', 'peak-publisher');
+        return sprintf(__('Committed · on the plugin page around %s', 'peak-publisher'), formatForecastTime(forecast));
+    }
+    // The band of a slot deleted and committed while the plugin page still shows its file.
+    function getRemovedWaitingText(forecast) {
+        const end = getForecastEnd(forecast);
+        if (end === null || Date.now() >= end) return __('Removed · still on the plugin page', 'peak-publisher');
+        if (isForecastSoon(forecast)) return __('Removed · gone from the plugin page within a few minutes', 'peak-publisher');
+        return sprintf(__('Removed · on the plugin page until around %s', 'peak-publisher'), formatForecastTime(forecast));
+    }
+    const getShownText = () => __('On the plugin page', 'peak-publisher');
+    // The page shows a file this site keeps out (the server's check_svg_file(): active content
+    // would run in the browser that opens the file here, or the server cannot check it).
+    const getRejectedText = (code) => code === 'asset_svg_unchecked'
+        ? __('On the plugin page · kept out here: SVG files cannot be checked on this server', 'peak-publisher')
+        : __('On the plugin page · kept out here: the file contains active content', 'peak-publisher');
+    // Committed, and passed over: the page shows the SVG icon in the raster icon's place (wordpress.org's "SVG has priority").
+    const getShadowedText = () => __('Committed · the plugin page shows the SVG', 'peak-publisher');
+    // An empty slot has no page to lag behind: the slot is what it is.
+    const getEmptyText = () => __('Empty', 'peak-publisher');
+    // Committed, and the plugin page never looked at: the first directory check is still to come.
+    const getUncheckedText = () => __('Committed · plugin page not checked yet', 'peak-publisher');
+
+    // When the import watch looks next (ms), or null: while a forecast stands that the stamp
+    // can end (its `watch`: assets to show, the current release's folder touched), at the
+    // forecast's time, from then on at once — the caller spaces the looks a minute apart — until
+    // ten minutes past it. Import times vary (a tag: seconds to minutes), so a beat rather than
+    // one look.
+    const IMPORT_WATCH_WINDOW = 600000;
+    function getImportWatchAt(forecast, now) {
+        if (!forecast || !forecast.watch) return null;
+        const expected = Date.parse(forecast.expected_at);
+        if (isNaN(expected) || now >= expected + IMPORT_WATCH_WINDOW) return null;
+        return Math.max(expected, now);
+    }
+
+    return {
+        getExpectedText, getTooLargeText, getMetaLine, getSwapConfirmText, getCaptionsSourceText, getPositionsHint, getNoCaptionsText, getNotSyncedNotice, getOtherFilesText, getAssetSections, getAssetSection,
+        getPendingChangesText, getPendingCountText, getConflictsText, getCommittingText, getNoAccountCommitText, getClosedAssetsNotice, getCommittedText, getShowWporgStateText,
+        getCommitConfirmText, getDiscardConfirmText, getDiscardUploadConfirmText, getDeleteConfirmText, getBandText,
+        getForecastEnd, getWaitingText, getRemovedWaitingText, getShownText, getShadowedText, getEmptyText, getUncheckedText, getRejectedText, getImportWatchAt,
+    };
+})());

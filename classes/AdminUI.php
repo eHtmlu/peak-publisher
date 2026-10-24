@@ -5,6 +5,13 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The admin page: registers the Peak Publisher menu entry, renders the mount points of the
+ * single-page app (#pblsh-header, #pblsh-app, #pblsh-footer) and enqueues its scripts and styles — the JS files one by one
+ * in load order ($script_files; there is no bundler), with PblshData carrying the server's
+ * facts for the app. Loaded for admin requests only; everything the app does afterwards goes
+ * through AdminAPI.
+ */
 class AdminUI {
     private static $instance = null;
 
@@ -36,16 +43,56 @@ class AdminUI {
             'manage_options',
             'pblsh-peak-publisher',
             [$this, 'render_peak_publisher'],
-            'dashicons-cloud',
+            // The small logo as a data URI: WordPress paints its one fill in the admin color
+            // scheme, in every menu state, like a dashicon. The arrows are cut out of the
+            // hexagon, so they stay visible in a single color.
+            'data:image/svg+xml;base64,' . base64_encode((string) file_get_contents(PBLSH_PLUGIN_DIR . 'assets/images/icon-small_white_20x20.svg')),
             58,
         );
     }
 
     /**
-     * Render Peak Publisher page.
+     * Renders the page's places: the header (#pblsh-header), which the app fills through a
+     * portal and which sticks below the admin bar — itself the sticky element, so it can stick
+     * across the whole page —, the admin's .wrap with WordPress's marker for admin notices,
+     * which WordPress moves right after it — below the header, aligned with the app's content;
+     * the app puts the notices WordPress leaves above the page right before it —, and the app,
+     * and the footer (#pblsh-footer), the header's counterpart held at the window's bottom, in
+     * place of WordPress's own footer on this page. The footer's content is the same in every
+     * view and rendered here, so it stands even when the app does not come up: the brand with
+     * its mark and the installed version at its start, the support forum and the donation at
+     * its end, and between them the day's promotion (footer_promos()) — both rendered, the
+     * day's shown; footer-promo.js turns the page at midnight UTC. The outer .pblsh-app is the scope
+     * of the app's variables and base styles for all of them, and the column that keeps the
+     * footer at the bottom of a short page.
      */
     public function render_peak_publisher(): void {
-        echo '<div class="wrap"><div id="pblsh-app" class="pblsh-app"></div></div>';
+        $brand_mark = trim((string) file_get_contents(PBLSH_PLUGIN_DIR . 'assets/images/wppeak-mark.svg'));
+        $links = [
+            'https://wordpress.org/support/plugin/peak-publisher/' => __('Support', 'peak-publisher'),
+            'https://www.wppeak.com/donate/' => __('Buy me a coffee', 'peak-publisher') . ' ☕',
+        ];
+        $links_html = '';
+        foreach ($links as $url => $label) {
+            $links_html .= '<li><a class="pblsh--footer__link" href="' . esc_url($url) . '" target="_blank" rel="noreferrer">' . esc_html($label) . '</a></li>';
+        }
+        $today = footer_promo_index(time());
+        $promos_html = '';
+        foreach (footer_promos() as $index => $promo) {
+            $promos_html .= '<a class="pblsh--footer__link" data-pblsh-promo="' . (int) $index . '" href="' . esc_url($promo['url']) . '" target="_blank" rel="noreferrer"' . ($index === $today ? '' : ' hidden') . '>' . esc_html($promo['text']) . '</a>';
+        }
+        echo '<div class="pblsh-app">'
+            . '<header id="pblsh-header" class="pblsh--header"></header>'
+            . '<div class="wrap"><hr class="wp-header-end"><div id="pblsh-app"></div></div>'
+            . '<footer id="pblsh-footer" class="pblsh--footer">'
+                . '<div class="pblsh--footer__identity">'
+                    . '<a class="pblsh--footer__brand" href="https://www.wppeak.com/" target="_blank" rel="noreferrer">' . $brand_mark . 'wppeak.com</a>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the plugin's own SVG file
+                    . '<span class="pblsh--footer__version">' . esc_html('Peak Publisher ' . get_peak_publisher_version()) . '</span>'
+                . '</div>'
+                . '<div class="pblsh--footer__promo">' . $promos_html . '</div>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from escaped parts
+                . '<nav class="pblsh--footer__nav" aria-label="' . esc_attr__('About Peak Publisher', 'peak-publisher') . '"><ul class="pblsh--footer__links">' . $links_html . '</ul></nav>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from escaped parts
+            . '</footer>'
+            . '</div>';
     }
 
     /**
@@ -59,54 +106,68 @@ class AdminUI {
         // Define all scripts to enqueue (slugs will be auto-generated from file paths)
         $script_files = [
             'utils.js',
+            'tips.js',
             'utils-upload.js',
+            'utils-upload-result.js',
+            'utils-current-release.js',
+            'utils-tested-up-to.js',
+            'utils-plugin-status.js',
+            'utils-installations.js',
+            'utils-wporg-check.js',
+            'utils-assets.js',
+            'utils-live-preview.js',
+            'upload-checks.js',
             'api.js',
             'stores/plugins.js',
             'stores/releases.js',
+            'stores/assets.js',
             'stores/settings.js',
-            //'components/ListManager.js',
-            //'components/ComboboxControl.js',
-            //'components/TriStateCheckboxControl.js',
+            'stores/wporg-accounts.js',
+            'components/Checklist.js',
+            'components/CurrentReleaseSwitch.js',
+            'components/FaqLink.js',
+            'components/TipLink.js',
+            'components/WporgRevisionLink.js',
+            'components/ChannelPath.js',
+            'components/PluginIdentity.js',
+            'components/NoticeBox.js',
+            'components/WporgAccountSpellingNotice.js',
+            'components/Figure.js',
+            'components/ScrollFrame.js',
+            'components/RelativeTime.js',
+            'components/UpgradeNotice.js',
+            'components/ChannelChoiceCards.js',
+            'components/WporgAccountForm.js',
+            'components/WporgImportTable.js',
+            'components/CurrentVersion.js',
+            'components/InstallationsCount.js',
+            'components/WporgCheckStatus.js',
             'components/PluginList.js',
-            //'components/SuccessMessage.js',
+            'components/BlueprintEditor.js',
+            'components/AssetStatusBand.js',
+            'components/LivePreview.js',
+            'components/PluginAssets.js',
+            'components/ImportForecast.js',
             'components/PluginEditor.js',
             'components/Settings.js',
+            'components/WporgImportFacts.js',
             'components/PluginAdditionProcess.js',
+            'components/PublishProgress.js',
             'components/GlobalDropOverlay.js',
-            //'components/ThemeEditorContent/SettingsGeneral.js',
-            //'components/ThemeEditorContent/SettingsColor.js',
-            //'components/ThemeEditorContent/SettingsTypography.js',
-            //'components/ThemeEditorContent/SettingsShadow.js',
-            //'components/ThemeEditorContent/SettingsDimensions.js',
-            //'components/ThemeEditorContent/SettingsLayout.js',
-            //'components/ThemeEditorContent/SettingsBackground.js',
-            //'components/ThemeEditorContent/SettingsBorder.js',
-            //'components/ThemeEditorContent/SettingsPosition.js',
-            //'components/ThemeEditorContent/SettingsSpacing.js',
             'admin.js',
-            //'highlightjs/highlight.js',
-            //'highlightjs-highlight-lines/highlightjs-highlight-lines.js',
+            'footer-promo.js',
         ];
 
-        //$settings = wp_enqueue_code_editor([ 'type' => 'php' ]);
-        /* wp_add_inline_script(
-            'code-editor',
-            'wp.codeEditor.initialize( document.getElementById("pblsh-code"), ' . wp_json_encode( $settings ) . ' );'
-        ); */
-        
+        // WordPress's code editor for the Live Preview's JSON (CodeMirror with JSON lint) — false
+        // when the user switched syntax highlighting off in their profile: a plain textarea then.
+        $code_editor = wp_enqueue_code_editor([ 'type' => 'application/json' ]);
+
 
         wp_enqueue_script(
             'pblsh-highlightjs',
             PBLSH_PLUGIN_URL . 'assets/libs/highlightjs/highlight.js',
             [],
             filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs/highlight.js'),
-            true
-        );
-        wp_enqueue_script(
-            'pblsh-highlightjs-highlight-lines',
-            PBLSH_PLUGIN_URL . 'assets/libs/highlightjs-highlight-lines/highlightjs-highlight-lines.js',
-            ['pblsh-highlightjs'],
-            filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs-highlight-lines/highlightjs-highlight-lines.js'),
             true
         );
         // JSZip for client-side zipping of folders before upload
@@ -124,10 +185,13 @@ class AdminUI {
             wp_enqueue_script(
                 $handle,
                 PBLSH_PLUGIN_URL . 'assets/js/' . $file,
-                $previous_handle ? [$previous_handle] : ['wp-element', 'wp-components', 'wp-i18n', 'wp-data', 'wp-api', 'wp-api-fetch', 'lodash', 'pblsh-highlightjs', 'pblsh-highlightjs-highlight-lines', 'pblsh-jszip'],
+                $previous_handle ? [$previous_handle] : ['wp-element', 'wp-components', 'wp-i18n', 'wp-data', 'wp-api', 'wp-api-fetch', 'lodash', 'pblsh-highlightjs', 'pblsh-jszip'],
                 filemtime(PBLSH_PLUGIN_DIR . 'assets/js/' . $file),
                 true
             );
+            // The strings of the file reach wp.i18n through the JSON translate.wordpress.org
+            // builds per script handle.
+            wp_set_script_translations($handle, 'peak-publisher');
             $previous_handle = $handle;
         }
         
@@ -153,20 +217,31 @@ class AdminUI {
             filemtime(PBLSH_PLUGIN_DIR . 'assets/libs/highlightjs/styles/atom-one-dark.css')
         );
         
-        require_once __DIR__ . '/AssetManager.php';
         wp_localize_script(
             'pblsh-admin',
             'PblshData',
             [
                 'bootstrapUpdateURI' => get_update_uri(),
-                'wpVersion' => function_exists('wp_get_wp_version') ? wp_get_wp_version() : $GLOBALS['wp_version'],
-                'phpVersion' => PHP_VERSION,
                 'hasPlainPermalinks' => get_option('permalink_structure') === '',
                 'permalinkSettingsUrl' => admin_url('options-permalink.php'),
-                'assetSlots' => AssetManager::get_slots(),
+                'faqUrls' => get_peak_publisher_faq_urls(),
+                // Icon fallback for plugins without directory assets — the endpoint
+                // generates the pattern purely from the slug in the URL.
+                'geopatternIconBase' => geopattern_icon_base_url(),
+                // The WordPress stable branch (x.y) from core's own version check — what a
+                // Tested up to is judged against (utils-tested-up-to.js).
+                'wordpressStableBranch' => wordpress_stable_branch(),
+                'assetSlots' => get_asset_slots(),
+                // wp_enqueue_code_editor()'s settings for the Live Preview's editor, or false.
+                'codeEditor' => $code_editor,
+                'channelTexts' => get_channel_texts(),
+                // Facts of the one-time schema upgrade (includes/upgrade.php), null once dismissed.
+                'upgradeNotice' => is_array($upgrade_notice = get_option('pblsh_upgrade_notice')) ? $upgrade_notice : null,
                 'i18n' => [
-                    'permalinkPlain'      => __('Plain'),
-                    'permalinkDayAndName' => __('Day and name'),
+                    // Core's labels of the permalink settings, in core's text domain on purpose:
+                    // the notice names the options as that screen shows them.
+                    'permalinkPlain'      => __('Plain'), // phpcs:ignore WordPress.WP.I18n.MissingArgDomain -- see above
+                    'permalinkDayAndName' => __('Day and name'), // phpcs:ignore WordPress.WP.I18n.MissingArgDomain -- see above
                 ],
             ]
         );

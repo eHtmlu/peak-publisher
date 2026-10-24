@@ -5,6 +5,16 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The REST API of the admin app (namespace pblsh-admin/v1, every route requires
+ * manage_options): plugins and releases, the current release, the assets tab, the upload
+ * workflow, the settings, and wordpress.org accounts, import and refresh. It is the boundary
+ * of the admin side: it validates the request and hands the work to the function modules,
+ * UploadWorkflow, AssetManager and WporgOperations, each loaded where it is needed. Errors
+ * are answered through rest_error_response(), code, message and status travelling together;
+ * the upload routes answer in UploadWorkflow's own format. Loaded only for REST requests
+ * whose URI contains pblsh-admin.
+ */
 class AdminAPI {
     private static $instance = null;
 
@@ -60,9 +70,19 @@ class AdminAPI {
             'callback' => [$this, 'get_plugin_releases'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
-        
-        
-        
+
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/current-release', [
+            'methods' => 'POST',
+            'callback' => [$this, 'set_current_release'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/wporg-download-url', [
+            'methods' => 'GET',
+            'callback' => [$this, 'get_wporg_download_url'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)', [
             'methods' => 'PUT',
             'callback' => [$this, 'update_plugin'],
@@ -81,15 +101,20 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
-        register_rest_route(self::NAMESPACE, '/releases/(?P<id>\d+)', [
-            'methods' => 'PUT',
-            'callback' => [$this, 'update_release'],
-            'permission_callback' => [$this, 'check_permission'],
-        ]);
-
         register_rest_route(self::NAMESPACE, '/releases/(?P<id>\d+)/download', [
             'methods' => 'GET',
             'callback' => [$this, 'download_release'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/releases/(?P<id>\d+)/tested-up-to', [
+            'methods' => 'POST',
+            'callback' => [$this, 'set_release_tested_up_to_rest'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/admin/upgrade-notice', [
+            'methods' => 'DELETE',
+            'callback' => [$this, 'dismiss_upgrade_notice'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
@@ -111,6 +136,12 @@ class AdminAPI {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/admin/upload/finalize', [
+            'methods' => 'GET',
+            'callback' => [$this, 'upload_finalize_status'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         register_rest_route(self::NAMESPACE, '/admin/upload/discard', [
             'methods' => 'POST',
             'callback' => [$this, 'upload_discard'],
@@ -125,6 +156,61 @@ class AdminAPI {
         register_rest_route(self::NAMESPACE, '/admin/settings', [
             'methods' => 'POST',
             'callback' => [$this, 'save_peak_publisher_settings_rest'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts', [
+            'methods' => 'GET',
+            'callback' => [$this, 'get_wporg_accounts_rest'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts', [
+            'methods' => 'POST',
+            'callback' => [$this, 'connect_wporg_account'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/test', [
+            'methods' => 'POST',
+            'callback' => [$this, 'test_wporg_credentials'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/(?P<id>\d+)', [
+            'methods' => 'PUT',
+            'callback' => [$this, 'update_wporg_account'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/(?P<id>\d+)', [
+            'methods' => 'DELETE',
+            'callback' => [$this, 'disconnect_wporg_account'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/admin/wporg/accounts/(?P<id>\d+)/test', [
+            'methods' => 'POST',
+            'callback' => [$this, 'test_wporg_account'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/admin/wporg/lookup-plugin', [
+            'methods' => 'POST',
+            'callback' => [$this, 'lookup_wporg_plugin'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/admin/wporg/discover-plugins', [
+            'methods' => 'POST',
+            'callback' => [$this, 'discover_wporg_plugins'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/admin/wporg/import-plugins', [
+            'methods' => 'POST',
+            'callback' => [$this, 'import_wporg_plugins'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/admin/wporg/refresh', [
+            'methods' => 'POST',
+            'callback' => [$this, 'refresh_wporg_rest'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
@@ -149,6 +235,31 @@ class AdminAPI {
             'callback' => [$this, 'handle_move_asset'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/commit', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_commit_assets'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/discard', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_discard_assets'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/resolve', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_resolve_asset'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/assets/blueprint', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_change_blueprint'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/plugins/(?P<id>\d+)/wporg/live-preview-check', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handle_live_preview_check'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
     }
 
     /**
@@ -162,50 +273,17 @@ class AdminAPI {
      * Get plugins.
      */
     public function get_plugins(): array {
-        $out = [];
-
         $plugins = get_posts([
-            'post_type' => 'pblsh_plugin',
+            'post_type' => PBLSH_PLUGIN_POST_TYPES,
             'post_status' => 'any',
             'posts_per_page' => -1,
         ]);
+        $plugin_ids = array_map('intval', wp_list_pluck($plugins, 'ID'));
+        $releases_by_parent = fetch_releases_grouped_by_parent($plugin_ids);
 
+        $out = [];
         foreach ($plugins as $plugin_post) {
-            $releases = get_posts([
-                'post_type' => 'pblsh_release',
-                'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
-                'post_parent' => $plugin_post->ID,
-                'posts_per_page' => -1,
-                'orderby' => 'date',
-                'order' => 'DESC',
-            ]);
-
-            $latest_version = '';
-            $latest_normalized = '';
-            $count_of_releases = count($releases);
-
-            foreach ($releases as $rel) {
-                $rel_data = json_decode((string) ($rel->post_content ?? ''), true);
-                $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-                $version = (string) ($rel_data['plugin_data']['Version'] ?? ($rel->post_title ?? ''));
-                if ($normalized !== '') {
-                    if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
-                        $latest_normalized = $normalized;
-                        $latest_version = $version;
-                    }
-                }
-            }
-
-            $out[] = [
-                'id' => $plugin_post->ID,
-                'name' => $plugin_post->post_title,
-                'slug' => $plugin_post->post_name,
-                'icon_url' => $this->assets()->get_best_icon_url($plugin_post->post_name),
-                'version' => $latest_version,
-                'status' => $plugin_post->post_status,
-                'count_of_releases' => $count_of_releases,
-                'installations_count' => get_plugin_installations_count((int) $plugin_post->ID),
-            ];
+            $out[] = $this->serialize_plugin_post($plugin_post, false, $releases_by_parent[(int) $plugin_post->ID] ?? []);
         }
         return $out;
     }
@@ -216,76 +294,212 @@ class AdminAPI {
     public function get_plugin(\WP_REST_Request $request): array {
         $id = (int) $request->get_param('id');
         $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
+        if (!is_plugin_post($post)) {
             return [];
         }
 
-        $releases_query = new \WP_Query([
-            'post_type' => 'pblsh_release',
-            'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
-            'posts_per_page' => 50,
-            'orderby' => 'date',
-            'order' => 'DESC',
-            'post_parent' => $post->ID,
-        ]);
-
-        $latest_version = '';
-        $latest_normalized = '';
-
-        foreach ($releases_query->posts as $release) {
-            $rel_data = json_decode((string) $release->post_content, true) ?? [];
-            $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
-            if ($normalized !== '') {
-                if ($latest_normalized === '' || version_compare($normalized, $latest_normalized, '>')) {
-                    $latest_normalized = $normalized;
-                    $latest_version = $version;
-                }
+        $releases = fetch_releases_grouped_by_parent([ $id ])[$id] ?? [];
+        if (is_wporg_plugin($post)) {
+            // No check against wordpress.org here: the list's directory refresh keeps the cache
+            // fresh within minutes, and every write reads fresh under the lock. Only the mirror's
+            // own disk is checked — a file lost there is fetched again.
+            try {
+                require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
+                (new WporgAssetSync())->recover($post);
+            } catch (\Throwable $e) {
+                wporg_log_cache_error($post, 'assets', $e);
+            }
+            // A forecast still shown is computed anew on load, foreign commits may have moved it —
+            // not on the reload right after the own commit that computed it, and not once the
+            // stamp confirms the import.
+            if (wporg_import_forecast_due($id, time(), wporg_import_facts($post, resolve_current_release($post, $releases)))) {
+                refresh_wporg_import_forecast($post);
             }
         }
+        return $this->serialize_plugin_post($post, true, $releases);
+    }
 
+    /**
+     * Whether the Live Preview on wordpress.org fails for the current release: the Requires
+     * Plugins the committed blueprint does not install before the plugin (live_preview_missing()),
+     * named with the release. Null without a committed blueprint or without a current release —
+     * nothing to fail, or nothing to compare with.
+     *
+     * @return array{version:string, missing:string[]}|null
+     */
+    private function live_preview_status(\WP_Post $post, ?\WP_Post $current_release, array $state): ?array {
+        if ($state['blueprints']['file'] === null || !$current_release instanceof \WP_Post) {
+            return null;
+        }
         return [
-            'id' => $post->ID,
-            'name' => $post->post_title,
-            'slug' => $post->post_name,
-            'icon_url' => $this->assets()->get_best_icon_url($post->post_name),
-            'version' => $latest_version,
-            'status' => $post->post_status,
-            'installations_count' => get_plugin_installations_count((int) $post->ID),
+            'version' => (string) $current_release->post_title,
+            'missing' => live_preview_missing($state, (string) $post->post_name, release_requires_plugins($current_release)),
         ];
     }
 
     /**
-     * Get releases list for a plugin.
+     * Serialize a plugin post for admin REST responses. `version` is the current release —
+     * the one sites receive — `latest_version` the highest; both null when absent.
+     * `released_at` is when the current release was published (its post date: the upload,
+     * or the first creation of its wordpress.org tag), null without one.
+     * `installations` is the channel's figure with its state (self-hosted the exact
+     * 24-hour count or 'disabled', wordpress.org the cached public figure), `downloads` the
+     * download figures of both channels in one shape — the total, today and the last 7 and
+     * 30 complete days: self-hosted counted here, wordpress.org the directory's total with
+     * the windows of the history fetched from the stats API and no today —, `wporg_stats`
+     * the wordpress.org dashboard
+     * figures, `wporg_check` and `wporg_token` the state of the copy against wordpress.org,
+     * `wporg_import` when the plugin page shows the last commit, while the forecast lasts and
+     * the stamp has not confirmed the import, with `watch` when the stamp can
+     * (includes/wporg_import_timing.php) — in the row too, since the row is what a client gets
+     * when its copy moved (all four null self-hosted).
+     *
+     * @param \WP_Post[] $releases The plugin's release posts.
      */
-    public function get_plugin_releases(\WP_REST_Request $request): array {
+    private function serialize_plugin_post(\WP_Post $post, bool $detail, array $releases = []): array {
+        $hosting_type = get_plugin_hosting_type($post);
+        $is_self_hosted = $hosting_type === 'self_hosted';
+        $current = resolve_current_release($post, $releases);
+        $wporg_directory = $is_self_hosted ? null : serialize_wporg_directory((int) $post->ID);
+        $assets_state = $is_self_hosted ? null : get_wporg_assets_state((int) $post->ID);
+
+        $out = [
+            'id' => $post->ID,
+            'name' => $post->post_title,
+            'slug' => $post->post_name,
+            'hosting_type' => $hosting_type,
+            'icon_url' => $this->assets()->get_best_icon_url($post),
+            'version' => $current['release'] instanceof \WP_Post ? (string) $current['release']->post_title : null,
+            'latest_version' => $current['latest'] instanceof \WP_Post ? (string) $current['latest']->post_title : null,
+            'current_release_state' => $current['state'],
+            // The raw pointer (wporg: the sanitized Stable tag, also 'trunk' or ''; self-hosted:
+            // the meta value) — shown as the mechanics line and sent back as the expected
+            // value of a flip.
+            'pointer' => $current['pointer'],
+            'released_at' => $current['release'] instanceof \WP_Post ? $this->release_published_at($current['release']) : null,
+            // Tested up to of what sites receive: the current release's effective value with its
+            // source; while wordpress.org distributes trunk, trunk's readme (source 'trunk').
+            'tested_up_to' => $this->plugin_tested_up_to($post, $current),
+            // The distribution switch: self-hosted the post status, wordpress.org the
+            // directory's verdict — 'closed' there means nothing is distributed.
+            'status' => !$is_self_hosted && $wporg_directory['wporg_stats']['closed'] !== null ? 'closed' : $post->post_status,
+            'count_of_releases' => count($releases),
+            'installations' => $is_self_hosted
+                ? serialize_self_hosted_installations((int) $post->ID)
+                : $wporg_directory['installations'],
+            'downloads' => $is_self_hosted
+                ? summarize_plugin_downloads(get_plugin_downloads((int) $post->ID))
+                : $wporg_directory['downloads'],
+            'wporg_stats' => $is_self_hosted ? null : $wporg_directory['wporg_stats'],
+            // When the plugin was last brought in step with wordpress.org, and the version of its
+            // copy here — the client compares it with the next refresh's row (wporg_sync_token()).
+            'wporg_check' => $is_self_hosted ? null : $wporg_directory['wporg_check'],
+            'wporg_token' => $is_self_hosted ? null : wporg_sync_token($post),
+            // Asset changes not on wordpress.org yet — deleting the plugin here would lose them.
+            'assets_pending' => $is_self_hosted ? null : count($assets_state['pending']),
+            'live_preview' => $is_self_hosted ? null : $this->live_preview_status($post, $current['release'], $assets_state),
+            'wporg_import' => $is_self_hosted ? null : serialize_wporg_import((int) $post->ID, time(), wporg_import_facts($post, $current)),
+        ];
+
+        if ($detail) {
+            // The one gate for every wporg write action in the editor: the account the
+            // operations would run with, and whether one is usable at all (a stored
+            // account whose password decrypts; write access itself is decided by
+            // wordpress.org at commit time).
+            $username = $is_self_hosted ? null : select_wporg_account_username(
+                wporg_string_from_value(get_post_meta((int) $post->ID, '_pblsh_wporg_account_username', true)) ?: null
+            );
+            $out['wporg_account'] = $is_self_hosted ? null : [
+                'username' => $username,
+                'can_write' => $username !== null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Tested up to of what is distributed — the current release's effective value
+     * (release_tested_up_to(): a well-formed plugin header value overrides the readme's), in
+     * the shape every release row has too; while wordpress.org distributes trunk (pointer
+     * trunk, a missing tag, or none while tags exist) the value of trunk's readme with source
+     * 'trunk' — the readme alone: the marker cache keeps trunk's readme, not its main file;
+     * null when nothing is distributed whose
+     * value anyone sees: self-hosted without a current release, wordpress.org without a
+     * pointer and without a single tag (approved, nothing published yet) — the same rule as
+     * the current release's notice (CurrentReleaseUtils.getCurrentReleaseIssue()), so the
+     * two never disagree.
+     *
+     * @return array{value:string, source:?string, header:string, readme:string}|null
+     */
+    private function plugin_tested_up_to(\WP_Post $post, array $current): ?array {
+        if ($current['release'] instanceof \WP_Post) {
+            return release_tested_up_to($current['release']);
+        }
+        $distributes_trunk = in_array($current['state'], [ 'trunk', 'tag_missing' ], true)
+            || ($current['state'] === 'none' && $current['latest'] instanceof \WP_Post);
+        if (is_wporg_plugin($post) && $distributes_trunk) {
+            $cache = wporg_decode_json_object((string) $post->post_content);
+            $tested = (string) ($cache['trunk_readme']['tested'] ?? '');
+            return [ 'value' => $tested, 'source' => $tested === '' ? null : 'trunk', 'header' => '', 'readme' => $tested ];
+        }
+        return null;
+    }
+
+    /**
+     * When a release was published — its post date (docs/data-schema.md: the upload, or the
+     * first creation of its wordpress.org tag) — as an ISO 8601 UTC moment.
+     */
+    private function release_published_at(\WP_Post $release): string {
+        return gmdate('Y-m-d\TH:i:s\Z', strtotime($release->post_date_gmt . ' UTC'));
+    }
+
+    /**
+     * The releases of a plugin, as stored. No check against wordpress.org of its own: the
+     * client requests the list only right after the plugin detail (get_plugin()), which has
+     * just refreshed the marker cache — a second check would cost wordpress.org a request
+     * for nothing.
+     */
+    public function get_plugin_releases(\WP_REST_Request $request): array|\WP_Error {
         $id = (int) $request->get_param('id');
         $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
+        if (!is_plugin_post($post)) {
             return [];
         }
+        $is_wporg = is_wporg_plugin($post);
 
         $releases_query = new \WP_Query([
             'post_type' => 'pblsh_release',
-            'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
-            'posts_per_page' => 50,
+            'post_status' => 'any',
+            'posts_per_page' => -1,
+            'no_found_rows' => true,
             'orderby' => 'date',
             'order' => 'DESC',
             'post_parent' => $post->ID,
         ]);
+        $current_release = resolve_current_release($post, $releases_query->posts)['release'];
+        $assets_state = $is_wporg ? get_wporg_assets_state((int) $post->ID) : null;
 
         $releases = [];
         foreach ($releases_query->posts as $release) {
-            $rel_data = json_decode((string) $release->post_content, true) ?? [];
+            $rel_data = release_snapshot($release);
             $normalized = (string) ($rel_data['plugin_info']['normalized_version'] ?? '');
-            $version = (string) ($rel_data['plugin_data']['Version'] ?? ($release->post_title ?? ''));
+            $version = (string) (($release->post_title ?? '') !== '' ? $release->post_title : ($rel_data['plugin_data']['Version'] ?? ''));
             $releases[] = [
                 'id' => $release->ID,
                 'version' => $version,
-                'status' => $release->post_status,
-                'date' => $release->post_date,
-                'download_url' => rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
-                'installations_count' => $normalized !== '' ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0,
+                'is_current' => $current_release instanceof \WP_Post && (int) $current_release->ID === (int) $release->ID,
+                'released_at' => $this->release_published_at($release),
+                'download_url' => $is_wporg ? '' : rest_url(self::NAMESPACE . '/releases/' . $release->ID . '/download'),
+                // wordpress.org has no per-release figures — the column is not rendered there.
+                'installations_count' => $is_wporg ? null : ($normalized !== '' ? get_plugin_installations_count_by_version((int) $post->ID, $normalized) : 0),
+                // The release's own Tested up to, editable in the row; a release with neither a
+                // readme nor the plugin file's line has nowhere to take a value (the client locks
+                // the pencil from these two facts).
+                'tested_up_to' => release_tested_up_to($release),
+                'readme_found' => !empty($rel_data['plugin_readme_txt']['found']),
+                // What a flip to this release adds to the Live Preview (WporgOperations::set_stable_tag()).
+                'live_preview_missing' => $assets_state === null ? [] : live_preview_missing($assets_state, (string) $post->post_name, release_requires_plugins($release)),
             ];
         }
 
@@ -300,11 +514,27 @@ class AdminAPI {
     /**
      * Delete a release.
      */
-    public function delete_release(\WP_REST_Request $request): array {
+    public function delete_release(\WP_REST_Request $request) {
         $id = (int) $request->get_param('id');
         $release = get_post($id);
         if (!$release || $release->post_type !== 'pblsh_release') {
             return [ 'status' => 'error', 'message' => 'Release not found.' ];
+        }
+        $parent = get_post((int) $release->post_parent);
+        if (is_wporg_plugin($parent)) {
+            return $this->delete_wporg_release_tag($release, $parent);
+        }
+
+        // The last gate before the irreversible delete: the current release cannot go — the
+        // plugin would silently stop delivering. Make another release current first; the
+        // last release leaves only together with the plugin.
+        $current_release = is_plugin_post($parent) ? get_current_release($parent) : null;
+        if ($current_release instanceof \WP_Post && (int) $current_release->ID === (int) $release->ID) {
+            return $this->rest_error_response($this->make_rest_error(
+                'current_release_protected',
+                __('This is the current release — make another release current before deleting it.', 'peak-publisher'),
+                409
+            ));
         }
 
         $zip_rel = (string) get_post_meta($release->ID, '_pblsh_zip_path', true);
@@ -327,6 +557,64 @@ class AdminAPI {
     }
 
     /**
+     * The wordpress.org account a write of this plugin commits as: the marker's assigned
+     * account when it is usable, else the first usable one (select_wporg_account_username()),
+     * never written back to the marker. No probe beforehand — the commit itself is the
+     * verdict (commit_files() records it, begin_commit() reports rejected credentials), and a
+     * probe cost four requests on every click.
+     *
+     * @return string|\WP_REST_Response the username, or the error response (wporg_no_credentials)
+     */
+    private function resolve_wporg_write_account(\WP_Post $marker) {
+        $preferred_username = wporg_string_from_value(get_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', true));
+        $username = select_wporg_account_username($preferred_username !== '' ? $preferred_username : null);
+        if ($username === null) {
+            return $this->rest_error_response($this->make_rest_error('wporg_no_credentials', __('No usable wordpress.org account — connect one under Settings › wordpress.org.', 'peak-publisher'), 400));
+        }
+        return $username;
+    }
+
+    private function delete_wporg_release_tag(\WP_Post $release, \WP_Post $parent) {
+        $version = (string) ($release->post_title ?? '');
+        if ($version === '') {
+            $content = wporg_decode_json_object((string) $release->post_content);
+            $version = (string) ($content['plugin_data']['Version'] ?? '');
+        }
+        $version = trim($version);
+        if ($version === '') {
+            return $this->rest_error_response($this->make_rest_error(
+                'invalid_version',
+                __('Missing plugin version.', 'peak-publisher'),
+                400
+            ));
+        }
+
+        $username = $this->resolve_wporg_write_account($parent);
+        if ($username instanceof \WP_REST_Response) {
+            return $username;
+        }
+
+        require_once __DIR__ . '/WporgOperations.php';
+        try {
+            $delete_result = WporgOperations::delete_tag($parent, $version, $username);
+        } catch (WporgSvnException $e) {
+            // The pipeline's errors travel as they are: code, message and status from the throw site.
+            return $this->rest_error_response($this->make_rest_error($e->get_error_code(), $e->getMessage(), $e->get_http_status()));
+        } catch (\Throwable $e) {
+            return $this->rest_error_response($this->make_rest_error('wporg_tag_delete_failed', __('Could not delete the wordpress.org SVN tag.', 'peak-publisher'), 502));
+        }
+
+        wp_delete_post((int) $release->ID, true);
+        mark_wporg_plugin_cache_stale((int) $parent->ID);
+
+        return [
+            'status' => 'ok',
+            'revision' => $delete_result['revision'],
+            'committed' => !empty($delete_result['committed']),
+        ];
+    }
+
+    /**
      * Streams a release ZIP through WordPress to bypass web-server access limits.
      */
     public function download_release(\WP_REST_Request $request) {
@@ -334,6 +622,10 @@ class AdminAPI {
         $release = get_post($id);
         if (!$release || $release->post_type !== 'pblsh_release') {
             return new \WP_Error('not_found', 'Release not found', ['status' => 404]);
+        }
+        $parent = get_post((int) $release->post_parent);
+        if (is_wporg_plugin($parent)) {
+            return new \WP_Error('unsupported_hosting_type', 'Release downloads for wordpress.org plugins are not available here.', ['status' => 404]);
         }
 
         $zip_rel = (string) get_post_meta($release->ID, '_pblsh_zip_path', true);
@@ -363,6 +655,239 @@ class AdminAPI {
         // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Binary file output
         echo $data;
         exit;
+    }
+
+    /**
+     * Makes a release the plugin's current release — the one sites receive — on both channels:
+     * self-hosted writes the pointer meta, wordpress.org commits the Stable tag line of trunk's
+     * readme. expected_pointer is the pointer the editor showed (null when it could not read
+     * it), so a flip by someone else in the meantime is refused, never overwritten.
+     */
+    public function set_current_release(\WP_REST_Request $request) {
+        $plugin = get_post((int) $request->get_param('id'));
+        if (!is_plugin_post($plugin)) {
+            return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
+        }
+        $params = $request->get_json_params();
+        $version = trim((string) ($params['version'] ?? ''));
+        if ($version === '') {
+            return $this->rest_error_response($this->make_rest_error('invalid_version', __('Missing plugin version.', 'peak-publisher'), 400, 'version'));
+        }
+        $expected_pointer = isset($params['expected_pointer']) && is_string($params['expected_pointer']) ? $params['expected_pointer'] : null;
+
+        if (!is_wporg_plugin($plugin)) {
+            $result = flip_current_release_pointer($plugin, $version, (string) $expected_pointer);
+            if (is_wp_error($result)) {
+                return $this->rest_error_response($result);
+            }
+            return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $result['to'], 'revision' => null ];
+        }
+
+        $username = $this->resolve_wporg_write_account($plugin);
+        if ($username instanceof \WP_REST_Response) {
+            return $username;
+        }
+        require_once __DIR__ . '/WporgOperations.php';
+        // The release's Requires Plugins come into the Live Preview with the flip (its snapshot: a tag does not change).
+        $release = wporg_find_release_post_by_version((int) $plugin->ID, $version);
+        try {
+            $result = WporgOperations::set_stable_tag($plugin, $version, $expected_pointer, $username, $release instanceof \WP_Post ? release_requires_plugins($release) : []);
+        } catch (WporgSvnException $e) {
+            return $this->rest_error_response($this->make_rest_error($e->get_error_code(), $e->getMessage(), $e->get_http_status()));
+        } catch (\Throwable $e) {
+            return $this->rest_error_response($this->make_rest_error('wporg_stable_tag_failed', __('Could not change the current release on wordpress.org.', 'peak-publisher'), 502));
+        }
+
+        // The flip changed only trunk's readme: when nothing else in the plugin changed since
+        // the cached revision, the cache stays fresh with the written pointer; otherwise (or
+        // when that cannot be verified) it goes stale and serves the pointer until the refresh.
+        // The title follows the pointer either way.
+        $known = [ 'trunk_readme' => $result['trunk_readme'] ];
+        try {
+            $only_trunk = WporgOperations::plugin_changed_only_in((string) $plugin->post_name, [ 'trunk' ], (int) $result['base_revision']);
+        } catch (\Throwable $e) {
+            $only_trunk = false;
+        }
+        if ($only_trunk) {
+            advance_wporg_plugin_cache((int) $plugin->ID, (int) $result['base_revision'], (int) $result['revision'], $known);
+        } else {
+            mark_wporg_plugin_cache_stale((int) $plugin->ID, $known);
+        }
+        refresh_plugin_title_from_reference((int) $plugin->ID);
+
+        return [ 'status' => 'ok', 'from' => $result['from'], 'to' => $version, 'revision' => $result['revision'], 'live_preview_added' => $result['live_preview_added'] ];
+    }
+
+    /**
+     * Sets Tested up to of a release (set_release_tested_up_to(), includes/releases.php); a
+     * wordpress.org release commits with the plugin's write account. Answers the edit's facts —
+     * version, from, to, the revision — for the editor's notice.
+     */
+    public function set_release_tested_up_to_rest(\WP_REST_Request $request) {
+        $release = get_post((int) $request->get_param('id'));
+        if (!$release instanceof \WP_Post || $release->post_type !== 'pblsh_release') {
+            return $this->rest_error_response($this->make_rest_error('release_not_found', __('Release not found.', 'peak-publisher'), 404));
+        }
+        $params = $request->get_json_params();
+        $value = trim((string) ($params['value'] ?? ''));
+        $expected = trim((string) ($params['expected'] ?? ''));
+        $parent = get_post((int) $release->post_parent);
+        $username = null;
+        if (is_wporg_plugin($parent)) {
+            $username = $this->resolve_wporg_write_account($parent);
+            if ($username instanceof \WP_REST_Response) {
+                return $username;
+            }
+        }
+        try {
+            $result = set_release_tested_up_to($release, $value, $expected, $username);
+        } catch (\Throwable $e) {
+            // The pipeline's expected failures arrive as WP_Error; anything else is a bug and
+            // surfaces through this generic fallback, like the flip's.
+            return $this->rest_error_response($this->make_rest_error('tested_up_to_failed', __('Could not set Tested up to.', 'peak-publisher'), 502));
+        }
+        if (is_wp_error($result)) {
+            return $this->rest_error_response($result);
+        }
+        return [ 'status' => 'ok', ...$result ];
+    }
+
+    /**
+     * Brings the client's wordpress.org plugins up to date, in three forms. Without `plugin_id`
+     * the automatic look: the stamp check, whose listings bring every plugin's figures along
+     * (refresh_wporg_directory(); the server alone decides when it is due), and the SVN refresh
+     * of every marker whose stamp moved — tags, trunk readme, assets mirror. With `plugin_id`
+     * the editor's Refresh: that plugin's figures and its SVN refresh whatever the directory
+     * says, which lags SVN by wordpress.org's import. With `plugin_id` and `watch` the import
+     * watch: that plugin's stamp compared — the site-wide clock neither consulted nor claimed —
+     * and its SVN refresh only when the stamp moved; what the client asks every minute while it
+     * waits for an own commit to land on the plugin page. A marker's check completes with its
+     * SVN refresh; one that failed is recorded on the marker and shows through `wporg_check`,
+     * never as an error of this request — and what it changed before it failed is told all the
+     * same.
+     *
+     * Answers the row of every marker in scope — the client compares each with the copy it
+     * holds: a token that differs (wporg_sync_token()) means the marker moved underneath it,
+     * whoever moved it, and its tabs are read anew; a marker its list lacks, or one it holds
+     * that the answer lacks, means the list is outdated and is loaded anew —, `changes`, what
+     * this request's SVN refreshes changed in what the editor shows, and `next_check_in`, the
+     * seconds until the stamp check is due again.
+     */
+    public function refresh_wporg_rest(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        $params = is_array($params) ? $params : [];
+        $plugin_id = isset($params['plugin_id']) ? (int) $params['plugin_id'] : null;
+        if ($plugin_id !== null && !is_wporg_plugin(get_post($plugin_id))) {
+            return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
+        }
+        $force = $plugin_id !== null && empty($params['watch']);
+
+        // The checks the directory left open — a stamp that moved; the editor's Refresh whatever
+        // the directory answered, or failed to — complete with the plugin's SVN refresh. The
+        // rows are built after that: a stamp this request moved is in their tokens.
+        $open = refresh_wporg_directory($plugin_id === null ? null : [ $plugin_id ], $force);
+        $changes = [];
+        foreach ($force ? [ $plugin_id => $open[$plugin_id] ?? null ] : $open as $id => $stamp) {
+            $refresh = refresh_wporg_plugin_cache(get_post($id));
+            if ($refresh['failure'] === null) {
+                confirm_wporg_directory_check($id, $stamp);
+            } else {
+                record_wporg_directory_check_error($id, $refresh['failure']);
+            }
+            if ($refresh['changes'] !== []) {
+                $changes[$id] = $refresh['changes'];
+            }
+        }
+
+        $markers = $plugin_id === null
+            ? get_posts([ 'post_type' => 'pblsh_wporg_plugin', 'post_status' => 'any', 'posts_per_page' => -1 ])
+            : [ get_post($plugin_id) ];
+        // The download history rides along with the look, once a day per plugin.
+        refresh_wporg_download_stats($markers, time());
+        $releases_by_parent = fetch_releases_grouped_by_parent(array_map('intval', wp_list_pluck($markers, 'ID')));
+        $plugins = [];
+        foreach ($markers as $marker) {
+            $plugins[$marker->ID] = $this->serialize_plugin_post($marker, false, $releases_by_parent[(int) $marker->ID] ?? []);
+        }
+        return [
+            'status' => 'ok',
+            // Objects even when empty, so the client can always iterate their keys.
+            'plugins' => (object) $plugins,
+            'changes' => (object) $changes,
+            'next_check_in' => wporg_directory_next_check_in(time()),
+        ];
+    }
+
+    public function get_wporg_download_url(\WP_REST_Request $request) {
+        $id = (int) $request->get_param('id');
+        $post = get_post($id);
+        if (!$post instanceof \WP_Post || !is_wporg_plugin($post)) {
+            return $this->rest_error_response($this->make_rest_error(
+                'unsupported_hosting_type',
+                __('wordpress.org download URLs are only available for wordpress.org plugins.', 'peak-publisher'),
+                404
+            ));
+        }
+
+        $version = trim((string) $request->get_param('version'));
+        if ($version === '') {
+            return $this->rest_error_response($this->make_rest_error(
+                'invalid_version',
+                __('Missing plugin version.', 'peak-publisher'),
+                400,
+                'version'
+            ));
+        }
+
+        $release = wporg_find_release_post_by_version((int) $post->ID, $version);
+        if (!$release instanceof \WP_Post) {
+            return $this->rest_error_response($this->make_rest_error(
+                'release_not_found',
+                __('Release not found.', 'peak-publisher'),
+                404
+            ));
+        }
+
+        $url = sprintf(
+            'https://downloads.wordpress.org/plugin/%s.%s.zip',
+            rawurlencode((string) $post->post_name),
+            rawurlencode($version)
+        );
+        $response = wp_remote_request($url, [
+            'method' => 'HEAD',
+            'timeout' => 15,
+            'redirection' => 3,
+            'user-agent' => wporg_user_agent(),
+        ]);
+
+        if (is_wp_error($response)) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_download_check_failed',
+                __('Could not verify the wordpress.org download URL.', 'peak-publisher'),
+                503
+            ));
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        if ($status === 404) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_download_not_available',
+                __('Release not yet available on wordpress.org. Releases typically appear a few minutes after publishing.', 'peak-publisher'),
+                404
+            ));
+        }
+        if ($status < 200 || $status >= 400) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_download_check_failed',
+                __('Could not verify the wordpress.org download URL.', 'peak-publisher'),
+                502
+            ));
+        }
+
+        return [
+            'status' => 'ok',
+            'url' => $url,
+        ];
     }
 
     
@@ -397,8 +922,12 @@ class AdminAPI {
     public function delete_plugin(\WP_REST_Request $request): array {
         $id = (int) $request->get_param('id');
         $plugin = get_post($id);
-        if (!$plugin || $plugin->post_type !== 'pblsh_plugin') {
+        if (!is_plugin_post($plugin)) {
             return [ 'status' => 'error', 'message' => 'Plugin not found.' ];
+        }
+
+        if (is_wporg_plugin($plugin)) {
+            return $this->delete_wporg_plugin_mirror($plugin);
         }
 
         // Delete all releases including their ZIP files
@@ -426,7 +955,7 @@ class AdminAPI {
         }
 
         // Delete the plugin's assets directory.
-        $assets_dir = get_plugin_assets_basedir($plugin->post_name);
+        $assets_dir = get_plugin_assets_dir($plugin);
         if (is_dir($assets_dir)) {
             get_wp_filesystem()->delete(trailingslashit($assets_dir), true);
         }
@@ -438,28 +967,42 @@ class AdminAPI {
         wp_delete_post($plugin->ID, true);
         return [ 'status' => 'ok' ];
     }
+
+    private function delete_wporg_plugin_mirror(\WP_Post $plugin): array {
+        $release_ids = get_posts([
+            'post_type' => 'pblsh_release',
+            'post_status' => 'any',
+            'posts_per_page' => -1,
+            'post_parent' => (int) $plugin->ID,
+            'fields' => 'ids',
+        ]);
+
+        foreach ($release_ids as $release_id) {
+            wp_delete_post((int) $release_id, true);
+        }
+
+        // The assets mirror and the working copy live together under wporg-plugins/{slug}/.
+        $plugin_dir = dirname(get_plugin_assets_dir($plugin), 2);
+        if (is_dir($plugin_dir)) {
+            get_wp_filesystem()->delete(trailingslashit($plugin_dir), true);
+        }
+        remove_empty_folders(peak_publisher_upload_basedir());
+
+        wp_delete_post((int) $plugin->ID, true);
+
+        return [
+            'status' => 'ok',
+            'removed_local_mirror' => true,
+            'deleted_releases' => count($release_ids),
+        ];
+    }
+
     /**
-     * Update a release.
+     * Dismisses the one-time notice about the schema upgrade (includes/upgrade.php).
      */
-    public function update_release(\WP_REST_Request $request): array {
-        $id = (int) $request->get_param('id');
-        $release = get_post($id);
-        if (!$release || $release->post_type !== 'pblsh_release') {
-            return [ 'status' => 'error', 'message' => 'Release not found.' ];
-        }
-        $params = $request->get_json_params();
-        $status = isset($params['status']) ? (string) $params['status'] : '';
-        if ($status !== 'publish' && $status !== 'draft') {
-            return [ 'status' => 'error', 'message' => 'Invalid status.' ];
-        }
-        $res = wp_update_post([
-            'ID' => $release->ID,
-            'post_status' => $status,
-        ], true);
-        if (is_wp_error($res)) {
-            return [ 'status' => 'error', 'message' => $res->get_error_message() ];
-        }
-        return [ 'status' => 'ok', 'id' => $release->ID, 'new_status' => $status ];
+    public function dismiss_upgrade_notice(): array {
+        delete_option('pblsh_upgrade_notice');
+        return [ 'status' => 'ok' ];
     }
 
     /**
@@ -483,6 +1026,12 @@ class AdminAPI {
         return $workflow->finalize($request);
     }
 
+    public function upload_finalize_status(\WP_REST_Request $request): array {
+        require_once __DIR__ . '/UploadWorkflow.php';
+        $workflow = new UploadWorkflow();
+        return $workflow->finalize_status($request);
+    }
+
     public function upload_discard(\WP_REST_Request $request): array {
         require_once __DIR__ . '/UploadWorkflow.php';
         $workflow = new UploadWorkflow();
@@ -490,177 +1039,699 @@ class AdminAPI {
     }
 
     /**
-     * Get all assets for a plugin.
+     * The editor's view of a plugin's assets.
      */
-    public function handle_get_assets(\WP_REST_Request $request): array {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
+    public function handle_get_assets(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-        $result  = $this->assets()->get_all($post->post_name);
-        $result['screenshot_captions'] = $this->get_screenshot_captions($id);
-        return $result;
+        return $this->assets()->describe($post);
     }
 
-    /**
-     * Get screenshot captions from the latest published release's readme.txt.
-     *
-     * @return object Screenshot captions keyed by number, e.g. {1: "Caption", 2: "Caption"}.
-     */
-    private function get_screenshot_captions(int $plugin_id): object {
-        $latest = get_posts([
-            'post_type'      => 'pblsh_release',
-            'post_status'    => 'publish',
-            'post_parent'    => $plugin_id,
-            'posts_per_page' => 1,
-            'orderby'        => 'date',
-            'order'          => 'DESC',
-        ]);
-        if (empty($latest)) {
-            return (object) [];
+    /** Uploads a file into a slot: multipart with file, slot and screenshot_n (optional). */
+    public function handle_upload_asset(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-        $content = json_decode((string) $latest[0]->post_content, true);
-        $screenshots = $content['plugin_readme_txt']['content']['screenshots'] ?? [];
-        if (empty($screenshots) || !is_array($screenshots)) {
-            return (object) [];
+        $file = $request->get_file_params()['file'] ?? null;
+        $upload_error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if (!is_array($file) || $upload_error !== UPLOAD_ERR_OK) {
+            /* translators: %d: PHP's upload error code */
+            return $this->rest_error_response($this->make_rest_error('asset_no_file', sprintf(__('No file uploaded (error code %d).', 'peak-publisher'), $upload_error), 400));
         }
-        // Ensure keys are integers and values are strings.
-        $captions = [];
-        foreach ($screenshots as $n => $caption) {
-            $captions[(int) $n] = (string) $caption;
-        }
-        return (object) $captions;
+        $screenshot_n = $request->get_param('screenshot_n');
+        $result = $this->assets()->upload(
+            $post,
+            sanitize_key((string) ($request->get_param('slot') ?? '')),
+            $screenshot_n === null || $screenshot_n === '' ? null : (int) $screenshot_n,
+            $file // validated by the facade (validate_asset_upload())
+        );
+        return $this->asset_write_response($result);
     }
 
-    /**
-     * Upload an asset file to a plugin slot.
-     * Expects multipart/form-data with: file (binary), slot (string), screenshot_n (int, optional).
-     */
-    public function handle_upload_asset(\WP_REST_Request $request): array {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
+    /** Deletes a slot: JSON { slot, screenshot_n? }. */
+    public function handle_delete_asset(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-
-        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below.
-        if (empty($_FILES['file']) || (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            $err_code = (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE);
-            return ['status' => 'error', 'message' => 'No file uploaded (error code ' . $err_code . ').'];
-        }
-
-        $slot         = sanitize_key((string) ($request->get_param('slot') ?? ''));
-        $screenshot_n_raw = $request->get_param('screenshot_n');
-        $screenshot_n = $screenshot_n_raw !== null && $screenshot_n_raw !== '' ? (int) $screenshot_n_raw : null;
-
-        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Passed to AssetManager which validates it.
-        $file_data = $_FILES['file'];
-        $result = $this->assets()->upload($id, $post->post_name, $slot, $screenshot_n, $file_data);
-
-        // Calculate banner average color for geopattern fallback icons.
-        // Based on WordPress.org Plugin Directory.
-        if ( in_array( $slot, [ 'banner_sd', 'banner_hd' ], true ) && ( $result['status'] ?? '' ) !== 'error' ) {
-            $this->update_banner_color( $id, $post->post_name );
-        }
-
-        return $result;
-    }
-
-    /**
-     * Delete an asset from a plugin slot.
-     * Expects JSON body: { slot: string, screenshot_n?: int }.
-     */
-    public function handle_delete_asset(\WP_REST_Request $request): array {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
-        }
-
-        $params       = $request->get_json_params();
-        $slot         = sanitize_key((string) ($params['slot'] ?? ''));
-        $screenshot_n_raw = $params['screenshot_n'] ?? null;
-        $screenshot_n = $screenshot_n_raw !== null ? (int) $screenshot_n_raw : null;
-
-        $deleted = $this->assets()->delete($id, $post->post_name, $slot, $screenshot_n);
-
-        // Recalculate banner average color for geopattern fallback icons.
-        // Based on WordPress.org Plugin Directory.
-        if ( in_array( $slot, [ 'banner_sd', 'banner_hd' ], true ) ) {
-            $this->update_banner_color( $id, $post->post_name );
-        }
-
-        $assets  = $this->assets()->get_all($post->post_name);
-        $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
-        return ['status' => 'ok', 'deleted' => $deleted, 'assets' => $assets];
-    }
-
-    /**
-     * Move a screenshot from one position to another.
-     * Expects JSON body: { slot: "screenshot", from: int, to: int }.
-     */
-    public function handle_move_asset(\WP_REST_Request $request): array {
-        $id   = (int) $request->get_param('id');
-        $post = get_post($id);
-        if (!$post || $post->post_type !== 'pblsh_plugin') {
-            return ['status' => 'error', 'message' => 'Plugin not found.'];
-        }
-
         $params = $request->get_json_params();
-        $from   = isset($params['from']) ? (int) $params['from'] : 0;
-        $to     = isset($params['to'])   ? (int) $params['to']   : 0;
+        $result = $this->assets()->delete(
+            $post,
+            sanitize_key((string) ($params['slot'] ?? '')),
+            isset($params['screenshot_n']) ? (int) $params['screenshot_n'] : null
+        );
+        return $this->asset_write_response($result);
+    }
 
-        $result = $this->assets()->move_screenshot($id, $post->post_name, $from, $to);
-        if ($result['status'] === 'error') {
-            return $result;
+    /** Moves or swaps screenshots: JSON { from, to }; the server decides which and answers `mode`. */
+    public function handle_move_asset(\WP_REST_Request $request) {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-
-        $assets = $this->assets()->get_all($post->post_name);
-        $assets['screenshot_captions'] = $this->get_screenshot_captions($id);
-        return ['status' => 'ok', 'assets' => $assets];
+        $params = $request->get_json_params();
+        $result = $this->assets()->move($post, (int) ($params['from'] ?? 0), (int) ($params['to'] ?? 0));
+        return $this->asset_write_response($result);
     }
 
     /**
-     * Recalculate and store the banner average color for geopattern fallback icons.
-     *
-     * Based on WordPress.org Plugin Directory.
-     * @see https://github.com/WordPress/wordpress.org — class-tools.php
+     * Commits the working copy of a wordpress.org plugin's assets as one SVN commit. A conflict
+     * answers 409 with the view after the commit's fresh pull: the boxes show what to decide.
      */
-    private function update_banner_color( int $plugin_id, string $plugin_slug ): void {
-        $banner_average_color = '';
-
-        // Find the first available banner file (prefer HD, then SD) via asset meta.
-        foreach ( [ 'banner_hd', 'banner_sd' ] as $slot ) {
-            $info = $this->assets()->find_file_in_slot( $plugin_slug, $slot );
-            if ( $info !== null ) {
-                $filepath = trailingslashit( get_plugin_assets_basedir( $plugin_slug ) ) . $info['filename'];
-                if ( file_exists( $filepath ) ) {
-                    $banner_average_color = get_image_average_color( $filepath );
-                    if ( ! is_string( $banner_average_color ) ) {
-                        $banner_average_color = '';
-                    }
-                }
-                break;
-            }
+    public function handle_commit_assets(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
         }
-
-        if ( $banner_average_color !== '' ) {
-            update_post_meta( $plugin_id, 'assets_banners_color', wp_slash( $banner_average_color ) );
-        } else {
-            delete_post_meta( $plugin_id, 'assets_banners_color' );
+        $username = $this->resolve_wporg_write_account($post);
+        if ($username instanceof \WP_REST_Response) {
+            return $username;
         }
+        $result = $this->assets()->commit($post, $username);
+        if (is_wp_error($result) && $result->get_error_code() === 'wporg_assets_conflict') {
+            $result = $this->make_rest_error($result->get_error_code(), $result->get_error_message(), 409, null, [ 'assets' => $this->assets()->describe($post) ]);
+        }
+        return $this->asset_write_response($result);
+    }
+
+    /** Drops every pending asset change of a wordpress.org plugin. */
+    public function handle_discard_assets(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        return $this->asset_write_response($this->assets()->discard($post));
+    }
+
+    /** Decides a conflict or takes back one pending change: JSON { slot, keep: mine|theirs }. */
+    public function handle_resolve_asset(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        $params = $request->get_json_params();
+        $keep = (string) ($params['keep'] ?? '');
+        if (!in_array($keep, [ 'mine', 'theirs' ], true)) {
+            return $this->rest_error_response($this->make_rest_error('invalid_request', __('Choose which version to keep: mine or theirs.', 'peak-publisher'), 400, 'keep'));
+        }
+        return $this->asset_write_response($this->assets()->resolve($post, sanitize_key((string) ($params['slot'] ?? '')), $keep));
+    }
+
+    /**
+     * Changes the Live Preview of a wordpress.org plugin in the working copy: JSON { change,
+     * value?, contents?, expected? } (AssetManager::change_blueprint()). A change built on a
+     * state that moved meanwhile answers 409 with the fresh view, like a commit's conflict.
+     */
+    public function handle_change_blueprint(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        $params = $request->get_json_params();
+        $result = $this->assets()->change_blueprint($post, is_array($params) ? $params : []);
+        if (is_wp_error($result) && $result->get_error_code() === 'blueprint_changed') {
+            $result = $this->make_rest_error($result->get_error_code(), $result->get_error_message(), 409, null, [ 'assets' => $this->assets()->describe($post) ]);
+        }
+        return $this->asset_write_response($result);
+    }
+
+    /**
+     * Whether the Live Preview of a wordpress.org plugin is public — checked on wordpress.org
+     * now (check_wporg_live_preview()) — with the fresh view, like every write's answer.
+     */
+    public function handle_live_preview_check(\WP_REST_Request $request) {
+        $post = $this->wporg_asset_plugin($request);
+        if ($post instanceof \WP_REST_Response) {
+            return $post;
+        }
+        try {
+            return [ 'status' => 'ok', 'preview' => check_wporg_live_preview($post), 'assets' => $this->assets()->describe($post) ];
+        } catch (WporgSvnException $e) {
+            return $this->rest_error_response($e->to_wp_error());
+        }
+    }
+
+    /** The plugin of an asset request — both channels. */
+    private function asset_plugin(\WP_REST_Request $request): \WP_Post|\WP_REST_Response {
+        $post = get_post((int) $request->get_param('id'));
+        if (!is_plugin_post($post)) {
+            return $this->rest_error_response($this->make_rest_error('plugin_not_found', __('Plugin not found.', 'peak-publisher'), 404));
+        }
+        return $post;
+    }
+
+    /** The plugin of a working-copy request — only wordpress.org plugins have one. */
+    private function wporg_asset_plugin(\WP_REST_Request $request): \WP_Post|\WP_REST_Response {
+        $post = $this->asset_plugin($request);
+        if ($post instanceof \WP_Post && !is_wporg_plugin($post)) {
+            return $this->rest_error_response($this->make_rest_error('unsupported_hosting_type', __('Only wordpress.org plugins commit their assets.', 'peak-publisher'), 400));
+        }
+        return $post;
+    }
+
+    /** Every write answers the fresh manifest, or the error as it is. */
+    private function asset_write_response(array|\WP_Error $result) {
+        if (is_wp_error($result)) {
+            return $this->rest_error_response($result);
+        }
+        return [ 'status' => 'ok', ...$result ];
     }
 
     public function get_peak_publisher_settings_rest(): array {
         return get_peak_publisher_settings();
     }
 
-    public function save_peak_publisher_settings_rest(\WP_REST_Request $request): array {
+    public function save_peak_publisher_settings_rest(\WP_REST_Request $request): array|\WP_REST_Response {
         $params = $request->get_json_params();
         if (!is_array($params)) { $params = []; }
+        $requirements = whitelist_requirements_error((array) ($params['ip_whitelist'] ?? []));
+        if ($requirements !== null) {
+            return $this->rest_error_response($requirements);
+        }
         update_peak_publisher_settings($params);
         return get_peak_publisher_settings();
+    }
+
+    public function get_wporg_accounts_rest(): array {
+        return wporg_accounts_payload();
+    }
+
+    public function connect_wporg_account(\WP_REST_Request $request) {
+        return $this->save_wporg_account_rest(null, $request);
+    }
+
+    public function update_wporg_account(\WP_REST_Request $request) {
+        $account = get_wporg_account((int) $request['id']);
+        if ($account === null) {
+            return $this->wporg_account_not_found();
+        }
+        return $this->save_wporg_account_rest($account, $request);
+    }
+
+    /**
+     * Connect and change share the one write path of the accounts module; the answer is
+     * the accounts as they are now, which account this was, and what the save found out
+     * about the username's spelling (save_wporg_account()).
+     */
+    private function save_wporg_account_rest(?\WP_Post $account, \WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+        $saved = save_wporg_account($account, $params['username'] ?? null, wporg_string_from_value($params['password'] ?? ''));
+        if (is_wp_error($saved)) {
+            return $this->rest_error_response($saved);
+        }
+        return wporg_accounts_payload() + [
+            'account_id' => (int) $saved['account']->ID,
+            'spelling' => $saved['spelling'],
+        ];
+    }
+
+    public function disconnect_wporg_account(\WP_REST_Request $request) {
+        $account = get_wporg_account((int) $request['id']);
+        if ($account === null) {
+            return $this->wporg_account_not_found();
+        }
+        delete_wporg_account($account);
+        return wporg_accounts_payload();
+    }
+
+    /**
+     * Tests the stored credentials of an account — the explicit probe: the verdict is
+     * recorded with $force (the badge jump is the feedback), the avatar resolved anew.
+     */
+    public function test_wporg_account(\WP_REST_Request $request) {
+        $account = get_wporg_account((int) $request['id']);
+        if ($account === null) {
+            return $this->wporg_account_not_found();
+        }
+        $password = wporg_account_password($account);
+        if (is_wp_error($password)) {
+            return $this->rest_error_response($password);
+        }
+        $probe_error = probe_wporg_credentials((string) $account->post_title, $password);
+        if ($probe_error !== null) {
+            if ($probe_error->get_error_code() === 'invalid_credentials') {
+                record_wporg_account_verdict($account, false);
+            }
+            return $this->rest_error_response($probe_error);
+        }
+        record_wporg_account_verdict($account, true, true);
+        refresh_wporg_account_avatar($account);
+        return wporg_accounts_payload() + [ 'account_id' => (int) $account->ID ];
+    }
+
+    /** Tests credentials the user typed but has not saved — nothing is stored or recorded. */
+    public function test_wporg_credentials(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+        $password = wporg_string_from_value($params['password'] ?? '');
+        if ($password === '') {
+            return $this->rest_error_response($this->make_rest_error('invalid_credentials', __('Invalid wordpress.org username or password.', 'peak-publisher'), 401, 'password'));
+        }
+        // Keep testing aligned with saving: credentials are only accepted when they can be
+        // stored securely. A test must not create the key file, though — that is the first save's job.
+        $storage_error = get_credential_storage_error();
+        if ($storage_error !== null) {
+            return $this->rest_error_response($storage_error);
+        }
+        $probe_error = probe_wporg_credentials($username, $password);
+        if ($probe_error !== null) {
+            return $this->rest_error_response($probe_error);
+        }
+        return [ 'status' => 'ok' ];
+    }
+
+    private function wporg_account_not_found(): \WP_REST_Response {
+        return $this->rest_error_response($this->make_rest_error('account_not_found', __('Account not found.', 'peak-publisher'), 404));
+    }
+
+    public function discover_wporg_plugins(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+
+        $credentials = get_wporg_credentials($username);
+        if (is_wp_error($credentials)) {
+            return $this->rest_error_response($credentials);
+        }
+        if ($credentials === null) {
+            return $this->rest_error_response($this->make_rest_error(
+                'account_not_configured',
+                __('Account not configured.', 'peak-publisher'),
+                400,
+                'username'
+            ));
+        }
+        // The stored spelling from here on (get_wporg_credentials()).
+        $username = $credentials['username'];
+
+        try {
+            $plugins = wporg_api_query_plugins_by_author($username);
+        } catch (\Throwable $e) {
+            // Expected failures arrive as WporgSvnException from the API module; anything
+            // else is an unexpected failure of the same remote operation.
+            $error = $e instanceof WporgSvnException ? $e : wporg_api_unavailable();
+            return $this->rest_error_response($this->make_rest_error(
+                $error->get_error_code(),
+                $error->getMessage(),
+                $error->get_http_status()
+            ));
+        }
+
+        $slugs = array_values(array_unique(array_filter(array_map(
+            static fn($plugin) => is_array($plugin) ? (string) ($plugin['slug'] ?? '') : '',
+            $plugins
+        ))));
+        $already_imported_by_slug = [];
+        if (!empty($slugs)) {
+            $existing_posts = get_posts([
+                'post_type' => 'pblsh_wporg_plugin',
+                'post_status' => 'any',
+                'posts_per_page' => -1,
+                'post_name__in' => $slugs,
+            ]);
+            foreach ($existing_posts as $existing_post) {
+                if ($existing_post instanceof \WP_Post) {
+                    $already_imported_by_slug[(string) $existing_post->post_name] = (int) $existing_post->ID;
+                }
+            }
+        }
+
+        // For imported plugins the local mirror is the authority on the release
+        // count — delivered here, so the client needs no directory lookup for them.
+        $release_counts_by_plugin_id = [];
+        if (!empty($already_imported_by_slug)) {
+            foreach (fetch_releases_grouped_by_parent(array_values($already_imported_by_slug)) as $plugin_id => $releases) {
+                $release_counts_by_plugin_id[(int) $plugin_id] = count($releases);
+            }
+        }
+
+        $out = [];
+        foreach ($plugins as $plugin) {
+            if (!is_array($plugin)) {
+                continue;
+            }
+            $slug = (string) ($plugin['slug'] ?? '');
+            if ($slug === '') {
+                continue;
+            }
+            $out[] = [
+                'slug' => $slug,
+                'name' => (string) ($plugin['name'] ?? $slug),
+                'icon' => isset($plugin['icon']) && is_string($plugin['icon']) ? $plugin['icon'] : null,
+                // wordpress.org's rounded bucket, as the plugin list will show it.
+                'active_installs' => is_int($plugin['active_installs'] ?? null) ? $plugin['active_installs'] : null,
+                'already_imported' => isset($already_imported_by_slug[$slug]),
+                'existing_plugin_id' => $already_imported_by_slug[$slug] ?? null,
+                'count_of_releases' => isset($already_imported_by_slug[$slug])
+                    ? ($release_counts_by_plugin_id[$already_imported_by_slug[$slug]] ?? 0)
+                    : null,
+                'directory_hint' => null,
+                'access_status' => 'pending',
+            ];
+        }
+
+        return [
+            'status' => 'ok',
+            'username' => $username,
+            'plugins' => $out,
+        ];
+    }
+
+    public function lookup_wporg_plugin(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+
+        $slug = normalize_plugin_slug($params['slug'] ?? null, 'slug');
+        if (is_wp_error($slug)) {
+            return $this->rest_error_response($slug);
+        }
+
+        $credentials = get_wporg_credentials($username);
+        if (is_wp_error($credentials)) {
+            return $this->rest_error_response($credentials);
+        }
+        if ($credentials === null) {
+            return $this->rest_error_response($this->make_rest_error(
+                'account_not_configured',
+                __('Account not configured.', 'peak-publisher'),
+                400,
+                'username'
+            ));
+        }
+        // The stored spelling from here on (get_wporg_credentials()).
+        $username = $credentials['username'];
+
+        $existing = get_posts([
+            'post_type' => 'pblsh_wporg_plugin',
+            'post_status' => 'any',
+            'name' => $slug,
+            'posts_per_page' => 1,
+        ]);
+        $existing_post = !empty($existing) && $existing[0] instanceof \WP_Post ? $existing[0] : null;
+
+        // Already imported: the local mirror is the authority on the release count.
+        $local_release_count = null;
+        if ($existing_post instanceof \WP_Post) {
+            $releases_by_parent = fetch_releases_grouped_by_parent([ (int) $existing_post->ID ]);
+            $local_release_count = count($releases_by_parent[(int) $existing_post->ID] ?? []);
+        }
+
+        require_once __DIR__ . '/WporgPluginSvnClient.php';
+        $client = new WporgPluginSvnClient($username, $credentials['password']);
+        $access = $client->check_repo_access($slug);
+        $access_status = (string) ($access['status'] ?? 'error');
+
+        // The directory hint is the remaining upfront ownership signal (heuristic,
+        // warn-only); write access itself is only decided at MERGE time.
+        $directory_hint = null;
+        if ($access_status === 'ok') {
+            require_once __DIR__ . '/WporgOperations.php';
+            $directory_hint = WporgOperations::directory_hint($slug, $username);
+        }
+
+        return [
+            'status' => 'ok',
+            'plugin' => [
+                'slug' => $slug,
+                'name' => null,
+                'already_imported' => $existing_post instanceof \WP_Post,
+                'existing_plugin_id' => $existing_post instanceof \WP_Post ? (int) $existing_post->ID : null,
+                'count_of_releases' => $local_release_count,
+                'access_status' => $access_status,
+                'directory_hint' => $directory_hint,
+                'message' => isset($access['message']) && is_string($access['message']) ? $access['message'] : null,
+            ],
+        ];
+    }
+
+    public function import_wporg_plugins(\WP_REST_Request $request) {
+        $params = $request->get_json_params();
+        $decoded_body = json_decode((string) $request->get_body());
+        if (!$decoded_body instanceof \stdClass || !is_array($params)) {
+            return $this->rest_error_response($this->make_rest_error(
+                'invalid_request',
+                __('Expected a JSON object request body.', 'peak-publisher'),
+                400
+            ));
+        }
+
+        $username = normalize_wporg_username($params['username'] ?? null, 'username');
+        if (is_wp_error($username)) {
+            return $this->rest_error_response($username);
+        }
+
+        $credentials = get_wporg_credentials($username);
+        if (is_wp_error($credentials)) {
+            return $this->rest_error_response($credentials);
+        }
+        if ($credentials === null) {
+            return $this->rest_error_response($this->make_rest_error(
+                'account_not_configured',
+                __('Account not configured.', 'peak-publisher'),
+                400,
+                'username'
+            ));
+        }
+        // The stored spelling from here on (get_wporg_credentials()): the markers record it.
+        $username = $credentials['username'];
+
+        $slugs = $this->validate_wporg_import_slugs($params);
+        if (is_wp_error($slugs)) {
+            return $this->rest_error_response($slugs);
+        }
+
+        require_once __DIR__ . '/WporgPluginSvnClient.php';
+        if (!WporgPluginSvnClient::is_batch_transport_available()) {
+            return $this->rest_error_response($this->make_rest_error(
+                'wporg_import_transport_unavailable',
+                __('wordpress.org import needs curl_multi_exec support.', 'peak-publisher'),
+                500
+            ));
+        }
+
+        $client = new WporgPluginSvnClient($username, $credentials['password']);
+        $imported = [];
+        $skipped = [];
+
+        foreach ($slugs as $slug) {
+            $existing = get_plugin_post_by_slug('pblsh_wporg_plugin', $slug);
+            if ($existing instanceof \WP_Post) {
+                $skipped[] = $this->wporg_import_skip(
+                    $slug,
+                    'already_imported',
+                    __('Plugin already imported.', 'peak-publisher'),
+                    (int) $existing->ID
+                );
+                continue;
+            }
+
+            try {
+                $access = $client->check_repo_access($slug);
+            } catch (\Throwable $e) {
+                $skipped[] = $this->wporg_import_skip($slug, 'access_check_failed');
+                continue;
+            }
+
+            // Importing needs no ownership — it only mirrors public SVN data (pending
+            // ownership transfers, agency handovers). The UI shows the contributor
+            // hint beforehand, and SVN enforces write access at deploy time.
+            $access_status = (string) ($access['status'] ?? 'error');
+            $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
+            // The access check's MKACTIVITY judges the stored credentials — record it.
+            if ($access_status === 'ok') {
+                record_wporg_credentials_verdict($username, true);
+            } elseif ($access_status === 'credentials_rejected') {
+                record_wporg_credentials_verdict($username, false);
+            }
+            if ($access_status === 'not_found') {
+                $skipped[] = $this->wporg_import_skip($slug, 'not_found', $access_message);
+                continue;
+            }
+            if ($access_status !== 'ok') {
+                $skipped[] = $this->wporg_import_skip($slug, 'access_check_failed', $access_message);
+                continue;
+            }
+
+            $bundle = fetch_wporg_import_cache_bundle($slug);
+            if (is_wp_error($bundle)) {
+                $skipped[] = $this->wporg_import_skip_from_error($slug, $bundle);
+                continue;
+            }
+
+            $plugin_id = persist_wporg_import_cache_bundle($slug, $username, $bundle);
+            if (is_wp_error($plugin_id)) {
+                $skipped[] = $this->wporg_import_skip_from_error($slug, $plugin_id);
+                continue;
+            }
+
+            $imported[] = $this->serialize_imported_wporg_plugin((int) $plugin_id, $slug);
+        }
+
+        // The directory data of the new markers — figures and stamp — in one batched request, so
+        // their rows arrive complete instead of waiting for the list's next look. A failure is
+        // recorded on the marker like any other and retried by the automatic path. Their
+        // download history starts here too: the stats API's full window, once.
+        if ($imported !== []) {
+            refresh_wporg_directory(array_column($imported, 'id'));
+            refresh_wporg_download_stats(array_map('get_post', array_column($imported, 'id')), time());
+        }
+
+        return [
+            'status' => 'ok',
+            'imported' => $imported,
+            'skipped' => $skipped,
+        ];
+    }
+
+    private function validate_wporg_import_slugs(array $params) {
+        if (!array_key_exists('slugs', $params) || !is_array($params['slugs']) || empty($params['slugs']) || !array_is_list($params['slugs'])) {
+            return $this->make_rest_error(
+                'invalid_slugs',
+                __('Select at least one wordpress.org plugin slug.', 'peak-publisher'),
+                400,
+                'slugs'
+            );
+        }
+
+        if (count($params['slugs']) > PBLSH_WPORG_IMPORT_CHUNK_SIZE) {
+            return $this->make_rest_error(
+                'too_many_slugs',
+                sprintf(
+                    /* translators: %d: the maximum number of plugins per import request */
+                    __('Import at most %d plugins per request.', 'peak-publisher'),
+                    PBLSH_WPORG_IMPORT_CHUNK_SIZE
+                ),
+                400,
+                'slugs'
+            );
+        }
+
+        $slugs = [];
+        foreach ($params['slugs'] as $index => $raw_slug) {
+            $slug = normalize_plugin_slug($raw_slug, 'slugs.' . $index);
+            if (is_wp_error($slug)) {
+                return $slug;
+            }
+            $slugs[] = $slug;
+        }
+
+        return array_values(array_unique($slugs));
+    }
+
+    private function wporg_import_skip(string $slug, string $reason, ?string $message = null, ?int $existing_plugin_id = null): array {
+        $default_messages = [
+            'already_imported' => __('Plugin already imported.', 'peak-publisher'),
+            'not_found' => __('Plugin not found on wordpress.org SVN.', 'peak-publisher'),
+            'access_check_failed' => __('Could not verify wordpress.org SVN access for this plugin.', 'peak-publisher'),
+        ];
+
+        return [
+            'slug' => $slug,
+            'reason' => $reason,
+            'message' => $message ?: ($default_messages[$reason] ?? __('Plugin could not be imported.', 'peak-publisher')),
+            'existing_plugin_id' => $existing_plugin_id !== null && $existing_plugin_id > 0 ? $existing_plugin_id : null,
+        ];
+    }
+
+    private function wporg_import_skip_from_error(string $slug, \WP_Error $error): array {
+        $reason = $error->get_error_code();
+        if (!in_array($reason, ['already_imported', 'not_found'], true)) {
+            $reason = 'access_check_failed';
+        }
+
+        $data = $error->get_error_data();
+        $existing_plugin_id = is_array($data) ? (int) ($data['existing_plugin_id'] ?? 0) : 0;
+
+        return $this->wporg_import_skip(
+            $slug,
+            $reason,
+            $error->get_error_message(),
+            $existing_plugin_id > 0 ? $existing_plugin_id : null
+        );
+    }
+
+    private function serialize_imported_wporg_plugin(int $plugin_id, string $fallback_slug): array {
+        $post = get_post($plugin_id);
+        if (!$post instanceof \WP_Post) {
+            return [
+                'slug' => $fallback_slug,
+                'id' => $plugin_id,
+                'name' => $fallback_slug,
+                'version' => '',
+                'count_of_releases' => 0,
+            ];
+        }
+
+        $releases_by_parent = fetch_releases_grouped_by_parent([$plugin_id]);
+        $plugin = $this->serialize_plugin_post($post, false, $releases_by_parent[$plugin_id] ?? []);
+
+        return [
+            'slug' => (string) ($plugin['slug'] ?? $fallback_slug),
+            'id' => (int) ($plugin['id'] ?? $plugin_id),
+            'name' => (string) ($plugin['name'] ?? $fallback_slug),
+            'version' => (string) ($plugin['version'] ?? ''),
+            'count_of_releases' => (int) ($plugin['count_of_releases'] ?? 0),
+        ];
+    }
+
+    /** @param array $payload Further facts the client renders with the error (an asset view). */
+    private function make_rest_error(string $code, string $message, int $status, ?string $field = null, array $payload = []): \WP_Error {
+        $data = [ 'status' => $status ];
+        if ($field !== null && $field !== '') {
+            $data['field'] = $field;
+        }
+        if ($payload !== []) {
+            $data['payload'] = $payload;
+        }
+        return new \WP_Error($code, $message, $data);
+    }
+
+    private function rest_error_response(\WP_Error $error): \WP_REST_Response {
+        $data = $error->get_error_data();
+        $status = is_array($data) && isset($data['status']) ? (int) $data['status'] : 500;
+        if ($status < 400 || $status > 599) {
+            $status = 500;
+        }
+
+        $payload = [
+            'status' => 'error',
+            'code' => $error->get_error_code(),
+            'message' => $error->get_error_message(),
+        ];
+        $field = is_array($data) ? (string) ($data['field'] ?? '') : '';
+        if ($field !== '') {
+            $payload['field'] = $field;
+        }
+        if (is_array($data) && is_array($data['payload'] ?? null)) {
+            $payload += $data['payload'];
+        }
+
+        return new \WP_REST_Response($payload, $status);
     }
 }
 

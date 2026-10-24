@@ -1,11 +1,14 @@
 /* Peak Publisher Admin Styles - React Version */
 
-/* Prevent layout shift from scrollbar appearing/disappearing.
-   The .pblsh-force-scrollbar class is added by an inline script only when
-   NOT inside an iframe (e.g. WordPress Playground), where overflow-y on
-   :root can interfere with the host frame's resize/scroll monitoring. */
+/* Prevent layout shift from the scrollbar appearing/disappearing: the gutter is reserved,
+   the bar shown only when there is something to scroll. Not overflow-y: scroll — that makes
+   html a scroll container, WordPress's body { overflow-x: hidden } then stays on body instead
+   of reaching the viewport, and body becomes a scroll container that never scrolls, which
+   every position: sticky in the app would stick to. The .pblsh-force-scrollbar class is added
+   by an inline script only when NOT inside an iframe (e.g. WordPress Playground), where a
+   gutter on :root can interfere with the host frame's resize/scroll monitoring. */
 :root.pblsh-force-scrollbar {
-    overflow-y: scroll;
+    scrollbar-gutter: stable;
 }
 
 .pblsh-app {
@@ -13,7 +16,11 @@
     /* --color-blue: #0073aa; */
     --color-blue: #4180ff;
     --color-gray: #ccd6e0;
+    --color-gray-dark: #646970; /* WordPress's admin gray — the draft state: chosen, not a problem */
     --color-red: #dc3232;
+    --color-orange: #f29309;
+    --color-gold: #d4a017;
+    --color-star: #e26f56; /* the rating stars of the wordpress.org plugin directory */
     --color-purple: #7a00df;
 
     --index-color-complete: var(--color-green);
@@ -26,6 +33,15 @@
 
     --border-color-light: #e5e7eb;
     --border-color-medium: #ddd;
+    /* Row-list rule system: the outer frame reads stronger than the rules
+       between rows. currentColor-based, so the mixes resolve against the
+       list's own text color at the point of use. */
+    --border-color-row-outer: color-mix(in srgb, currentColor 30%, transparent);
+    --border-color-row-between: color-mix(in srgb, currentColor 15%, transparent);
+
+    /* The gray decision/identity surface: the publish-path row, and the whole
+       result body while the publish destination is still undecided. */
+    --surface-color: #f0f0f1;
 
     --content-padding: var(--content-padding-block) var(--content-padding-inline);
 
@@ -47,7 +63,8 @@
 }
 
 
-.pblsh-app button {
+/* A disabled button keeps the arrow: the pointer promises a click that does nothing. */
+.pblsh-app button:not(:disabled) {
     cursor: pointer;
 }
 
@@ -108,211 +125,285 @@
 }
 
 /* Success Message */
-.pblsh--success-message {
-    position: fixed;
-    top: 2rem; /* 32px */
-    right: 1.25rem; /* 20px */
-    background: #46b450;
-    color: white;
-    padding: 0.75rem 1.25rem; /* 12px 20px */
-    border-radius: 0.25rem; /* 4px */
-    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.15); /* 2px 8px */
-    z-index: 999999;
+/* Compact wizard stepper — circle + inline label per step, line segments in
+   between; past steps show a check (passed, not verified — every step stays
+   freely clickable). Lives in the wizard panel's header. */
+.pblsh--stepper {
     display: flex;
     align-items: center;
-    gap: 0.625rem; /* 10px */
-    max-width: 25rem; /* 400px */
-    animation: pblsh--slide-in-right 0.3s ease-out;
-}
-
-.pblsh--success-message__icon {
-    font-size: 1.125rem; /* 18px */
-}
-
-.pblsh--success-message__text {
-    flex: 1;
-}
-
-.pblsh--success-message__dismiss {
-    background: transparent !important;
-    border: 1px solid rgba(255, 255, 255, 0.3) !important;
-    color: white !important;
-    padding: 0.25rem 0.5rem !important; /* 4px 8px */
-    min-height: auto !important;
-}
-
-@keyframes pblsh--slide-in-right {
-    from {
-        transform: translateX(100%);
-        opacity: 0;
-    }
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
-}
-
-/* New Stepper */
-.pblsh--stepper {
-    position: relative;
-    padding: var(--stepper-padding-top) 0 2rem; /* 20px 0 32px */
-    margin-bottom: 1.25rem; /* 20px */
-    --steps: 3; /* fallback value */
-    --step: 1; /* fallback value */
-    --bar-thickness: 0.25rem; /* 4px */
-    --index-size: 2.25rem; /* 36px */
-    --button-padding: 0.5rem; /* 8px */
-    --stepper-padding-top: 1.25rem; /* 20px */
-}
-
-.pblsh--stepper__bar {
-    position: absolute;
-    top: calc(var(--stepper-padding-top) + var(--button-padding) + ((var(--index-size) - var(--bar-thickness)) / 2)); /* aligns with circle center */
-    left: 0;
-    right: 0;
-    height: var(--bar-thickness);
-    background: #ccd6e0;
-    border-radius: calc(var(--bar-thickness) / 2);
-    z-index: 0;
-    margin-inline: calc(100% / (var(--steps) * 2));
-}
-
-.pblsh--stepper__bar-fill {
-    height: 100%;
-    width: calc((var(--step) - 1) / (var(--steps) - 1) * 100%);
-    background: linear-gradient(90deg, var(--index-color-complete) max(0%, calc((var(--step) - 2) / (var(--steps) - 1) * 100%)), var(--index-color-active) 100%);
-    border-radius: calc(var(--bar-thickness) / 2);
-    transition: width 0.3s ease;
+    gap: 1rem;
+    width: 100%;
+    --index-size: 1.5rem; /* 24px */
 }
 
 .pblsh--stepper__list {
     list-style: none;
-    padding: 0;
     margin: 0;
-    display: grid;
-    grid-template-columns: repeat(var(--steps), 1fr);
-    gap: 1rem; /* 16px */
-    position: relative;
-    z-index: 1;
+    padding: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
 }
 
 .pblsh--stepper__item {
-    position: relative;
+    display: flex;
+    align-items: center;
+    margin: 0;
+}
+
+.pblsh--stepper__item:not(:last-child) {
+    flex: 1;
+}
+
+/* The segment towards the next step — green once this step lies behind. */
+.pblsh--stepper__item:not(:last-child)::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--index-color-upcoming);
+    margin: 0 1rem;
+}
+
+.pblsh--stepper__item.is-complete::after {
+    background: var(--index-color-complete);
 }
 
 .pblsh--stepper__link {
     appearance: none;
     background: transparent;
     border: 0;
-    padding: var(--button-padding);
-    width: 100%;
-    text-align: center;
-    display: grid;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
+    padding: 0.25rem;
+    display: flex;
     align-items: center;
-    justify-items: center;
-    gap: 0.5rem; /* 8px */
+    gap: 0.5rem;
+    font: inherit;
     cursor: pointer;
-    border-radius: 0.5rem; /* 8px */
-    transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
+    border-radius: 0.375rem;
 }
 
 .pblsh--stepper__index {
-    height: var(--index-size);
     width: var(--index-size);
-    border-radius: calc(var(--index-size) / 2);
+    height: var(--index-size);
+    border-radius: 50%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-weight: 700;
-    font-size: 1rem;
-    background: var(--index-color-upcoming);
-    transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    border: 1px solid var(--color-gray);
+    color: #646970;
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
 
 .pblsh--stepper__item.is-active .pblsh--stepper__index {
-    color: #fff;
     background: var(--index-color-active);
+    border-color: var(--index-color-active);
+    color: #fff;
 }
 
 .pblsh--stepper__item.is-complete .pblsh--stepper__index {
-    color: #fff;
-    background: var(--index-color-complete);
-}
-
-.pblsh--stepper__text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    align-items: center;
+    background: color-mix(in srgb, var(--index-color-complete) 15%, #fff);
+    border-color: var(--index-color-complete);
+    color: var(--index-color-complete);
 }
 
 .pblsh--stepper__label {
+    white-space: nowrap;
+}
+
+.pblsh--stepper__item.is-active .pblsh--stepper__label {
     font-weight: 600;
-    color: #23282d;
 }
 
-.pblsh--stepper__desc {
-    color: #666;
-    font-size: 0.875rem; /* 14px */
+.pblsh--stepper__item.is-upcoming .pblsh--stepper__label {
+    color: #646970;
 }
 
-@media (max-width: 48rem) { /* 768px */
-    .pblsh--stepper__list {
-        grid-template-columns: 1fr;
-    }
-    .pblsh--stepper__bar {
-        display: none;
-    }
+.pblsh--stepper__link:hover .pblsh--stepper__label {
+    color: var(--color-blue);
+}
+
+.pblsh--stepper__count {
+    color: #646970;
+    font-size: 0.8125rem;
+    white-space: nowrap;
 }
 
 .pblsh--addition-process {
     --max-content-width: 60rem; /* 960px */
+    /* The wporg situation triage column — options and back control share it. */
+    --situation-width: 34rem;
+    /* The shared base height of every screen (wizard body and free-standing
+       steps) — calibrated to the tallest regular step; longer content grows
+       past it. Deliberately rem, not viewport-based: framed white space reads
+       as "missing content". */
+    --step-height: 26rem; /* 416px */
     /* --max-content-height: 60rem; */
 }
 
-.pblsh--addition-process--protocol-warning {
-    background: #ffd700;
-    color: #000;
-    padding: 0.5rem;
-    border-radius: 0.25rem;
-    margin-bottom: 1rem;
-    font-size: 0.875rem;
+/* The flow's title, centered under the header's app name and sized like the admin's own page
+   title, with more room above than the header's inset gives: its top margin adds to it. */
+.pblsh--addition-process__title {
+    margin: 1.75rem 0 1.5rem;
+    font-size: 1.4375rem; /* 23px — the admin page-title size */
     font-weight: 600;
+    line-height: 1.3;
+    color: #1d2327;
     text-align: center;
-    border: 1px solid #000;
-    border-radius: 0.25rem;
+}
+
+/* The wizard panel — stepper header, step body, and navigation footer share
+   one card (the app's dialog anatomy: the body carries both divider lines).
+   Decision screens (channel choice, situation triage, import) render outside
+   of it. */
+.pblsh--wizard {
+    max-width: var(--max-content-width);
+    margin-inline: auto;
+    background: #fff;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem; /* 8px */
+    box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
     overflow: hidden;
+}
+
+.pblsh--wizard__header {
     display: flex;
     align-items: center;
+    padding: 1rem 1.5rem;
+}
+
+/* The step content, card-less — the panel is the card. The height pair keeps
+   the footer stable while stepping AND gives the filling steps a definite
+   height (the PHP snippet's percentage chain collapses without one); longer
+   content grows the body via the fit-content minimum. */
+.pblsh--wizard__body {
+    min-height: fit-content;
+    height: var(--step-height);
+    /* More head room than the compact card padding provides (its block value
+       maxes at 1rem); the inline side keeps the app's fluid padding. */
+    padding: 1.5rem var(--content-padding-inline);
+    border-block: 1px solid var(--border-color-light);
+}
+
+/* The step title — the body's anchor, sized between the app's card titles
+   and the modal page titles. */
+.pblsh--wizard__step-title {
+    margin: 0 0 1rem;
+    font-size: 1.25rem; /* 20px */
+}
+
+/* The two filling steps (dropzone, scrolling PHP snippet) replicate the old
+   upload/bootstrap card modifiers: a flex column so the last block can take
+   the remaining height. */
+.pblsh--wizard__body:has(.pblsh--dropzone),
+.pblsh--wizard__body:has(code[class*="language-php"]) {
+    display: flex;
+    flex-direction: column;
+}
+
+.pblsh--wizard__footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+}
+
+/* Navigation buttons carry a direction arrow — shared between the wizard
+   footer and the free-standing back controls (triage, import). */
+.pblsh--wizard__footer .components-button,
+.pblsh--controls .components-button {
+    gap: 0.375rem;
+}
+
+.pblsh--button-icon {
+    display: inline-flex;
+    line-height: 1;
+}
+
+/* Tip links under the step's action. */
+.pblsh--addition-process__tips {
+    margin-top: 1.5rem;
+}
+
+/* Plugin-header rundown — a two-column definition list shared by the
+   self-hosted "Header" step (required headers) and the recommended-headers
+   tip: the header names form a scannable column, each explanation sits beside
+   its name. Each dt/dd pair lives in a group div so the separator line can run
+   across both columns; subgrid keeps the columns aligned across groups. */
+.pblsh--plugin-headers {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0 1rem;
+}
+
+/* Rules follow the row-list system also used by the channel-choice facts:
+   outer frame around the list, softer rules between the groups. */
+.pblsh--plugin-headers__group {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: baseline;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border-color-row-between);
+}
+
+.pblsh--plugin-headers__group:first-child {
+    border-top-color: var(--border-color-row-outer);
+}
+
+.pblsh--plugin-headers__group:last-child {
+    border-bottom: 1px solid var(--border-color-row-outer);
+}
+
+.pblsh--plugin-headers__term {
+    margin: 0;
+}
+
+.pblsh--plugin-headers__desc {
+    margin: 0;
+}
+
+/* Content flows — elements keep their own margins, only the edges are trimmed. */
+.pblsh--plugin-headers__desc > :first-child {
+    margin-top: 0;
+}
+
+.pblsh--plugin-headers__desc > :last-child {
+    margin-bottom: 0;
 }
 
 .pblsh--addition-process .pblsh--step {
     min-height: fit-content;
-    height: 50vh;
-    /* max-height: var(--max-content-height); */
     display: flex;
     flex-direction: column;
     align-items: stretch;
+}
+
+/* The base height applies only where a white card carries it — free-standing
+   screens without one (channel choice, situation triage) stay content-sized. */
+.pblsh--addition-process .pblsh--step:has(> .pblsh--card) {
+    height: var(--step-height);
 }
 
 .pblsh--addition-process .pblsh--snippet-wrapper:has(code[class*="language-php"]) {
     flex: 1;
 }
 
-.pblsh--addition-process .pblsh--step pre {
+.pblsh--addition-process pre {
     margin: 0;
     padding: 0;
     border-radius: .25rem;
     overflow: hidden;
 }
 
-.pblsh--addition-process .pblsh--step pre code {
+.pblsh--addition-process pre code {
     margin: 0;
 }
 
-.pblsh--addition-process .pblsh--step pre:has(code[class*="language-php"]) {
+.pblsh--addition-process pre:has(code[class*="language-php"]) {
     flex: 1;
     position: relative;
     height: 100%;
@@ -320,14 +411,10 @@
     margin: 0;
 }
 
-.pblsh--addition-process .pblsh--step pre code[class*="language-php"] {
+.pblsh--addition-process pre code[class*="language-php"] {
     overflow: auto;
     position: absolute;
     inset: 0;
-}
-
-.pblsh--addition-process .pblsh--step pre code .highlight-line {
-    min-width: fit-content !important;
 }
 
 .pblsh--addition-process .pblsh--step {
@@ -336,13 +423,821 @@
 }
 
 .pblsh--addition-process .pblsh--step > .pblsh--card {
+    flex: 1 0 auto;
+}
+
+/* Shared option-card base — the one clearly-owned base for selectable card
+   options (the upload overlay's destination-choice rows, the wporg situation
+   triage). Layout stays in the owning component's own classes; only the card
+   look and radio mechanics live here. */
+.pblsh--option-card {
+    position: relative;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.375rem;
+    background: #fff;
+    cursor: pointer;
+}
+
+.pblsh--option-card:hover {
+    border-color: color-mix(in srgb, var(--color-blue) 45%, var(--border-color-light));
+}
+
+/* The radios are visually hidden but stay focusable — selecting a card immediately applies the choice. */
+.pblsh--option-card input[type="radio"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.pblsh--option-card:has(input:focus-visible) {
+    outline: 2px solid var(--color-blue);
+    outline-offset: 2px;
+}
+
+/* Shared channel cards (upload overlay channel screen, add-new channel step) */
+.pblsh--channel-choice {
+    display: grid;
+    gap: 1rem;
+}
+
+/* Shared intro for decision screens (channel choice, wporg situation triage):
+   a centered prompt with its stake line, grouped tighter than the screen's
+   section gap. */
+.pblsh--choice-intro {
+    display: grid;
+    gap: 0.25rem;
+    text-align: center;
+}
+
+.pblsh--choice-intro__prompt {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.pblsh--choice-intro__subtitle {
+    margin: 0;
+    color: #646970;
+}
+
+.pblsh--channel-choice__cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.pblsh--channel-choice__option {
+    display: flex;
+    flex-direction: column;
+    padding: 1.25rem;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.375rem;
+    background: #fff;
+    box-shadow: 0 .125rem .5rem rgba(0, 0, 0, 0.1);
+}
+
+/* Card header — the app's identity pattern: icon left, text block right,
+   vertically centered against each other. The bottom padding is the section
+   spacing towards the fact list. */
+.pblsh--channel-choice__header {
+    display: flex;
+    align-items: start;
+    gap: 0.75rem;
+    padding-bottom: 1rem;
+}
+
+.pblsh--channel-choice__icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem; /* 40px */
+    height: 2.5rem;
+    line-height: 1;
+}
+
+.pblsh--channel-choice__header-text {
+    display: grid;
+    align-content: start;
+    min-width: 0;
+}
+
+.pblsh--channel-choice__label {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.pblsh--channel-choice__desc {
+    margin: 0;
+    color: #646970;
+}
+
+.pblsh--channel-choice__best-for {
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+
+/* Fact list — same five dimensions on both cards, comparable row by row; the
+   label sits inline before the value so the full card width serves the text. */
+.pblsh--channel-choice__facts {
+    list-style: none;
+    margin: 0;
+    /* The bottom padding is the section spacing towards the best-for line. */
+    padding: 0 0 1rem;
+}
+
+.pblsh--channel-choice__fact {
+    display: flex;
+    align-items: start;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0.375rem 0;
+    border-top: 1px solid var(--border-color-row-between);
+}
+
+.pblsh--channel-choice__fact:first-child {
+    border-top: 1px solid var(--border-color-row-outer);
+}
+
+.pblsh--channel-choice__fact:last-child {
+    border-bottom: 1px solid var(--border-color-row-outer);
+}
+
+.pblsh--channel-choice__fact-icon {
+    display: inline-flex;
+    align-items: center;
+    height: 1.25rem; /* one text line — keeps the icon on the first line of wrapped values */
+    flex: none;
+    --size: 1.125rem;
+}
+
+.pblsh--channel-choice__fact-icon > svg {
+    width: var(--size);
+    height: var(--size);
+}
+
+.pblsh--channel-choice__fact-text {
+    min-width: 0;
+}
+
+.pblsh--channel-choice__fact-label {
+    font-weight: 600;
+}
+
+
+/* Anchored to the bottom, so both cards' buttons align even when the guidance
+   texts differ in length. */
+.pblsh--channel-choice__select {
+    align-self: center;
+    margin-top: auto;
+}
+
+/* Stacked and left-aligned to each other, centered as a group below the cards. */
+.pblsh--channel-choice__faq {
+    justify-self: center;
+}
+
+.pblsh--hosting-choice .pblsh--channel-choice {
+    width: 100%;
+}
+
+/* Shared wordpress.org account form (Settings card, access gate, import empty state) */
+/* The form owns its width and spacing — hosts (Settings card, gate, import
+   expander) embed it without wrappers, so it looks identical everywhere. */
+.pblsh--wporg-account-form {
+    --wporg-color: #3858e9;
+    --account-form-padding: 1.5rem;
+    /* The wordpress logo's rendered size — WporgAccountForm.js requests it via
+       getSvgIcon('wordpress', { size: 48 }); keep both in sync. */
+    --account-form-icon-size: 48px;
+
+    margin-inline: auto;
+    max-width: 31rem;
+}
+
+.pblsh--wporg-account-form__main {
+    display: grid;
+    gap: 1rem;
+    text-align: left;
+    padding: var(--account-form-padding);
+
+    border: 0.125rem solid var(--wporg-color);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--wporg-color) 8%, transparent);
+}
+
+/* The grid gap is the single source of vertical rhythm — neutralizes host spacing
+   like the settings section's base-control margins (.pblsh-app prefix wins the
+   specificity contest against that rule). */
+.pblsh-app .pblsh--wporg-account-form .components-base-control {
+    margin-bottom: 0;
+}
+
+/* Static intro: logo top-aligned next to heading, tagline and storage-FAQ link. */
+.pblsh--wporg-account-form__intro {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.pblsh--wporg-account-form__heading-icon {
+    flex: 0 0 auto;
+    line-height: 0;
+}
+
+.pblsh--wporg-account-form__intro-text {
+    display: grid;
+    justify-items: start;
+}
+
+.pblsh--wporg-account-form__heading {
+    margin: 0;
+    font-size: 1.25rem;
+    line-height: 1.3;
+}
+
+.pblsh--wporg-account-form__intro-line {
+    margin: 0;
+}
+
+/* One notice slot for every form-level problem (storage defect, rejected or
+   undecryptable password) — a NoticeBox; the form grid's gap owns the spacing.
+   (Scoped to the form root: the NoticeBox base rule sits later in this file,
+   so a bare class would lose the margin override to source order.) */
+.pblsh--wporg-account-form .pblsh--wporg-account-form__notice {
+    margin: 0;
+}
+
+/* Label column left (sized to the widest label), inputs right. */
+.pblsh--wporg-account-form__fields {
+    display: grid;
+    /* The label column sizes to the widest label, inputs take the remaining width. */
+    grid-template-columns: max-content 1fr;
+    gap: 0.5rem 1rem;
+    align-items: center;
+    /* Indent past the intro's logo column so fields align with the intro text. */
+    margin-left: calc(var(--account-form-icon-size) + 1rem);
+}
+
+/* Full-width rows (e.g. the credentials intro line) span both columns. */
+.pblsh--wporg-account-form__fields > p {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+/* Subgrid chain through the TextControl wrappers: the base-control and its field
+   wrapper each span both columns and forward them, so every label lands in the
+   shared label column — no markup changes needed. */
+.pblsh--wporg-account-form__fields .components-base-control,
+.pblsh--wporg-account-form__fields .components-base-control__field {
+    display: grid;
+    grid-column: span 2;
+    grid-template-columns: subgrid;
+    align-items: center;
+}
+
+.pblsh--wporg-account-form__fields .components-base-control__label {
+    margin: 0 0 0.125rem;
+    text-transform: none;
+    font-size: inherit;
+    font-weight: bold;
+}
+
+/* A field help (when enabled) belongs under the input, not under the label. */
+.pblsh--wporg-account-form__fields .components-base-control__help {
+    grid-column: 2;
+    margin: 0;
+}
+
+.pblsh--wporg-account-form__actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.pblsh--wporg-account-form__bottom-line {
+    text-align: center;
+}
+
+.pblsh--wporg-account-form__status--success {
+    color: var(--color-green);
+}
+
+/* Errors get their own row (rendered above the actions), successes sit inline. */
+.pblsh--wporg-account-form__status--error {
+    color: var(--color-red);
+}
+
+/* Add-new flow: wporg "Approval" screen — the external-link marker inside the
+   submission button. */
+.pblsh--addition-process__approval-external {
+    display: inline-flex;
+    margin-left: 0.375rem;
+}
+
+/* Add-new flow: wporg situation triage — the plugin's standing dictates the
+   route, so it is asked before any step renders. Prompt and options sit
+   centered. */
+
+/* The same anatomy as the channel choice: the screen's grid gap spaces the
+   shared choice-intro from the options. */
+.pblsh--wporg-situation {
+    display: grid;
+    gap: 1rem;
+}
+
+.pblsh--wporg-situation__options {
+    display: grid;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: var(--situation-width);
+    margin-inline: auto;
+}
+
+/* A button wearing the shared option-card base; the arrow marks it as a way
+   forward. */
+.pblsh--wporg-situation__option {
+    appearance: none;
+    font: inherit;
+    text-align: left;
+    padding: 1rem 1.25rem;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Stage illustration — muted on purpose: it locates, the arrow is the
+   action accent. */
+.pblsh--wporg-situation__option-icon {
+    display: inline-flex;
+    color: #a7aaad;
+}
+
+.pblsh--wporg-situation__option-text {
+    display: grid;
+    gap: 0.25rem;
+}
+
+/* Below the screen prompt (1.125rem), above the body text (13px). */
+.pblsh--wporg-situation__option-label {
+    font-size: 1rem;
+    line-height: 1.4;
+}
+
+.pblsh--wporg-situation__option-desc {
+    color: #646970;
+}
+
+.pblsh--wporg-situation__option-arrow {
+    display: inline-flex;
+    color: #a7aaad;
+}
+
+.pblsh--wporg-situation__option:hover .pblsh--wporg-situation__option-arrow {
+    color: var(--color-blue);
+}
+
+/* The back control under the triage aligns with the decision column. */
+.pblsh--controls.pblsh--controls--situation {
+    max-width: var(--situation-width);
+}
+
+.pblsh--wporg-import {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: 0;
+}
+
+.pblsh--wporg-import__header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.pblsh--wporg-import__header p {
+    margin: 0;
+    color: #646970;
+}
+
+/* The refresh indicator while rows are already on screen. */
+.pblsh--wporg-import__loading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: #f6f7f7;
+    margin-bottom: 0.75rem;
+}
+
+/* Fixed layout: column widths are a layout decision (taken from the header
+   row), not a content negotiation — the cells' contents change constantly
+   (lookup results, hints, the row action) and must never move the columns.
+   The frame and the cells are the framed table's (pblsh--framed-table). */
+.pblsh--wporg-import__table {
+    table-layout: fixed;
+    background: #fff;
+}
+
+/* Wide enough for the widest one-line pairing ("Already imported" plus the
+   Open-plugin button) — extra viewport width belongs to the plugin column. */
+.pblsh--wporg-import__status-header {
+    box-sizing: border-box;
+    width: 16rem;
+}
+
+/* Installations column: wordpress.org's rounded bucket per row */
+.pblsh--wporg-import__installations-header,
+.pblsh--wporg-import__installations-cell {
+    box-sizing: border-box;
+    width: 7rem;
+    white-space: nowrap;
+    text-align: right;
+}
+
+/* The foot's own border-bottom would double the frame's edge; the last body
+   row keeps its border as the separator toward the add row (the frame drops
+   it only where the body ends the table). */
+.pblsh--wporg-import__table tfoot td {
+    border-bottom: 0;
+    background: #f6f7f7;
+}
+
+/* The list's state (loading, discover error, empty) as one muted table row. */
+.pblsh--wporg-import__table-state {
+    color: #646970;
+}
+
+.pblsh--wporg-import__table-state p {
+    margin: 0 0 0.25rem;
+}
+
+.pblsh--wporg-import__table-state p:last-child {
+    margin-bottom: 0;
+}
+
+.pblsh--wporg-import__table-state .components-spinner {
+    margin: 0 0.5rem 0 0;
+    vertical-align: middle;
+}
+
+.pblsh--wporg-import__table-state .components-button {
+    margin-top: 0.5rem;
+}
+
+.pblsh--wporg-import__add-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pblsh--wporg-import__add-controls .components-base-control {
     flex: 1;
 }
 
-.pblsh--ul {
+/* Fixed instead of shrink-to-content: the cell holds a checkbox, a spinner or
+   nothing depending on the row's state — the column must not shift between
+   them. 2.75rem = the checkbox (widest case) plus the cell padding. */
+.pblsh--wporg-import__select-header,
+.pblsh--wporg-import__select-cell {
+    box-sizing: border-box;
+    width: 2.75rem;
+}
+
+/* First line of the status cell: the status plus, on imported rows, the
+   inline Open action right after it (WP-row-action style). */
+.pblsh--wporg-import__status-line {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pblsh--wporg-import__status {
+    display: block;
+    font-weight: 600;
+}
+
+/* The access checks' spinner stands in for the checkbox while selectability
+   is being decided — per row, and in the header for the whole list. Same
+   slot, no component page margins. */
+.pblsh--wporg-import__select-header .components-spinner,
+.pblsh--wporg-import__select-cell .components-spinner {
+    margin: 0;
+    display: block;
+}
+
+/* wp-admin's custom checkbox look has no :indeterminate visual (appearance:
+   none suppresses the native dash, and core forms.css defines none) — draw
+   the dash ourselves, in the core checkmark blue. */
+.pblsh--wporg-import__select-header input[type=checkbox]:indeterminate::before {
+    content: "";
+    display: block;
+    width: 0.5rem;
+    height: 0.125rem;
+    margin: 0.375rem auto 0;
+    background-color: #3582c4;
+}
+
+/* Transitional result body while a slug change re-resolves the destination —
+   replaces the previous slug's facts until the fresh result arrives. */
+.pblsh--upload-result__resolving {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 3rem 1rem;
+    color: #646970;
+}
+
+.pblsh--upload-result__resolving .components-spinner {
+    margin: 0;
+}
+
+/* The steps of a running publish (PublishProgress), in the upload result's body instead of
+   the checklist and in its rhythm — the icon column, the title type, a passed check's green
+   for a done step; the running one with a spinner and, where the amount of work is known, a
+   bar; the ones to come muted. The list is centered as a whole, its steps aligned left to
+   each other; its width is the step names', which never change, so it stays in place while
+   the running step's detail comes and goes. */
+.pblsh--publish-progress {
+    list-style: none;
+    width: fit-content;
+    margin: 0 auto;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem; /* 12px */
+}
+
+.pblsh--publish-progress__step {
+    display: flex;
+    align-items: start;
+    gap: 1rem; /* 16px */
+    margin: 0;
+}
+
+.pblsh--publish-progress__text {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.pblsh--publish-progress__label {
+    font-weight: 600;
+    font-size: 1rem; /* 16px */
+    line-height: 1.75rem; /* 28px */
+}
+
+.pblsh--publish-progress__step.is-pending {
+    color: #646970;
+}
+
+.pblsh--publish-progress__icon {
+    width: 1.75rem; /* 28px */
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.pblsh--publish-progress__step.is-done .pblsh--publish-progress__icon {
+    color: var(--index-color-complete);
+}
+
+/* What the running step has done so far, under its name like a check's description: as wide
+   as the names, never wider (width 0, min-width 100% — no share in the list's width), and one
+   line high whether it shows something or not (no step moves when it fills or empties). */
+.pblsh--publish-progress__detail {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 0;
+    min-width: 100%;
+    min-height: 1.25rem; /* 20px */
+    line-height: 1.25rem;
+    color: #666666;
+    font-size: 0.875rem; /* 14px */
+}
+
+/* A step to come: a muted dot in the icon's place. */
+.pblsh--publish-progress__step.is-pending .pblsh--publish-progress__icon::before {
+    content: '';
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.5;
+}
+
+.pblsh--publish-progress__icon .components-spinner {
+    margin: 0;
+}
+
+.pblsh--publish-progress__bar {
+    flex: 1;
+    height: 0.5rem;
+    border-radius: 0.25rem;
+    background: var(--border-color-light);
+    overflow: hidden;
+}
+
+/* Glides from one status read to the next (FINALIZE_POLL_INTERVAL in GlobalDropOverlay, 1 s
+   plus the answer's way): a little longer than the interval, so a new value takes over a
+   running glide and the bar never stops in between. */
+.pblsh--publish-progress__bar::before {
+    content: '';
+    display: block;
+    height: 100%;
+    width: var(--pblsh-publish-progress, 0%);
+    background: var(--color-blue);
+    transition: width 1.5s linear;
+}
+
+.pblsh--publish-progress__count {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pblsh--publish-progress__bar::before {
+        transition: none;
+    }
+}
+
+/* Shared base: the running wporg import's work unit shows activity as a faint
+   barber-pole drifting leftwards, matching the core button's is-busy stripes
+   (-45deg, leftward travel), which run right next to it. Owned here; used by
+   the import table's running row (there the background sits on the tr, so the
+   pattern runs unbroken across the cells), the overlay's identity card and its
+   celebration box. Hosts must set background-color, not the background
+   shorthand — the shorthand would reset this background-image regardless of
+   rule order. --pblsh-importing-stripe-color is the one tone knob (NoticeBox
+   pattern): hosts with their own palette declare it, and the reduced-motion
+   tint derives from it too. Deliberately only a var() fallback here, no
+   declaration — a host's declaration must win independent of rule order. */
+.pblsh--importing-stripes {
+    background-image: linear-gradient(
+        -45deg,
+        var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 25%,
+        transparent 25%,
+        transparent 50%,
+        var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 50%,
+        var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 75%,
+        transparent 75%,
+        transparent
+    );
+    background-size: 1.5rem 1.5rem;
+    animation: pblsh--importing-stripes 1.2s linear infinite;
+}
+
+@keyframes pblsh--importing-stripes {
+    from { background-position: 1.5rem 0; }
+    to { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pblsh--importing-stripes {
+        animation: none;
+        background-image: none;
+        /* Static tint instead of moving stripes, derived from the stripe tone. */
+        background-color: color-mix(in srgb, var(--pblsh-importing-stripe-color, rgba(65, 128, 255, 0.15)) 40%, transparent);
+    }
+}
+
+.pblsh--wporg-import__row.is-ready .pblsh--wporg-import__status {
+    color: #008a20;
+}
+
+.pblsh--wporg-import__row.is-pending .pblsh--wporg-import__status,
+.pblsh--wporg-import__row.is-importing .pblsh--wporg-import__status {
+    color: #646970;
+}
+
+.pblsh--wporg-import__row.is-blocked .pblsh--wporg-import__status,
+.pblsh--wporg-import__manual-error {
+    color: #b32d2e;
+}
+
+.pblsh--wporg-import__row.is-imported .pblsh--wporg-import__status {
+    color: #50575e;
+}
+
+.pblsh--wporg-import__message,
+.pblsh--wporg-import__release-count {
+    display: block;
+    color: #646970;
+    margin-top: 0.25rem;
+}
+
+.pblsh--wporg-import__message.is-warning {
+    color: #996800;
+}
+
+.pblsh--wporg-import__execution {
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+    padding: 0.875rem 1rem;
+    background: #f6f7f7;
+}
+
+.pblsh--wporg-import__execution.is-done {
+    border-color: #72aee6;
+    background: #f0f6fc;
+}
+
+.pblsh--wporg-import__execution.is-error {
+    border-color: #d63638;
+    background: #fcf0f1;
+}
+
+/* A content list (pblsh--content-list carries bullets and indent). */
+.pblsh--wporg-import__skipped-list {
+    margin: 0.75rem 0 0;
+}
+
+.pblsh--wporg-import__skipped-list li {
+    margin-bottom: 0.25rem;
+}
+
+.pblsh--wporg-import__manual-error {
+    margin: 0.5rem 0 0;
+}
+
+.pblsh--wporg-import__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+}
+
+@media (max-width: 48rem) {
+    .pblsh--channel-choice__cards {
+        grid-template-columns: 1fr;
+    }
+
+    .pblsh--wporg-import__header,
+    .pblsh--wporg-import__footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}
+
+/* Real content lists opt in to the bullet look — layout lists keep the
+   wp-admin reset (a bare ul selector would style every component's list from
+   outside). Owned base; pblsh--arrow-list varies only the marker. */
+.pblsh--content-list {
     list-style: initial;
-    list-style-type: "→ ";
     padding-inline-start: 1.5em;
+}
+
+/* An ordered content list counts — `initial` is the bullet whatever the element. */
+ol.pblsh--content-list {
+    list-style-type: decimal;
+}
+
+.pblsh--content-list.pblsh--arrow-list {
+    list-style-type: "→ ";
+}
+
+/* Real content tables — the same opt-in as content lists, for facts in
+   flowing text (tips). Sized to its content; the paragraph rhythm around it.
+   Rules follow the row-list system: outer frame above and below, a softer
+   rule between the rows, no vertical rules. */
+.pblsh--content-table {
+    margin: 1em 0;
+    border-collapse: collapse;
+}
+
+.pblsh--content-table th,
+.pblsh--content-table td {
+    padding: 0.5rem 1rem;
+    text-align: center;
+    border-top: 1px solid var(--border-color-row-between);
+}
+
+.pblsh--content-table th {
+    font-weight: 600;
+}
+
+.pblsh--content-table > :first-child > tr:first-child > * {
+    border-top-color: var(--border-color-row-outer);
+}
+
+.pblsh--content-table > :last-child > tr:last-child > * {
+    border-bottom: 1px solid var(--border-color-row-outer);
 }
 
 .pblsh--controls {
@@ -355,13 +1250,6 @@
 }
 
 /* Step content cards */
-.pblsh--cards {
-    /* display: grid; */
-    /* grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr)); */
-    /* gap: 1rem; */ /* 16px */
-    margin-top: 1rem; /* 16px */
-}
-
 .pblsh--card {
     background: #fff;
     border: 1px solid var(--border-color-light);
@@ -370,28 +1258,12 @@
     box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.06);
 }
 
-.pblsh--card--bootstrap-code,
-.pblsh--card--upload-zip {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
 .pblsh--card__title:first-child {
     margin: 0 0 0.5rem 0;
 }
 
 .pblsh--card__title:not(:first-child) {
     margin: 1.5rem 0 0.5rem 0;
-}
-
-.pblsh--bullets {
-    margin: 0;
-    padding-left: 1.2rem; /* 19px */
-}
-
-.pblsh--bullets li {
-    margin: 0.25rem 0;
 }
 
 /* Snippet with toolbar */
@@ -552,7 +1424,8 @@
     --release-color: var(--color-red);
 }
 
-.pblsh--upload-result--newplugin {
+.pblsh--upload-result--newplugin,
+.pblsh--upload-result--firstrelease {
     --release-color: var(--color-green);
     --release-color-text-percent: 65%;
 }
@@ -580,56 +1453,163 @@
 }
 
 .pblsh--upload-result__plugin {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: start;
+    column-gap: 1rem;
+    row-gap: 1rem;
     padding: 2rem; /* 32px */
 }
 
 .pblsh--upload-result__plugin__headline {
+    grid-column: 1;
     font-size: 1.5rem; /* 24px */
     font-weight: 400;
     margin: 0;
     letter-spacing: .025em;
-    text-align: center;
+    text-box: trim-both cap alphabetic;
+    line-height: 1.2;
 }
 
 .pblsh--upload-result__plugin__desc {
-    font-size: .875rem; /* 16px */
+    grid-column: 1;
+    font-size: .875rem; /* 14px */
     margin: 0;
+    text-box: trim-both cap alphabetic;
 }
 
 .pblsh--upload-result__plugin__type {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    justify-self: end;
     font-size: .75rem; /* 12px */
     padding: .25rem .75rem;
     border-radius: .25rem; /* 4px */
-    background-color: var(--color-gray);
     text-transform: uppercase;
     letter-spacing: .1em;
     text-align: center;
-    margin-top: .5rem; /* 8px */
     font-weight: 600;
     background-color: var(--release-color-background);
     color: var(--release-color-text);
 }
 
+/* Solid badges: the alarm (invalid) and the two identity moments — new plugin
+   and first release share the full-tone green deliberately. */
 .pblsh--upload-result--invalid .pblsh--upload-result__plugin__type,
-.pblsh--upload-result--newplugin .pblsh--upload-result__plugin__type {
+.pblsh--upload-result--newplugin .pblsh--upload-result__plugin__type,
+.pblsh--upload-result--firstrelease .pblsh--upload-result__plugin__type {
     color: #fff;
     background-color: color-mix(in srgb, var(--release-color) 70%, #000);
 }
 
-.pblsh--upload-result__meta > div {
-    margin-top: 0.25rem; /* 4px */
+/* The current-release switch, above the checklist with its track first: a role="switch" button
+   whose knob is the current ring (the release list's symbol) on a 20px track. The label is
+   constant, so track and knob carry the state. Off: a white disc on a gray track; hovering
+   previews the outcome with the blue rim, as the list's ring does. On: a white ring on the
+   blue track — the track shows through as the dot, the list's "current" symbol; hovering
+   previews the outcome by fading that dot. Locked (aria-disabled) keeps its look, loses the
+   preview and shows a lock on the track's free half. */
+/* The decision block that opens the body, above the checklist it is answered in. */
+.pblsh--upload-result__current-release {
+    margin-bottom: 1.5rem;
 }
 
-.pblsh--upload-result__list {
-    margin-top: 0.75rem; /* 12px */
+.pblsh--upload-result__spelling {
+    margin: 0 0 1.5rem;
 }
 
-.pblsh--upload-result__list ul {
-    margin: 0.25rem 0 0 1.2rem;
+.pblsh--current-release-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 0.8125rem;
+    color: #1e1e1e;
+    cursor: pointer;
+}
+
+.pblsh--current-release-switch.is-locked,
+.pblsh--current-release-switch:disabled {
+    cursor: default;
+}
+
+.pblsh--current-release-switch:disabled {
+    opacity: 0.6;
+}
+
+.pblsh--current-release-switch:focus-visible {
+    outline: none;
+}
+
+.pblsh--current-release-switch:focus-visible .pblsh--current-release-switch__track {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--color-blue);
+}
+
+.pblsh--current-release-switch__track {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    box-sizing: border-box;
+    width: 2.5rem;
+    height: 1.25rem;
+    border-radius: 0.625rem;
+    background: var(--border-color-medium);
+    transition: background-color 0.15s ease;
+}
+
+.pblsh--current-release-switch.is-on .pblsh--current-release-switch__track {
+    background: var(--color-blue);
+}
+
+/* The lock of a forced default, on the track's free half beside the knob: the state is a
+   fact, not a choice. */
+.pblsh--current-release-switch__lock {
+    position: absolute;
+    left: 0.25rem;
+    display: inline-flex;
+    color: #fff;
+}
+
+/* The knob: the ring's own border is the 2px inset to the track's edge; its pseudo-element
+   draws the white disc (off) or, with the background cleared, the white ring (on). It
+   travels the track's width minus its own size. */
+.pblsh--current-release-switch .pblsh--current-ring {
+    flex: none;
+    border-color: transparent;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.pblsh--current-release-switch .pblsh--current-ring::after {
+    border-color: #fff;
+    background-color: #fff;
+    /* Painted under the border, not clipped to the padding box: two white areas meeting at
+       the curve would render a hairline seam. */
+    background-clip: border-box;
+    opacity: 1;
+    transition: background-color 0.15s ease;
+}
+
+.pblsh--current-release-switch.is-on .pblsh--current-ring {
+    transform: translateX(1.25rem);
+}
+
+.pblsh--current-release-switch.is-on .pblsh--current-ring::after {
+    background-color: transparent;
+}
+
+/* Hovering previews the other outcome: off gains the blue rim and a faint dot, on fades
+   its dot to the same faint tone — the list ring's preview tone (its dot at 35%). */
+.pblsh--current-release-switch:not(.is-on):not(.is-locked):not(:disabled):hover .pblsh--current-ring {
+    border-color: var(--color-blue);
+}
+
+.pblsh--current-release-switch:not(.is-locked):not(:disabled):hover .pblsh--current-ring::after {
+    background-color: color-mix(in srgb, var(--color-blue) 35%, #fff);
 }
 
 .pblsh--upload-result__actions {
@@ -644,14 +1624,539 @@
     text-transform: uppercase;
 }
 
-/* Validation checklist */
+/* Assignment/slug screens of the upload result (the channel-cards screen renders
+   the shared channel-choice component instead). */
+.pblsh--destination-choice {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+}
 
-.pblsh--upload-result__checks {
+.pblsh--destination-choice__prompt {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.4;
+    text-align: center;
+}
+
+/* Card look and radio mechanics come from the shared option-card base. */
+.pblsh--destination-choice__option {
+    display: flex;
+    padding: 0.5rem 0.75rem;
+    box-shadow: 0 .125rem .5rem rgba(0, 0, 0, 0.1);
+}
+
+/* Custom slug input below the destination cards */
+.pblsh--destination-choice__slug-edit {
+    grid-column: 1 / -1;
+    justify-self: center;
+    text-align: center;
+    font-size: 0.8125rem;
+    color: #666;
+}
+
+.pblsh--destination-choice__slug-edit .pblsh--slug-edit {
+    justify-content: center;
+}
+
+/* Pre-import facts of the wporg import screen. */
+
+/* Header row — title left, FAQ pointer right. The row's small font size reaches
+   the FAQ link via inheritance; the title sets its own. */
+.pblsh--wporg-import-facts__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.8125rem;
+}
+
+.pblsh--wporg-import-facts__title {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.4;
+}
+
+/* Compact positives line — below the identity card (published) or the
+   celebration box (fresh); the hero element owns the spacing above. */
+.pblsh--wporg-import-facts__facts-line {
+    display: flex;
+    align-items: start;
+    gap: 0.5rem;
+    margin-block: 0 1rem;
+}
+
+.pblsh--wporg-import-facts__facts-line-icon {
+    height: 1.25rem; /* 20px */
+    width: 1.25rem; /* 20px */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    color: var(--index-color-complete);
+}
+
+.pblsh--wporg-import-facts__facts-line-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.pblsh--wporg-import-facts__facts-line-text {
+    color: #666666;
+    font-size: 0.875rem; /* 14px */
+    line-height: 1.25rem; /* 20px — aligned with the icon */
+}
+
+/* Identity card of the found directory listing — icon, name, short description.
+   The card is a link to the live directory page; text keeps its own colors, only
+   hover and the external icon signal the click affordance. */
+.pblsh--wporg-import-facts__plugin {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color-medium);
+    border-radius: 0.375rem;
+    background-color: #fff; /* not the shorthand — the importing stripes layer a background-image on top */
+    color: inherit;
+    text-decoration: none;
+}
+
+.pblsh--wporg-import-facts__plugin:hover,
+.pblsh--wporg-import-facts__plugin:focus-visible {
+    border-color: var(--color-blue);
+    color: inherit;
+}
+
+.pblsh--wporg-import-facts__plugin-external {
+    align-self: start;
+    margin-left: auto;
+    line-height: 1;
+    color: #787c82;
+    flex: 0 0 auto;
+}
+
+.pblsh--wporg-import-facts__plugin:hover .pblsh--wporg-import-facts__plugin-external {
+    color: var(--color-blue);
+}
+
+.pblsh--wporg-import-facts__plugin-icon {
+    width: 3rem;
+    height: 3rem;
+    flex: 0 0 auto;
+    /* No border-radius to show the icon as it is */
+}
+
+.pblsh--wporg-import-facts__plugin-text {
+    display: grid;
+    gap: 0.125rem;
+    min-width: 0;
+}
+
+.pblsh--wporg-import-facts__plugin-desc {
+    color: #646970;
+    font-size: 0.8125rem;
+    /* Short descriptions can run to ~150 characters — keep the card compact. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Celebration box — the fresh states' hero element, sitting where the other
+   states show the identity card (matching outer spacing). A permanent
+   light-gold look, a golden glow and an icon pop when it appears — replayed
+   on hover. */
+.pblsh--wporg-import-facts__celebrate {
+    /* The box's own light gold — resting surface, rim, stripes and glow all derive from it. */
+    --pblsh-celebrate-gold: #f5c518;
+    --pblsh-celebrate-resting-bg: color-mix(in srgb, var(--pblsh-celebrate-gold) 12%, #fff);
+    /* The importing stripes in the box's own gold instead of the signal blue. */
+    --pblsh-importing-stripe-color: color-mix(in srgb, var(--pblsh-celebrate-gold) 30%, transparent);
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: start;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--pblsh-celebrate-gold) 45%, #fff);
+    border-radius: 0.375rem;
+    background-color: var(--pblsh-celebrate-resting-bg); /* not the shorthand — the importing stripes layer a background-image on top */
+}
+
+/* Hover-replay carrier for the glow: exactly the box footprint (incl. the border),
+   behind the content — mount and replay share one visible area. */
+.pblsh--wporg-import-facts__celebrate::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+.pblsh--wporg-import-facts__celebrate-icon {
+    height: 1.75rem; /* 28px */
+    width: 1.75rem; /* 28px */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    color: var(--color-gold);
+}
+
+.pblsh--wporg-import-facts__celebrate-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.pblsh--wporg-import-facts__celebrate-text {
+    display: flex;
+    flex-direction: column;
     flex: 1;
+}
+
+.pblsh--wporg-import-facts__celebrate-title {
+    font-weight: 600;
+    font-size: 1rem; /* 16px */
+    line-height: 1.75rem; /* 28px */
+}
+
+.pblsh--wporg-import-facts__celebrate-desc {
+    color: #666666;
+    font-size: 0.875rem; /* 14px */
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .pblsh--wporg-import-facts__celebrate {
+        animation: pblsh-celebrate-glow 1.6s ease-out 1;
+    }
+
+    /* The stripes share the one animation property with the mount glow —
+       composed here (adding the stripes class restarts the glow, which reads
+       as the import's kickoff pulse). */
+    .pblsh--wporg-import-facts__celebrate.pblsh--importing-stripes {
+        animation: pblsh-celebrate-glow 1.6s ease-out 1, pblsh--importing-stripes 1.2s linear infinite;
+    }
+
+    .pblsh--wporg-import-facts__celebrate .pblsh--wporg-import-facts__celebrate-icon svg {
+        animation: pblsh-celebrate-pop 1s ease-out 1 both;
+    }
+
+    /* Replay on hover — deliberately on OTHER boxes (::after, icon wrapper) than the
+       mount animations: leaving hover would otherwise restart the mount animation.
+       The replay keyframes start and end at the resting state, so the visible icon
+       never jumps when the animation kicks in. */
+    .pblsh--wporg-import-facts__celebrate:hover::after {
+        animation: pblsh-celebrate-glow-replay 1.6s ease-out 1;
+    }
+
+    .pblsh--wporg-import-facts__celebrate:hover .pblsh--wporg-import-facts__celebrate-icon {
+        animation: pblsh-celebrate-pop-replay 0.9s ease-in-out 1;
+    }
+}
+
+/* Ends at the resting background — anything else would snap at animation end.
+   Deliberately no box-shadow halo: the glow stays exactly the box area.
+   background-color, not the shorthand: the importing stripes' background-image
+   must survive the glow. */
+@keyframes pblsh-celebrate-glow {
+    0% { background-color: color-mix(in srgb, var(--pblsh-celebrate-gold) 35%, #fff); }
+    100% { background-color: var(--pblsh-celebrate-resting-bg); }
+}
+
+@keyframes pblsh-celebrate-pop {
+    0% { transform: scale(0.3) rotate(-25deg); opacity: 0; }
+    55% { transform: scale(1.4) rotate(10deg); opacity: 1; }
+    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+@keyframes pblsh-celebrate-glow-replay {
+    0% { background-color: transparent; }
+    25% { background-color: color-mix(in srgb, var(--pblsh-celebrate-gold) 30%, transparent); }
+    100% { background-color: transparent; }
+}
+
+@keyframes pblsh-celebrate-pop-replay {
+    0% { transform: scale(1) rotate(0deg); }
+    35% { transform: scale(0.65) rotate(-18deg); }
+    70% { transform: scale(1.3) rotate(8deg); }
+    100% { transform: scale(1) rotate(0deg); }
+}
+
+
+/* State panels — the NoticeBox brings its own block margins; directly after
+   the header (not_found/error, where no hero renders) the header's own margin
+   suffices. */
+.pblsh--wporg-import-facts__header + .pblsh--wporg-import-facts__panel {
+    margin-top: 0;
+}
+
+/* The RelativeTime component's <time> — the dotted underline signals the exact
+   moment behind the relative wording (native title, or the Tooltip component). */
+.pblsh--relative-time {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
+/* Shared tinted message box (NoticeBox component) — icon + optional title +
+   content. Info (blue) and warning (amber) mean the same wherever they appear;
+   spacing towards the surroundings stays with the caller. */
+.pblsh--notice-box {
+    /* The paragraph rhythm — the box is a block in flowing content; layout
+       containers that own their spacing zero this via a context class. */
+    margin: 1em 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.75rem;
+    align-items: start;
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--pblsh-notice-color);
+    border-left-width: 0.5rem; /* 8px — the WP admin notice accent bar */
+    background: color-mix(in srgb, var(--pblsh-notice-color) 10%, #fff);
+    /* Font size and line height are inherited on purpose — the WordPress admin
+       default (13px) is the app's de-facto text size. */
+}
+
+/* The list's load error, first in the content: the header owns the distance above it. */
+.pblsh--notice-box.pblsh--list-load-error {
+    margin-top: 0;
+}
+
+/* The variants only pick the color: every colored part (bar, border, tint, icon)
+   derives from this one property, so overriding it recolors the whole box. */
+.pblsh--notice-box--info {
+    --pblsh-notice-color: var(--color-blue);
+}
+
+.pblsh--notice-box--warning {
+    /* The palette's warning orange — deliberately not WP's #ffb900 amber, which
+       is too light to read as bar, border, or icon on light ground. */
+    --pblsh-notice-color: var(--color-orange);
+}
+
+.pblsh--notice-box--error {
+    --pblsh-notice-color: var(--color-red);
+}
+
+/* Flush: the box as a pinned, edge-to-edge strip (e.g. the upload result's
+   error slot between body and footer) — no own frame, the accent bar stays
+   as the signature; the neighbours provide the separating edges. */
+.pblsh--notice-box--flush {
+    margin: 0;
+    border-radius: 0;
+    border-block: 0;
+    border-right: 0;
+}
+
+.pblsh--notice-box__icon {
+    line-height: 1;
+    color: var(--pblsh-notice-color);
+}
+
+/* The title is the box's headline line; the gap towards the text comes from
+   the following paragraph's own margin. */
+.pblsh--notice-box__title {
+    display: block;
+}
+
+/* Content flows: elements keep their own margins (complex content may need
+   individual spacing); the container only trims the edges. */
+.pblsh--notice-box__content > :first-child {
+    margin-top: 0;
+}
+
+.pblsh--notice-box__content > :last-child {
+    margin-bottom: 0;
+}
+
+/* The machine code right beneath the human message (`error.code`) — muted support detail. */
+.pblsh--notice-box__code {
+    color: #646970;
+    font-size: 0.75rem;
+}
+
+/* Shared help-link pattern (FaqLink and TipLink components) — small icon plus a
+   bold linked line: FaqLink opens the plugin FAQ in a new tab, TipLink opens an
+   in-app tip dialog. Link color without underline; underline appears on
+   hover/focus (explicit on the text span — an inline-flex link does not draw the
+   parent's text-decoration through its flex items). */
+.pblsh--tip-link {
+    /* TipLink is a <button> — strip the native chrome before the shared look. */
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    cursor: pointer;
+}
+
+.pblsh--faq-link,
+.pblsh--tip-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    text-decoration: none;
+    font-weight: 600;
+    /* Muted slate-blue mix of the plugin blue and the admin text gray — still
+       reads as interactive, but does not compete with real actions. */
+    color: color-mix(in srgb, var(--color-blue) 50%, #646970);
+}
+
+.pblsh--faq-link:hover,
+.pblsh--faq-link:focus-visible,
+.pblsh--tip-link:hover,
+.pblsh--tip-link:focus-visible {
+    color: var(--color-blue);
+}
+
+.pblsh--faq-link__icon,
+.pblsh--tip-link__icon {
+    display: inline-flex;
+    line-height: 1;
+}
+
+/* The text gives the link its baseline, so a link inside running text sits on
+   the line's baseline. Without it the inline-flex takes its baseline from the
+   first item, the icon, whose bottom edge would lift the text off the line. */
+.pblsh--faq-link__text,
+.pblsh--tip-link__text {
+    align-self: baseline;
+}
+
+/* The tip mark's two-tone bulb — glowing glass over a metal-gray base; the
+   tips' recognition mark, stable on hover. */
+.pblsh--tip-bulb__glass {
+    fill: #ffd207;
+}
+
+.pblsh--tip-bulb__base {
+    fill: #a7aaad;
+}
+
+.pblsh--faq-link:hover .pblsh--faq-link__text,
+.pblsh--faq-link:focus-visible .pblsh--faq-link__text,
+.pblsh--tip-link:hover .pblsh--tip-link__text,
+.pblsh--tip-link:focus-visible .pblsh--tip-link__text {
+    text-decoration: underline;
+}
+
+/* Shared stack for help-link rows (FaqLink/TipLink, also mixed) — the inner
+   anatomy is the same everywhere: spacing between links, links left-aligned at
+   their content width. Position and outer spacing stay with the embedding
+   component via its own context class. */
+.pblsh--help-links {
+    display: grid;
+    gap: 0.375rem;
+    justify-items: start;
+}
+
+/* Check rows — the shared base rendered by the Checklist component: the upload
+   result checklist and the wporg import facts use the same anatomy. */
+
+/* While the destination is undecided, the body is the gray decision surface at the
+   dialog's top — the publish-path row unfolded: choosing collapses it into the row of
+   the same color and place. No line against the dialog's edge. */
+.pblsh--upload-result--choosing .pblsh--upload-result__body {
+    background: var(--surface-color);
+}
+
+.pblsh--upload-result--choosing .pblsh--upload-result__body-frame {
+    border-top: 0;
+}
+
+/* The upload's own identity atop the decision surface, in the prompts' centered column. */
+.pblsh--upload-result__upload-identity {
+    margin: 0 0 1.5rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: #646970;
+}
+
+.pblsh--upload-result__upload-identity strong {
+    font-weight: 600;
+    color: #1e1e1e;
+}
+
+/* Shared scroll frame (the upload dialog's body, the settings content): a frame around a
+   scroller, with a shadow under the edge in whose direction content is cut off
+   (is-clipped-top / is-clipped-bottom, set by the ScrollFrame component). The shadows are
+   overlays on the frame rather than anything inside the scroller: nothing there scrolls or
+   pads them away. Its own stacking context keeps the overlays under panels that open above
+   the frame. The frame's place in its layout and its lines are the component's, the
+   scroller's padding and background too. */
+.pblsh--scroll-frame {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* The shadow that says content continues past an edge — one look for the frame's edges and
+   for the page's bars, the header's lower edge and the footer's upper one: the page column
+   carries the same is-clipped classes (set in admin.js). Where each edge lies is its owner's. */
+.pblsh--scroll-frame::before,
+.pblsh--scroll-frame::after,
+.pblsh--header::after,
+.pblsh--footer::before {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    z-index: 1;
+    height: 0.75rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.pblsh--scroll-frame::before,
+.pblsh--header::after {
+    background: linear-gradient(rgba(0, 0, 0, 0.1), transparent);
+}
+
+.pblsh--scroll-frame::after,
+.pblsh--footer::before {
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.1));
+}
+
+.pblsh--scroll-frame::before {
+    top: 0;
+}
+
+.pblsh--scroll-frame::after {
+    bottom: 0;
+}
+
+.pblsh--scroll-frame.is-clipped-top::before,
+.pblsh--scroll-frame.is-clipped-bottom::after,
+.pblsh-app.is-clipped-top .pblsh--header::after,
+.pblsh-app.is-clipped-bottom .pblsh--footer::before {
+    opacity: 1;
+}
+
+.pblsh--scroll-frame__scroller {
+    flex: 1;
+    min-height: 0;
     overflow: auto;
     overscroll-behavior: contain;
-    padding: 2rem;
+}
+
+/* The body's frame: the lines above and below the scrolling body; the shared scroll frame
+   adds the shadows. The lines stay; the shadow adds that the content continues. */
+.pblsh--upload-result__body-frame {
+    flex: 1;
     border-block: 1px solid var(--border-color-light);
+}
+
+.pblsh--upload-result__body {
+    padding: 2rem;
 }
 
 .pblsh--checklist {
@@ -681,8 +2186,9 @@
 }
 
 .pblsh--check--ok .pblsh--check__icon { color: var(--index-color-complete); }
-.pblsh--check--warn .pblsh--check__icon { color: #ffb900; }
-.pblsh--check--error .pblsh--check__icon { color: #dc3232; }
+.pblsh--check--celebrate .pblsh--check__icon { color: var(--color-gold); }
+.pblsh--check--warn .pblsh--check__icon { color: var(--color-orange); }
+.pblsh--check--error .pblsh--check__icon { color: var(--color-red); }
 .pblsh--check--info .pblsh--check__icon { color: inherit; }
 
 .pblsh--check__icon svg {
@@ -709,6 +2215,16 @@
 
 .pblsh--check .components-checkbox-control {
     margin-block: .75rem; /* 12px */
+}
+
+/* A topic of a check's description: its sentences in one paragraph, its receipts beneath.
+   Topics stand apart by the spacing a checkbox has. */
+.pblsh--check__topic {
+    display: block;
+}
+
+.pblsh--check__topic + .pblsh--check__topic {
+    margin-top: .75rem; /* 12px */
 }
 
 /* Global overlay */
@@ -770,41 +2286,434 @@
     border-radius: 0.75rem; /* 12px */
     box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
     overflow: hidden;
+    outline: none;
 }
 .pblsh--modal::backdrop {
     background: rgba(0,0,0,0.7);
 }
 
-
-/* Plugin List View */
-.pblsh--list {
-    margin: 1.25rem 0; /* 20px */
+/* Tip dialog — the modal opened by a TipLink: the header stays put, the body
+   scrolls when a tip outgrows the cap (the upload overlay's dialog anatomy).
+   The height follows the content. */
+.pblsh--modal--tip {
+    width: calc(100% - 2rem);
+    max-width: 40rem; /* 640px */
+    max-height: calc(100% - 2rem);
 }
 
-/* Main Header - Always visible */
-.pblsh--header {
+.pblsh--modal--tip[open] {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+}
+
+.pblsh--tip-dialog {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* Icon and close button stay pinned to the first title line even when the
+   title wraps. */
+.pblsh--tip-dialog__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+}
+
+/* Centered within the height of one title line, so the start alignment still
+   looks centered next to a single-line title. */
+.pblsh--tip-dialog__icon {
+    display: flex;
     align-items: center;
-    margin-bottom: 1.875rem; /* 30px */
-    padding-top: 2.5rem; /* 40px */
-    padding-bottom: 1.25rem; /* 20px */
+    height: 2rem; /* one title line */
+}
+
+/* The dialog owns its title styling — doubled class beats the admin's generic
+   .wrap h1 (0,1,1), which would otherwise leak its padding into the header.
+   Rendered at the admin page-title size: the open modal is its own document. */
+.pblsh--tip-dialog .pblsh--tip-dialog__title {
+    margin: 0;
+    padding: 0;
+    font-size: 1.4375rem; /* 23px — the admin page-title size */
+    font-weight: 400;
+    line-height: 2rem; /* 32px — one title line, matches the bulb icon */
+}
+
+.pblsh--tip-dialog__close {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    /* Tucked into the header padding so the button box keeps one identical
+       distance (1.125rem) to the top, right, and bottom edges. The symmetric
+       vertical pull also keeps the header at one title line and the button
+       centered on it. */
+    margin: -0.125rem -0.375rem -0.125rem auto;
+    width: 2.25rem; /* 36px */
+    height: 2.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    color: #646970;
+}
+
+.pblsh--tip-dialog__close:hover,
+.pblsh--tip-dialog__close:focus-visible {
+    background: #f0f0f1;
+    color: #1d2327;
+}
+
+.pblsh--tip-dialog__body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 1.5rem;
+    border-top: 1px solid var(--border-color-light);
+}
+
+/* Section headings inside a tip: clearly detached from the section above,
+   tight to their own text below (the following paragraph's top margin still
+   provides the minimum gap). Declared before the edge trimming, which shares
+   this specificity and must keep the last word for the first heading. */
+.pblsh--tip-dialog__body h2 {
+    margin: 2em 0 0.5em;
+}
+
+/* Content flows — elements keep their own margins, only the edges are trimmed. */
+.pblsh--tip-dialog__body > :first-child {
+    margin-top: 0;
+}
+
+.pblsh--tip-dialog__body > :last-child {
+    margin-bottom: 0;
+}
+
+
+/* Snippets in tips carry the app's code look independent of where the TipLink
+   is embedded. */
+.pblsh--tip-dialog__body pre {
+    margin: 0;
+    border-radius: 0.25rem;
+    overflow: hidden;
+}
+
+
+/* Plugin List View */
+/* At the top of the content: the header owns the distance above (--pblsh-page-inset). */
+.pblsh--list > :first-child {
+    margin-top: 0;
+}
+/* The freshness of the wordpress.org rows while a check failed, right-aligned over the table
+   it speaks for */
+.pblsh--list__check {
+    text-align: right;
+}
+.pblsh--list__check + .pblsh--table-container {
+    margin-top: 0.5rem; /* 8px */
+}
+
+/* The one-time upgrade notice above the plugin list — aligned with the list's margin;
+   one section per migration topic, each led by its own heading line */
+.pblsh--upgrade-notice {
+    margin: 0 0 1.25rem; /* 20px to the list below */
+}
+.pblsh--upgrade-notice__topic {
+    display: block;
+    margin: 1em 0 0.25em;
+}
+
+/* The page header (AdminUI::render_peak_publisher()): one row, the editor's way back at its start,
+   the title in its middle and the actions at its end — two equal outer columns keep the title
+   centered on the header, white
+   across the content area and held right below the admin bar while the page scrolls — below
+   600px the admin bar scrolls away (WordPress makes it absolute there), and so does the header.
+   Below it, --pblsh-sticky-top is where content sticking under the header stops, and focus and
+   jumps with it. The page keeps one inset around its content, --pblsh-page-inset: WordPress's
+   left padding of #wpcontent, which .wrap takes on the right and the header below itself — the
+   header owns that distance, so nothing at the top of the content brings a top margin of its
+   own: the page's column lets none collapse into the inset, one that wants more room adds it.
+   Full width by undoing the padding, the header's own padding aligns title and actions
+   with the content. Above the content (the assets bar), below the admin menu's flyouts
+   (z-index 9990) and the upload overlay. The footer (.pblsh--footer) is its counterpart at the
+   window's bottom; jumps stop above it. */
+:root:has(#pblsh-header) {
+    --pblsh-page-inset: 20px;
+    --pblsh-header-height: 3.75rem; /* 60px */
+    --pblsh-footer-height: 3.75rem; /* 60px */
+    --pblsh-sticky-top: calc(var(--wp-admin--admin-bar--height, 32px) + var(--pblsh-header-height));
+    scroll-padding-top: var(--pblsh-sticky-top);
+    scroll-padding-bottom: var(--pblsh-footer-height);
+}
+
+/* The page's column: header, content and footer, at least as tall as the window below the
+   admin bar — the content takes what the bars leave, so the footer is at the window's bottom
+   under a short list too. WordPress's own footer and the room #wpbody-content keeps for it go:
+   the page's footer takes their place. */
+.pblsh-app {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - var(--wp-admin--admin-bar--height, 32px));
+}
+
+:root:has(#pblsh-footer) #wpfooter {
+    display: none;
+}
+
+#wpbody-content:has(> .pblsh-app) {
+    padding-bottom: 0;
+}
+
+.pblsh--header {
+    position: sticky;
+    top: var(--wp-admin--admin-bar--height, 32px);
+    z-index: 100;
+    display: grid;
+    grid-template-columns: 1fr minmax(0, auto) 1fr;
+    align-items: center;
+    gap: 1rem;
+    box-sizing: border-box;
+    height: var(--pblsh-header-height);
+    margin: 0 0 var(--pblsh-page-inset) calc(-1 * var(--pblsh-page-inset));
+    padding: 0 var(--pblsh-page-inset);
+    background: #fff;
     border-bottom: 1px solid var(--border-color-medium);
 }
 
-.pblsh--header__title {
+/* The header's shadow, right below it (the shared shadow at .pblsh--scroll-frame). */
+.pblsh--header::after {
+    top: 100%;
+}
+
+@media (max-width: 48.875rem) { /* 782px — WordPress's narrower content padding */
+    :root:has(#pblsh-header) {
+        --pblsh-page-inset: 10px;
+    }
+}
+
+/* The admin's .wrap on this page: the inset on the right, none on the left (#wpcontent's padding
+   is it) and none on top (the header's margin is it) — in place of WordPress's 10px 20px 0 2px.
+   It fills the column between the bars. */
+.pblsh-app .wrap {
+    flex: 1 0 auto;
+    margin: 0 var(--pblsh-page-inset) 0 0;
+}
+
+@media (max-width: 37.5rem) { /* 600px — the admin bar scrolls with the page, the header too */
+    :root:has(#pblsh-header) {
+        --pblsh-sticky-top: var(--wp-admin--admin-bar--height);
+    }
+    .pblsh--header {
+        position: static;
+        height: auto;
+        min-height: var(--pblsh-header-height);
+        padding-block: 0.625rem;
+    }
+    /* Scrolling away, it casts no shadow. */
+    .pblsh--header::after {
+        display: none;
+    }
+}
+
+/* WordPress's marker for admin notices (AdminUI::render_peak_publisher()) only anchors where
+   WordPress moves them; out of the flow, it does not keep the header's distance from the
+   content apart from the first element's own margin. */
+.pblsh-app .wp-header-end {
+    display: none;
+}
+
+/* The editor's way back to the list, at the header's start. */
+.pblsh--header__back {
+    grid-column: 1;
+    justify-self: start;
+}
+
+/* The header's center, a one-line clip over two lines: the app's name as the bar's label,
+   the page's h1 outside .wrap — small, uppercase and in the footer's gray, so the bar stays
+   quiet chrome and the views name themselves in the body — and below it the view's title,
+   which slides up into the label's place once the title in the body has scrolled under the
+   header (is-docked, set in admin.js) and slides back when it returns. A long line is cut,
+   not wrapped. */
+.pblsh--header__titles {
+    grid-column: 2;
+    min-width: 0;
+    height: 1.5rem;
+    overflow: hidden;
+    text-align: center;
+}
+
+.pblsh--header__title,
+.pblsh--header__docked-title {
     margin: 0;
-    font-size: 1.8em;
-    color: #23282d;
+    padding: 0;
+    height: 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.5rem;
+    white-space: nowrap;
+    transition: transform 0.2s ease;
+}
+
+.pblsh--header__title {
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #646970;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The docked line: the plugin's icon, line-high, and its name, which carries the ellipsis. */
+.pblsh--header__docked-title {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    color: #1d2327;
+}
+
+.pblsh--header__docked-icon {
+    /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
+    flex: none;
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.pblsh--header__docked-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pblsh--header__titles.is-docked .pblsh--header__title,
+.pblsh--header__titles.is-docked .pblsh--header__docked-title {
+    transform: translateY(-100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pblsh--header__title,
+    .pblsh--header__docked-title {
+        transition: none;
+    }
 }
 
 .pblsh--header__actions {
+    grid-column: 3;
+    justify-self: end;
     display: flex;
     gap: 0.625rem; /* 10px */
 }
 
 .pblsh--header__actions .button {
     margin: 0;
+}
+
+/* The page footer (AdminUI::render_peak_publisher()): white across the content area, held at
+   the window's bottom while the content passes above, with the inset above itself — the footer
+   owns that distance, so nothing at the bottom of the content brings a bottom margin of its own.
+   One quiet row in the admin footer's size and gray: the identity at its start, the links at
+   its end — gray like the text, dark on hover, so the row stays calm beside the content —, and
+   the day's note in the middle of the row: three columns whose sides share the width equally,
+   so the note is centred on the row and not merely between neighbours of unequal width. */
+.pblsh--footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 100;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 1fr minmax(0, max-content) 1fr;
+    align-items: center;
+    gap: 1rem;
+    height: var(--pblsh-footer-height);
+    margin: var(--pblsh-page-inset) 0 0 calc(-1 * var(--pblsh-page-inset));
+    padding: 0 var(--pblsh-page-inset);
+    background: #fff;
+    border-top: 1px solid var(--border-color-medium);
+    font-size: 0.875rem; /* 14px */
+    color: #646970;
+    white-space: nowrap;
+}
+
+/* The footer's shadow, right above it (the shared shadow at .pblsh--scroll-frame). */
+.pblsh--footer::before {
+    bottom: 100%;
+}
+
+.pblsh--footer__identity {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* The brand: the mark and the name, one link. */
+.pblsh--footer__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: inherit;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.pblsh--footer__brand svg {
+    height: 1rem; /* 16px */
+    width: auto;
+}
+
+.pblsh--footer__links {
+    display: flex;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* The day's promotion (footer_promos()) in the middle column: one line that ellipsizes
+   before either side gives way — the sides never go below their content. The column is as
+   wide as the text, so the clipping the ellipsis needs would cut the link's focus ring: the
+   padding is the ring's room. */
+.pblsh--footer__promo {
+    min-width: 0;
+    padding: 0 0.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+.pblsh--footer__nav {
+    justify-self: end;
+}
+
+/* A dot between the links, on the list item: outside the link, so it neither clicks nor
+   underlines. */
+.pblsh--footer__links > li + li::before {
+    content: "·" / "";
+    margin: 0 0.75rem;
+    color: #a7aaad;
+}
+
+.pblsh--footer__link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.pblsh--footer__brand:hover,
+.pblsh--footer__brand:focus,
+.pblsh--footer__link:hover,
+.pblsh--footer__link:focus {
+    color: #1d2327;
+}
+
+.pblsh--footer__link:hover,
+.pblsh--footer__link:focus {
+    text-decoration: underline;
+}
+
+@media (max-width: 48.875rem) { /* 782px — the row keeps the identity only, as WordPress drops its footer */
+    .pblsh--footer__promo,
+    .pblsh--footer__links {
+        display: none;
+    }
 }
 
 /* Table Styles */
@@ -853,88 +2762,215 @@
 }
 
 /* Screenshot Column */
-.pblsh--table__screenshot-header {
-    width: 6.25rem; /* 100px */
+/* Plugin Column: icon and name block in one cell. */
+.pblsh--table__plugin-header {
+    min-width: 16.5rem; /* 264px: 200px of text beside the 48px icon and its gap */
 }
 
-.pblsh--table__screenshot-cell {
-    width: 6.25rem; /* 100px */
-}
-
-.pblsh--table__screenshot-thumbnail {
-    border-radius: 0.25rem; /* 4px */
-    border: 1px solid var(--border-color-light);
-    object-fit: cover;
-    vertical-align: middle;
-}
-
-.pblsh--table__no-screenshot {
-    width: 5rem; /* 80px */
-    height: 3.75rem; /* 60px */
-    background: #f9f9f9;
-    border: 1px solid var(--border-color-light);
-    border-radius: 0.25rem; /* 4px */
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: #ccc;
-    vertical-align: middle;
-}
-
-.pblsh--table__no-screenshot svg {
-    width: 2rem; /* 32px */
-    height: 2rem; /* 32px */
-    fill: #ccc;
-}
-
-/* Name Column */
-.pblsh--table__name-header {
-    min-width: 12.5rem; /* 200px */
-}
-
-.pblsh--table__icon-header,
-.pblsh--table__icon-cell {
-    width: 3rem;
-    text-align: right;
-    padding: 0 !important;
-}
-.pblsh--table__icon {
-    /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
-    width: 3rem;
-    height: 3rem;
-    display: inline-block;
-    vertical-align: middle;
-}
-.pblsh--table__name-header,
-.pblsh--table__name-cell {
-    padding-left: 1rem !important;
-}
-
-.pblsh--table__name-cell {
-    min-width: 12.5rem; /* 200px */
+.pblsh--table__plugin-cell {
+    min-width: 16.5rem; /* 264px */
+    /* Lets the auto table layout shrink this column below its content width,
+       so the nowrap slug's ellipsis can kick in instead of stretching the
+       table past its container. */
+    max-width: 1px;
     word-break: break-word;
     white-space: normal;
 }
 
-/* Slug Column */
-.pblsh--table__slug-header {
-    min-width: 9.375rem; /* 150px */
+.pblsh--table__plugin {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
 
-.pblsh--table__slug-cell {
-    min-width: 9.375rem; /* 150px */
+.pblsh--table__icon {
+    /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
+    width: 3rem;
+    height: 3rem;
+    flex-shrink: 0;
+}
+
+/* The name block beside the icon — min-width 0, so it shrinks for the slug's ellipsis. */
+.pblsh--table__name-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+/* The name line: the row's anchor, lifted above the table's 13px base. */
+.pblsh--table__name-line {
+    font-size: 0.9375rem; /* 15px */
+}
+
+/* Status column: what needs attention, one item per line in the editor's notice vocabulary
+   (utils-plugin-status.js) — a mark, not a control. The variant colors the glyph (orange
+   warns, blue informs), the label stays text; a closed or draft plugin is a state, not a
+   problem, and shows the editor status button's dot in its color. A green check says all
+   clear, so the column is never blank. Not muted: it is the row's only carrier of that, and
+   the exceptions stand out by their label anyway. The items are a layout stack, hence the
+   gap. */
+.pblsh--table__status-header,
+.pblsh--table__status-cell {
+    white-space: nowrap;
+}
+
+.pblsh--table__status-cell {
+    font-size: 0.875rem; /* 14px */
+}
+
+.pblsh--status-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.pblsh--status-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: help;
+}
+
+.pblsh--status-item__glyph {
+    display: inline-flex;
+}
+
+.pblsh--status-item--warning .pblsh--status-item__glyph { color: var(--color-orange); }
+.pblsh--status-item--info .pblsh--status-item__glyph { color: var(--color-blue); }
+.pblsh--status-item--draft .pblsh--status-item__glyph { color: var(--color-gray-dark); }
+.pblsh--status-item--closed .pblsh--status-item__glyph { color: var(--color-red); }
+.pblsh--status-item--ok .pblsh--status-item__glyph { color: var(--color-green); }
+
+/* ChannelPath — the publish path in short (channel icon + slug), shared by
+   the plugin list and the editor header. */
+.pblsh--channel-path {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    /* As light as WCAG AA allows: ~4.5:1 on the row hover gray — do not
+       lighten further. */
+    color: #737373;
+    max-width: 100%;
+    min-width: 0;   /* a grid or flex item too: shrinks below the slug, which then ellipsizes */
+}
+
+.pblsh--channel-path__icon {
+    display: inline-flex;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+/* The way to the plugin's page on its channel, at the line's end: the line's gray, blue when
+   pointed at. */
+.pblsh--channel-path__link {
+    display: inline-flex;
+    line-height: 1;
+    flex-shrink: 0;
+    color: inherit;
+    text-decoration: none;
+}
+.pblsh--channel-path__link:hover,
+.pblsh--channel-path__link:focus-visible {
+    color: var(--color-blue);
+}
+
+/* Bare like the upload overlay's publish path — no chip background. Always one
+   line: overlong slugs get an ellipsis, the tooltip carries the full slug — a flex
+   item shrinks below its content only with min-width 0. */
+.pblsh--channel-path code {
+    min-width: 0;
+    padding: 0;
+    background: transparent;
+    font-size: 0.75rem; /* 12px */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 1px;
 }
 
-.pblsh--table__slug-cell code {
-    background: #f1f1f1;
-    padding: 0.125rem 0.375rem; /* 2px 6px */
-    border-radius: 0.1875rem; /* 3px */
-    font-size: 0.75rem; /* 12px */
-    color: #666;
+/* PluginIdentity — a plugin, or a theme, as a row names it: image, name, slug (ChannelPath) —
+   the one anatomy of the wporg import table's rows and the Live Preview's plugins and theme. */
+.pblsh--plugin-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.pblsh--plugin-identity__image {
+    width: 3rem; /* 48px */
+    height: 3rem;
+    flex-shrink: 0;
+}
+/* A theme's screenshot, 4:3 as the directory shows it, framed — screenshots are mostly white. */
+.pblsh--plugin-identity__image--theme {
+    width: 4rem;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.25rem;
+    background: #f6f7f7;
+    object-fit: cover;
+}
+.pblsh--plugin-identity__text {
+    display: grid;
+    gap: 0.125rem;
+    min-width: 0;
+}
+/* The row's anchor — the plugin list's row anchor size. */
+.pblsh--plugin-identity__name {
+    font-size: 0.9375rem; /* 15px */
+}
+/* With a page to link to: quiet by default, the affordance (underline + external marker)
+   appears on hover and keyboard focus; without one, the same anatomy as a plain block. */
+a.pblsh--plugin-identity {
+    color: inherit;
+    text-decoration: none;
+}
+a.pblsh--plugin-identity:hover .pblsh--plugin-identity__name,
+a.pblsh--plugin-identity:focus-visible .pblsh--plugin-identity__name {
+    text-decoration: underline;
+}
+/* The name's last word and the marker never part: a line breaks before an atomic inline unless
+   its line forbids it. */
+.pblsh--plugin-identity__tail {
+    white-space: nowrap;
+}
+/* Atomic inline: keeps the name's underline off the marker; opacity instead of display, so
+   the reserved space never shifts the layout on hover. */
+.pblsh--plugin-identity__external {
+    display: inline-flex;
+    vertical-align: middle;
+    line-height: 1;
+    margin-left: 0.375rem;
+    opacity: 0;
+}
+a.pblsh--plugin-identity:hover .pblsh--plugin-identity__external,
+a.pblsh--plugin-identity:focus-visible .pblsh--plugin-identity__external {
+    opacity: 1;
+}
+
+/* The framed table — a hairline frame with rounded corners on the wrap, a hairline between the
+   rows, the cells padded — shared by the wporg import table and the Live Preview's plugins. The
+   last row of a body that ends the table has no hairline, the frame is its edge; a body a foot
+   follows keeps it as the separator. The frame (pblsh--framed-box) is the table's and any
+   box's that stands among such tables, as the Live Preview's landing page does. */
+.pblsh--framed-box {
+    overflow: auto;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.5rem;
+}
+.pblsh--framed-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.pblsh--framed-table th,
+.pblsh--framed-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color-light);
+    text-align: left;
+    vertical-align: middle;
+}
+.pblsh--framed-table tbody:last-child tr:last-child td {
+    border-bottom: 0;
 }
 
 /* Version Column */
@@ -952,6 +2988,195 @@
     max-width: 1px;
 }
 
+/* Released Column: when a release was published — in the plugin list the current one. */
+.pblsh--table__released-header,
+.pblsh--table__released-cell {
+    white-space: nowrap;
+}
+
+.pblsh--table__released-cell {
+    color: #666;
+    font-size: 0.875rem; /* 14px */
+}
+
+/* Current version (list cell, editor header): the version, or what sites get
+   instead, with a state glyph whose tooltip explains it (CurrentVersion.js) */
+.pblsh--current-version {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 100%;
+}
+
+.pblsh--current-version__glyph {
+    display: inline-flex;
+    cursor: help;
+}
+
+.pblsh--current-version--warning .pblsh--current-version__glyph { color: var(--color-orange); }
+.pblsh--current-version--info .pblsh--current-version__glyph { color: var(--color-blue); }
+
+/* Tested up to (editor header figure): the value with a state glyph whose tooltip says
+   what to do (PluginEditor.js, utils-tested-up-to.js) */
+.pblsh--tested-figure {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.pblsh--tested-figure__glyph {
+    display: inline-flex;
+}
+
+.pblsh--tested-figure--warning .pblsh--tested-figure__glyph { color: var(--color-orange); }
+
+/* Releases table, Tested up to column: the value with its edit pencil, or the inline field
+   with Save and Cancel; the field's error or hint takes a line of its own below the controls,
+   a warning as a notice box — tinted, easier to read than colored text. The form is a layout
+   stack of two tiers (hence the gap): the controls' row, then the messages. */
+.pblsh--table__tested-header,
+.pblsh--table__tested-cell {
+    white-space: nowrap;
+}
+
+.pblsh--table__tested-cell {
+    color: #666;
+    font-size: 0.875rem; /* 14px */
+}
+
+.pblsh--tested-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.pblsh--tested-value__text {
+    cursor: help;
+}
+
+/* The current release's row: the header figure's glyph, before the pencil that fixes it. */
+.pblsh--tested-value__glyph {
+    display: inline-flex;
+    cursor: help;
+}
+
+.pblsh--tested-value--warning .pblsh--tested-value__glyph { color: var(--color-orange); }
+
+.pblsh--tested-edit {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    white-space: normal;
+}
+
+.pblsh--tested-edit__controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* WordPress sizes the control's input at 100% with a two-class selector; this one outranks it. */
+.pblsh--tested-edit .pblsh--tested-edit__input .components-text-control__input {
+    width: 5.5em;
+}
+
+.pblsh--tested-edit__error,
+.pblsh--tested-edit__hint {
+    font-size: 0.8125rem; /* 13px */
+}
+
+.pblsh--tested-edit__error {
+    color: var(--color-red);
+}
+
+/* The warning box below the controls: the stack's gap as its spacing, a reading width. */
+.pblsh--tested-edit .pblsh--tested-edit__notice {
+    max-width: 35rem;
+    margin: 0;
+}
+
+/* Releases table, Current column: which release sites receive — a radio-like ring
+   per row, with the dot in the selection blue on the current one (CSS only, no icon;
+   deliberately not the status green, which means "public") */
+.pblsh--table__current-header,
+.pblsh--table__current-cell {
+    width: 4.5rem; /* 72px */
+    white-space: nowrap;
+}
+
+.pblsh--current-ring {
+    display: inline-block;
+    position: relative;
+    box-sizing: border-box;
+    width: 1.25rem;
+    height: 1.25rem;
+    border: 2px solid var(--border-color-medium);
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+.pblsh--current-ring--current {
+    border-color: var(--color-blue);
+}
+
+/* The dot: drawn as the padding box behind a transparent 2px border rather than as an inset
+   box, so a context can turn it into a ring by coloring that border and clearing the
+   background (the upload's current-release switch does). */
+.pblsh--current-ring::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    background: var(--color-blue);
+    background-clip: padding-box;
+    opacity: 0;
+}
+
+.pblsh--current-ring--current::after {
+    opacity: 1;
+}
+
+/* A draft plugin distributes nothing — the dot says so by fading */
+.pblsh--current-ring--muted::after {
+    opacity: 0.5;
+}
+
+/* The ring of every other row is the action "Make … the current release": a bare
+   button around the ring; hovering previews the dot in the selection color */
+.pblsh--table__current-cell .pblsh--current-ring-button.components-button {
+    padding: 0;
+    min-width: 0;
+    height: auto;
+    border-radius: 50%;
+    line-height: 0;
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-button:hover .pblsh--current-ring {
+    border-color: var(--color-blue);
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-button:hover .pblsh--current-ring::after {
+    opacity: 0.35;
+}
+
+/* Locked: during a flip, and on wordpress.org rows until the wporg write paths exist */
+.pblsh--table__current-cell .pblsh--current-ring-button:disabled .pblsh--current-ring,
+.pblsh--table__current-cell .pblsh--current-ring-button[aria-disabled="true"] .pblsh--current-ring {
+    border-color: var(--border-color-light);
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-button[aria-disabled="true"]:hover .pblsh--current-ring::after {
+    opacity: 0;
+}
+
+.pblsh--table__current-cell .pblsh--current-ring-spinner.components-spinner {
+    margin: 0;
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
 /* Installations Column */
 .pblsh--table__installations-header {
     width: 6.25rem; /* 100px */
@@ -959,52 +3184,62 @@
 
 .pblsh--table__installations-cell {
     width: 6.25rem; /* 100px */
-}
-
-/* Status Column */
-.pblsh--table__status-cell {
-    width: 6.25rem; /* 100px */
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 1px;
 }
 
-.pblsh--badge {
-    display: inline-block;
-    padding: 0.125rem 0.5rem; /* 2px 8px */
-    border-radius: 0.1875rem; /* 3px */
-    font-size: 0.75rem; /* 12px */
-    font-weight: 500;
+/* A figure whose tooltip says what it is (Figure.js): the installations cell, the
+   editor's Downloads and Rating. While a value is fetched for the first time, a small
+   spinner stands in for it. */
+.pblsh--figure {
+    cursor: help;
 }
 
-.pblsh--badge--active {
-    background: #46b450;
-    color: white;
+.pblsh--figure .pblsh--figure__spinner.components-spinner {
+    margin: 0;
+    width: 1rem;
+    height: 1rem;
+    vertical-align: middle;
 }
 
-.pblsh--badge--inactive {
-    background: #f1f1f1;
+/* Rating in the editor header, inside a Figure: five stars in half steps like the
+   directory shows them (getRating() in utils-installations.js). The icons carry
+   whitespace of their own, so the stars overlap their boxes slightly. */
+.pblsh--rating-stars {
+    vertical-align: middle;
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-star);
+    margin-top: -.25rem;
+}
+
+.pblsh--rating-stars__star {
+    display: inline-flex;
+    margin-inline-start: -0.25rem;
+}
+
+/* The number of ratings beside the stars, the plugin installer's "(7,308)" */
+.pblsh--rating-stars__count {
     color: #666;
+    font-size: 0.8125rem;
 }
 
 /* Status button variations (icon colored via currentColor) */
 .components-button.is-tertiary.pblsh--status-btn svg { width: 1rem; height: 1rem; }
 .components-button.is-tertiary.pblsh--status-btn { color: #000 !important; }
 .components-button.is-tertiary.pblsh--status-btn--public { color: var(--color-green) !important; }
-.components-button.is-tertiary.pblsh--status-btn--draft { color: var(--color-gray) !important; }
+.components-button.is-tertiary.pblsh--status-btn--draft { color: var(--color-gray-dark) !important; }
+/* Closed on wordpress.org: the directory distributes nothing */
+.components-button.is-tertiary.pblsh--status-btn--closed { color: var(--color-red) !important; }
 
-/* Plugin info card */
+/* Plugin info card: the icon in a gutter of its own, name, slug and the figures in one
+   column beside it with the rule between them — one left edge for everything but the icon.
+   The gutter's width is the icon's and the gap's, declared once here. */
 .pblsh--card--plugin-info {
+    --plugin-icon-size: 5rem;   /* 80px */
+    --plugin-icon-gap: 0.75rem; /* 12px */
     display: flex;
     flex-direction: column;
 }
-.pblsh--plugin-info__row {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--content-padding-block);
-}
-.pblsh--plugin-info__right { flex: 1; }
 .pblsh--loading--table { padding: 2rem; }
 .pblsh--plugin-header {
     display: flex;
@@ -1012,18 +3247,29 @@
     justify-content: space-between;
     gap: 1rem;
     padding-bottom: var(--content-padding-block);
-    border-bottom: 1px solid var(--border-color-medium);
-    margin-bottom: var(--content-padding-block);
 }
 .pblsh--plugin-header__main {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--plugin-icon-gap);
     min-width: 0;
 }
+/* The status button, at the header's top right. */
 .pblsh--plugin-header__actions {
-    display: flex;
-    align-items: center;
+    flex-shrink: 0;
+}
+
+/* How fresh the wordpress.org data on screen is (WporgCheckStatus): one muted line of
+   fragments; a link among them — the editor's Refresh — reads like its neighbours. In the
+   editor it is a line of the tab bar's wordpress.org stack (pblsh--tab-nav__wporg). */
+.pblsh--wporg-check {
+    color: #666;
+    font-size: 0.8125rem;
+}
+.pblsh--wporg-check .components-button.is-link {
+    font-size: inherit;
+    line-height: inherit;
+    vertical-align: baseline;
 }
 .pblsh--plugin-header code {
     font-size: 0.75rem;
@@ -1035,13 +3281,31 @@
     letter-spacing: .025em;
 }
 .pblsh--plugin-meta { display: flex; gap: 0.5rem; align-items: center; color: #666; }
-.pblsh--plugin-meta .pblsh--plugin-version { font-weight: 600; }
-.pblsh--plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.75rem; }
+/* The figures, in the column beside the icon's gutter, the rule with them; below 600px the
+   gutter would cost a column's worth of the card, so the figures take the card's width. */
+.pblsh--plugin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: 0.75rem;
+    margin-left: calc(var(--plugin-icon-size) + var(--plugin-icon-gap));
+    padding-top: var(--content-padding-block);
+    border-top: 1px solid var(--border-color-medium);
+}
+@media (max-width: 37.5rem) { /* 600px */
+    .pblsh--plugin-grid {
+        margin-left: 0;
+    }
+}
 .pblsh--plugin-grid__label { color: #666; font-size: 0.8125rem; }
 .pblsh--plugin-grid__value {
     font-size: 1.5rem;
     font-weight: 400;
     letter-spacing: .025em;
+}
+/* Second line under a grid value: muted fragments, ' · ' separated, no period */
+.pblsh--plugin-grid__hint {
+    color: #666;
+    font-size: 0.8125rem;
 }
 
 /* Actions Column */
@@ -1073,7 +3337,6 @@
     font-style: italic;
     background: #f9f9f9;
     border-radius: 0.5rem; /* 8px */
-    margin-top: 1.25rem; /* 20px */
 }
 
 /* Responsive Table */
@@ -1082,13 +3345,12 @@
     .pblsh--table td {
         font-size: 0.8125rem; /* 13px */
     }
-    .pblsh--table__name-cell,
-    .pblsh--table__slug-cell {
-        min-width: 6.25rem; /* 100px */
+    .pblsh--table__plugin-cell {
+        min-width: 10.25rem; /* 164px */
         font-size: 0.8125rem; /* 13px */
     }
     .pblsh--table__version-cell,
-    .pblsh--table__status-cell {
+    .pblsh--table__released-cell {
         font-size: 0.75rem; /* 12px */
     }
     .pblsh--table__actions {
@@ -1102,9 +3364,8 @@
     .pblsh--table td {
         font-size: 0.75rem; /* 12px */
     }
-    .pblsh--table__name-cell,
-    .pblsh--table__slug-cell {
-        min-width: 5rem; /* 80px */
+    .pblsh--table__plugin-cell {
+        min-width: 9rem; /* 144px */
         font-size: 0.75rem; /* 12px */
     }
     .pblsh--table__actions {
@@ -1123,9 +3384,8 @@
     .pblsh--table td {
         font-size: 0.6875rem; /* 11px */
     }
-    .pblsh--table__name-cell,
-    .pblsh--table__slug-cell {
-        min-width: 3.75rem; /* 60px */
+    .pblsh--table__plugin-cell {
+        min-width: 7.75rem; /* 124px */
         font-size: 0.6875rem; /* 11px */
     }
     .pblsh--table__actions {
@@ -1149,14 +3409,37 @@
     margin-top: 1.25rem;
 }
 
+/* The tabs sit on the bar's bottom edge whatever stands beside them: the wordpress.org stack
+   at the right end is centered in the bar's height and never stretches a tab. */
 .pblsh--tab-nav {
     display: flex;
+    align-items: flex-end;
     gap: 0;
     padding: 0;
     margin-bottom: 0;
 }
 
+/* wordpress.org at the right end of the tab bar, plugin-wide: when the plugin page shows the
+   last commit, and how fresh the plugin's data is with Refresh — each a line of its own,
+   right-aligned, one gray, the stack centered in the bar's height. Two lines fit in a tab's
+   height, so the bar keeps its height when the forecast comes and goes; where the width runs
+   out, the lines wrap and the bar grows, the tabs staying on its bottom edge. */
+.pblsh--tab-nav__wporg {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    align-self: center;
+    margin-left: auto;
+    min-width: 0;
+    padding: 0 0.75rem;
+    color: #666;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    text-align: right;
+}
+
 .pblsh--tab-nav__tab {
+    flex-shrink: 0;   /* the wordpress.org stack beside the tabs gives way, never a tab's name */
     background: #f3f4f6;
     border: 1px solid var(--border-color-light);
     border-bottom-color: var(--border-color-light);
@@ -1190,6 +3473,18 @@
     border-bottom-color: #fff;
 }
 
+/* Changes waiting for their commit: a dot after the tab's name, in the info color of the
+   status column's entry for the same fact. */
+.pblsh--tab-nav__pending {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-left: 0.375rem;
+    border-radius: 50%;
+    background: var(--color-blue);
+    vertical-align: middle;
+}
+
 .pblsh--tab-panel__body {
     position: relative;
     z-index: 0;
@@ -1197,7 +3492,9 @@
     border: 1px solid var(--border-color-light);
     border-radius: 0 0.5rem 0.5rem 0.5rem;
     box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.1);
-    overflow: hidden;
+    /* clip, not hidden: the corners cut the content the same, but no scroll container — the
+       assets bar sticks to the window, not to this box. */
+    overflow: clip;
 }
 
 /* Strip box styling from inner elements rendered directly inside the panel */
@@ -1208,15 +3505,20 @@
     border-radius: 0;
     margin-top: 0;
 }
+/* Notices at the top of a tab (above the releases table, above the assets) sit flush
+   in the panel body, separated from what follows by one hairline */
+.pblsh--tab-panel__body > .pblsh--tab-panel__notice {
+    margin: 0;
+    border-radius: 0;
+    border-block: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color-light);
+}
 .pblsh--plugin-header__icon {
     /* It is intentional that non-square images are distorted, as WordPress itself behaves in this way as well. */
-    width: 5rem;
-    height: 5rem;
+    width: var(--plugin-icon-size);
+    height: var(--plugin-icon-size);
     flex-shrink: 0;
-}
-
-.pblsh--editor {
-    margin: 1.25rem 0; /* 20px */
 }
 
 .pblsh--settings {
@@ -1225,6 +3527,13 @@
     height: 100%;
     border-radius: .5em;
     overflow: hidden;
+}
+/* In the form's place when the settings could not be loaded: the reason, then the way out */
+.pblsh--settings__unavailable {
+    padding: 1.25rem; /* 20px */
+}
+.pblsh--settings__unavailable-notice {
+    margin-top: 0;
 }
 
 
@@ -1290,6 +3599,12 @@
     font-weight: 600;
 }
 
+.pblsh--settings--sidebar__nav-separator {
+    height: 1px;
+    background: rgba(0, 0, 0, 0.12);
+    margin: 0.75rem 0.5rem;
+}
+
 
 
 
@@ -1307,11 +3622,11 @@
     flex-direction: column;
 }
 
-.pblsh--settings--main__content {
+/* The content's frame: the line above the buttons; the shared scroll frame adds the
+   shadows. No line at the top, that is the dialog's edge. */
+.pblsh--settings--main__frame {
     flex: 1;
-    overflow: auto;
-    overscroll-behavior: contain;
-    height: 100%;
+    border-bottom: 1px solid #eee;
 }
 
 /* Settings Sections */
@@ -1327,7 +3642,6 @@
 
 .pblsh--settings--main__section--buttons {
     padding: 2rem; /* 32px */
-    border-top: 1px solid #eee;
     margin: 0;
 }
 
@@ -1355,24 +3669,8 @@
     gap: 1rem; /* 16px */
 }
 
-.pblsh--settings--main__section-content--grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
-    gap: 2rem; /* 32px */
-}
-
-.pblsh--settings--main__section-content--grid-column-span-2 { grid-column: span 2; }
-.pblsh--settings--main__section-content--grid-column-span-3 { grid-column: span 3; }
-.pblsh--settings--main__section-content--grid-column-span-4 { grid-column: span 4; }
-.pblsh--settings--main__section-content--grid-row-span-2 { grid-row: span 2; }
-.pblsh--settings--main__section-content--grid-row-span-3 { grid-row: span 3; }
-.pblsh--settings--main__section-content--grid-row-span-4 { grid-row: span 4; }
-.pblsh--settings--main__section-content--grid-row-span-5 { grid-row: span 5; }
-.pblsh--settings--main__section-content--grid-row-span-6 { grid-row: span 6; }
-.pblsh--settings--main__section-content--grid-row-span-7 { grid-row: span 7; }
-
-.pblsh--settings--main__section-content--grid .regular-text {
-    max-width: 100%;
+.pblsh--settings--main__section-content .components-base-control:where(:not(:last-child)) {
+    margin-bottom: 1rem; /* 16px */
 }
 
 .pblsh--settings--main__section-content .components-base-control:last-child {
@@ -1384,6 +3682,162 @@
     color: #666;
     font-style: italic;
     font-size: 0.8125rem; /* 13px */
+}
+
+/* Settings: wordpress.org account card (view state; the edit state embeds the shared form) */
+/* Account card — one grid: the identity (avatar plus text) on the left across
+   both rows, management icons top right, the import action bottom right.
+   Notices span the full width in an implicit row below (no reserved empty row). */
+.pblsh--wporg-account-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "identity manage"
+        "identity import";
+    gap: 0.5rem 0.75rem;
+    padding: 1rem;
+    border: 1px solid var(--border-color-medium);
+    border-radius: 0.5rem;
+    background: #fff;
+}
+
+.pblsh--wporg-account-card__avatar {
+    flex: none;
+    line-height: 1;
+}
+
+/* Placeholder when the Gravatar cannot load (blocked/offline): the avatar's
+   round footprint with a muted person icon inside. */
+.pblsh--wporg-account-card__avatar-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem; /* 64px — same footprint as the loaded avatar */
+    height: 4rem;
+    border-radius: 50%;
+    background: #f0f0f1;
+    color: #a7aaad;
+}
+
+.pblsh--wporg-account-card__avatar-image {
+    display: block;
+    width: 4rem; /* 64px — same footprint as the logo fallback */
+    height: 4rem;
+    border-radius: 50%;
+}
+
+.pblsh--wporg-account-card__identity {
+    grid-area: identity;
+    align-self: start;
+    display: flex;
+    align-items: center; /* username and state centered against the avatar */
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.pblsh--wporg-account-card__identity-text {
+    display: grid;
+    /* Pack the rows regardless of the height the flex parent hands out — grid's
+       default would stretch the auto rows apart when the item is taller than
+       its content. */
+    align-content: start;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.pblsh--wporg-account-card__manage {
+    grid-area: manage;
+    justify-self: end;
+    align-self: start;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.pblsh--wporg-account-card__import {
+    grid-area: import;
+    justify-self: end;
+    align-self: end;
+}
+
+/* Narrow contexts: the import action moves into its own full-width row. */
+@media (max-width: 480px) {
+    .pblsh--wporg-account-card {
+        grid-template-areas:
+            "identity manage"
+            "import import";
+    }
+
+    .pblsh--wporg-account-card__import {
+        justify-self: stretch;
+        justify-content: center;
+    }
+}
+
+.pblsh--wporg-account-card__username {
+    font-size: 1.125rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+/* Account state badge — one anatomy for every state: the container carries the
+   state modifier (its color as custom property), the icon sits beside a body in
+   which status word and optional <time> can wrap — a wrapped time then aligns
+   flush with the word, not with the icon. */
+.pblsh--wporg-account-card__state {
+    display: flex;
+    align-items: start;
+    gap: 0.375rem;
+}
+
+.pblsh--wporg-account-card__state.is-verified { --pblsh-account-state-color: var(--color-green); }
+.pblsh--wporg-account-card__state.is-blocked { --pblsh-account-state-color: var(--color-red); }
+/* Stored before save-time verification existed — neutral until tested. */
+.pblsh--wporg-account-card__state.is-unknown { --pblsh-account-state-color: #646970; }
+
+.pblsh--wporg-account-card__state-icon {
+    display: inline-flex;
+    align-items: center;
+    height: 1.25rem; /* one text line — keeps the icon on the first line when the body wraps */
+    flex: none;
+    color: var(--pblsh-account-state-color);
+}
+
+.pblsh--wporg-account-card__state-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.125rem 0.375rem;
+    min-width: 0;
+}
+
+.pblsh--wporg-account-card__state-status {
+    font-weight: 600;
+    color: var(--pblsh-account-state-color);
+}
+
+/* A NoticeBox as a full-width card row; the card grid's gap owns the spacing. */
+.pblsh--wporg-account-card__reentry,
+.pblsh--wporg-account-card__spelling {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+body.toplevel_page_pblsh-peak-publisher [data-lastpass-icon-root],
+body.toplevel_page_pblsh-peak-publisher [data-lastpass-root],
+body.toplevel_page_pblsh-peak-publisher [data-lastpass-infield],
+body.toplevel_page_pblsh-peak-publisher img[id^="__lpform_"],
+.pblsh--settings [data-lastpass-icon-root],
+.pblsh--settings [data-lastpass-root],
+.pblsh--settings [data-lastpass-infield],
+.pblsh--settings img[id^="__lpform_"] {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
 }
 
 
@@ -1430,12 +3884,6 @@
     border-bottom: none;
 }
 
-.pblsh--main__section--buttons {
-    padding: 2rem; /* 32px */
-    border-top: 1px solid #eee;
-    margin: 0;
-}
-
 /* Section Headers */
 .pblsh--main__content section h2:first-child {
     margin-top: 0;
@@ -1448,67 +3896,6 @@
 .pblsh--main__content section h3 {
     font-size: 1.15em;
     margin-top: 2rem;
-}
-
-.pblsh--main__section-content {
-    max-width: 62.5rem; /* 1000px */
-}
-
-.pblsh--main__section-content--buttons {
-    display: flex;
-    justify-content: flex-end;
-    gap: 1rem; /* 16px */
-}
-
-.pblsh--main__section-content--grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
-    gap: 2rem; /* 32px */
-}
-
-.pblsh--main__section-content--grid-column-span-2 { grid-column: span 2; }
-.pblsh--main__section-content--grid-column-span-3 { grid-column: span 3; }
-.pblsh--main__section-content--grid-column-span-4 { grid-column: span 4; }
-.pblsh--main__section-content--grid-row-span-2 { grid-row: span 2; }
-.pblsh--main__section-content--grid-row-span-3 { grid-row: span 3; }
-.pblsh--main__section-content--grid-row-span-4 { grid-row: span 4; }
-.pblsh--main__section-content--grid-row-span-5 { grid-row: span 5; }
-.pblsh--main__section-content--grid-row-span-6 { grid-row: span 6; }
-.pblsh--main__section-content--grid-row-span-7 { grid-row: span 7; }
-
-.pblsh--main__section-content--grid .regular-text {
-    max-width: 100%;
-}
-
-.pblsh--main__section-content .components-base-control:last-child {
-    margin-bottom: 0;
-}
-
-.pblsh--main__section-content .components-base-control__help {
-    margin-top: 0.25rem; /* 4px */
-    color: #666;
-    font-style: italic;
-    font-size: 0.8125rem; /* 13px */
-}
-
- 
-
- 
-
-/* Slug Status */
-.pblsh--slug-status--checking {
-    color: #ffb900;
-    font-style: italic;
-}
-
-.pblsh--slug-status--available {
-    color: #46b450;
-    font-weight: 500;
-}
-
-.pblsh--slug-status--unavailable {
-    color: #dc3232;
-    font-weight: 500;
 }
 
 /* Responsive Design */
@@ -1535,12 +3922,6 @@
         flex: 1;
     }
 
-    .pblsh--header {
-        flex-direction: column;
-        gap: 0.9375rem; /* 15px */
-        align-items: stretch;
-    }
-    
     .pblsh--table__actions {
         flex-direction: column;
     }
@@ -1571,21 +3952,15 @@
 }
 
 /* Notice spacing within sections */
-.pblsh--main__section .components-notice:not(:first-child) {
-    margin-top: 1rem;
-}
-
-.pblsh--main__section .components-notice:not(:last-child) {
-    margin-bottom: 1rem;
-}
-
 
 /* ============================================================
    Plugin Assets Section
    ============================================================ */
 
 .pblsh--assets-card {
-    padding: 1.5rem;
+    --pblsh-assets-card-padding: 1.5rem;   /* the head row spans it */
+    --pblsh-asset-box-width: 26rem;        /* a slot's box, and the column of boxes in Icon & Banner */
+    padding: var(--pblsh-assets-card-padding);
 }
 
 .pblsh--assets-group {
@@ -1614,12 +3989,18 @@
 }
 
 /* Individual asset slot */
+/* The assets tab's box — the one base of its look, shared by the slot boxes and the Live
+   Preview's box: a band sits flush at its top as the head, the content beneath. */
+.pblsh--assets-box {
+    --pblsh-assets-box-border: 1px;
+    border: var(--pblsh-assets-box-border) solid var(--border-color-medium);
+    border-radius: 8px;
+    background: #fff;
+}
+
 .pblsh--asset-slot {
     display: flex;
     flex-direction: column;
-    border: 1.5px solid var(--border-color-medium);
-    border-radius: 8px;
-    background: #fff;
     transition: border-color 0.15s, box-shadow 0.15s;
     position: relative;
 }
@@ -1719,7 +4100,23 @@
 .pblsh--assets-slots--boxes {
     gap: 1rem;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 421px), 421px));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--pblsh-asset-box-width)), var(--pblsh-asset-box-width)));
+}
+
+/* Icon & Banner: the two groups side by side, each a column as wide as a box, twice the card's
+   padding between them — clearly two things — and the padding to the footer and, stacked, between
+   them — the same distance as to the card's edge; the columns keep the box's width and go one
+   under the other where two do not fit. */
+.pblsh--assets-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--pblsh-asset-box-width)), var(--pblsh-asset-box-width)));
+    gap: var(--pblsh-assets-card-padding) calc(2 * var(--pblsh-assets-card-padding));
+}
+.pblsh--assets-columns > .pblsh--assets-group {
+    margin-bottom: 0;
+}
+.pblsh--assets-columns:has(+ .pblsh--assets-footer) {
+    margin-bottom: var(--pblsh-assets-card-padding);
 }
 
 .pblsh--asset-slot--box {
@@ -1852,14 +4249,6 @@
     margin-top: 0.5rem;
 }
 
-.pblsh--asset-slot__box-footer {
-    display: flex;
-    justify-content: flex-end;
-    padding: 0.25rem 0.375rem;
-    border-top: 1px solid var(--border-color-light);
-    background: #f9fafb;
-}
-
 /* Screenshot drag: cursor on the image area (the draggable element) */
 .pblsh--asset-slot__box-image[draggable="true"] {
     cursor: grab;
@@ -1879,9 +4268,822 @@
     outline-offset: -2px;
 }
 
-/* Caption text — shown right after the slot label */
-.pblsh--asset-slot__caption {
-    font-size: 0.9375rem;
-    color: #1e1e1e;
-    line-height: 1.4;
+/* A group's explanatory lines right under its label (where the screenshot captions come from). */
+.pblsh--assets-group__label + .pblsh--assets-group__hints {
+    margin-top: -0.5rem;
+}
+.pblsh--assets-group__hints {
+    color: #8c96a0;
+    margin-bottom: 1rem;
+}
+
+/* A box's explanatory line under its figures (a screenshot without caption). */
+.pblsh--asset-slot__hint {
+    color: #8c96a0;
+}
+
+/* wordpress.org: the band every slot carries (AssetStatusBand) — over a slot's box and over
+   the Live Preview, the assets tab's one base for it: what the commit will do with the slot,
+   or where its file stands on the plugin page. Grey at rest; the color comes from one
+   property, like the notice boxes, and changes with the state — blue and red where the user
+   can act (the control that takes the change back stands in the line then), orange for the
+   one warning — while the height never does: one line, the Live Preview's check line a second
+   beneath it. */
+.pblsh--assets-band {
+    --pblsh-band-color: #646970;
+    --pblsh-band-background: #f6f7f7;
+    --pblsh-band-border: var(--border-color-light);
+    --pblsh-band-sign: 16px;       /* the state's sign, as the component draws it */
+    --pblsh-band-gap: 0.375rem;    /* between the sign and the text: what the line beneath is indented by */
+    padding: 0.25rem 0.75rem;
+    color: var(--pblsh-band-color);
+    background: var(--pblsh-band-background);
+    border-bottom: 1px solid var(--pblsh-band-border);
+}
+.pblsh--assets-band--pending {
+    --pblsh-band-color: var(--color-blue);
+}
+.pblsh--assets-band--conflict {
+    --pblsh-band-color: var(--color-red);
+}
+.pblsh--assets-band--warning,
+.pblsh--assets-band--rejected {
+    --pblsh-band-color: var(--color-orange);
+}
+.pblsh--assets-band--pending,
+.pblsh--assets-band--conflict,
+.pblsh--assets-band--warning,
+.pblsh--assets-band--rejected {
+    --pblsh-band-background: color-mix(in srgb, var(--pblsh-band-color) 10%, #fff);
+    --pblsh-band-border: color-mix(in srgb, var(--pblsh-band-color) 30%, #fff);
+}
+/* The line: the state, and at its end the control that takes the change back. */
+.pblsh--assets-band__line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+/* The state's sign before its text, in the band's color and on its first line: a wrapped text
+   hangs under its own first word, not under the sign. */
+.pblsh--assets-band__text {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--pblsh-band-gap);
+    min-width: 0;
+}
+.pblsh--assets-band__icon {
+    display: flex;
+    flex: none;
+    margin-top: 0.0625rem;
+}
+/* The moment an import lands — the band turns from waiting to on the plugin page, from removed
+   to empty — the band lights up once, like the import card (pblsh-celebrate-glow); while it
+   waits, nothing moves. Ends at the resting background, so nothing snaps. */
+@media (prefers-reduced-motion: no-preference) {
+    .pblsh--assets-band--landed {
+        animation: pblsh--assets-band-landed 1.6s ease-out 1;
+    }
+}
+@keyframes pblsh--assets-band-landed {
+    0% { background-color: color-mix(in srgb, var(--color-green) 35%, #fff); }
+    100% { background-color: var(--pblsh-band-background); }
+}
+/* The way out of a warning, a line of its own under the fact — inside the label, so it
+   starts where the fact does —, in the text's own weight and color. */
+.pblsh--assets-band__note {
+    display: block;
+    font-weight: 400;
+    color: #1d2327;
+}
+/* The band's own control, outlined in the band's color and on the band's line, so the band
+   stays as high as its text. */
+.pblsh--assets-band .pblsh--assets-band__discard.components-button {
+    color: var(--pblsh-band-color);
+    border-color: currentColor;
+    height: auto;
+    min-height: 0;
+    line-height: inherit;
+    padding: 0 0.375rem;
+    margin-block: -1px;
+}
+.pblsh--assets-band .pblsh--assets-band__discard.components-button:hover:not(:disabled) {
+    color: var(--pblsh-band-color);
+    border-color: currentColor;
+    background: color-mix(in srgb, var(--pblsh-band-color) 12%, #fff);
+}
+/* The second line (the Live Preview's check), muted, under the first line's text — past the
+   sign and its gap —, its links on the text's baseline. */
+.pblsh--assets-band__detail {
+    padding-left: calc(var(--pblsh-band-sign) + var(--pblsh-band-gap));
+    color: #8c96a0;
+}
+.pblsh--assets-band__detail .components-button.is-link {
+    vertical-align: baseline;
+}
+
+/* wordpress.org: a conflict box — both states side by side at any width (a conflict is decided
+   at a desk; small images do no harm), each with the decision that takes it beneath. */
+.pblsh--asset-slot__conflict {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.75rem;
+}
+.pblsh--asset-slot__compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+.pblsh--asset-slot__compare-side {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+}
+.pblsh--asset-slot__compare-label {
+    font-weight: 600;
+}
+/* A row of its own for the frame: it shrinks to the picture's width, so the frame's height
+   (a percentage of its own width) follows the picture, not the side. */
+.pblsh--asset-slot__compare-picture {
+    display: flex;
+}
+/* The empty side: the slot's frame as a dashed outline, inert — no hover. */
+.pblsh--asset-slot__box-image--empty:hover {
+    border-color: transparent;
+}
+.pblsh--asset-slot__box-image--empty .pblsh--asset-slot__box-image-inner {
+    background: none;
+    outline: 1px dashed #c3c4c7;
+    outline-offset: -1px;
+}
+.pblsh--asset-slot__box-image--empty .pblsh--asset-slot__box-image-inner:hover {
+    box-shadow: none;
+}
+.pblsh--asset-slot__compare .pblsh--asset-slot__box-meta {
+    word-break: break-word;
+}
+/* The decision stands at the foot of its side — the sides stretch to one height, so the two
+   buttons share a baseline — and spans it, so both are one width whatever they say. */
+.pblsh--asset-slot__compare-decision {
+    display: flex;
+    margin-top: auto;
+    padding-top: 0.25rem;
+}
+.pblsh--asset-slot__compare-decision .components-button {
+    flex: 1;
+    justify-content: center;
+}
+
+/* wordpress.org: the files of assets/ the tab does not show, after the groups — closer to
+   the last group than the groups are to each other, set off by a rule. */
+.pblsh--assets-group:has(+ .pblsh--assets-footer) {
+    margin-bottom: 2rem;
+}
+.pblsh--assets-footer {
+    color: #8c96a0;
+    border-top: 1px solid var(--border-color-light);
+    padding-top: 1rem;
+}
+
+/* The assets tab's head: the sections Icon & Banner, Screenshots, Live Preview as a quiet row
+   of tabs inside the card, the active one underlined in the accent color, a dot after the name
+   while changes in the section wait for the commit — and, at the row's right end, the working
+   copy while there is one: its message and its actions. The tabs give the row its height and
+   the working copy fills it, so nothing beneath moves when changes come or go; while they are
+   there, the row carries the blue tint of the bands. The row is the card's head, the assets
+   tab's counterpart of the releases table's header: its type, its vertical padding and, at
+   rest, its gray. Flush with the card's top edge, over its padding, with the card's corners.
+   It sticks below the page header while the sections scroll under it; held there
+   (pblsh--assets-subtabs--stuck, set from its sentinel, which stands where the row rests) it
+   loses the corners and shows a shadow. Wraps on narrow screens. */
+.pblsh--assets-subtabs__sentinel {
+    margin-top: calc(-1 * var(--pblsh-assets-card-padding));   /* collapses with the row's: both at the card's edge */
+}
+.pblsh--assets-subtabs {
+    position: sticky;
+    top: var(--pblsh-sticky-top);
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    margin: calc(-1 * var(--pblsh-assets-card-padding)) calc(-1 * var(--pblsh-assets-card-padding)) 2rem;
+    padding: 0 var(--pblsh-assets-card-padding);
+    border-bottom: 1px solid var(--border-color-light);
+    border-radius: inherit;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    background: #f9f9f9;
+    font-size: 0.875rem;
+    transition: background-color .3s, border-color .3s, box-shadow .3s;
+}
+.pblsh--assets-subtabs--working-copy {
+    border-bottom-color: color-mix(in srgb, var(--color-blue) 30%, #fff);
+    background: color-mix(in srgb, var(--color-blue) 10%, #fff);
+}
+.pblsh--assets-subtabs--stuck {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    box-shadow: 0 0.375rem 1rem rgba(0, 0, 0, 0.15);
+}
+.pblsh--assets-subtabs__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1.25rem;
+}
+.pblsh--assets-subtabs__tab {
+    margin: 0 0 -1px;
+    padding: var(--content-padding-block) 0;   /* the row's height, as the table header's */
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    font: inherit;
+    font-weight: 500;
+    color: #666;
+    cursor: pointer;
+}
+.pblsh--assets-subtabs__tab:hover:not(.pblsh--assets-subtabs__tab--active) {
+    color: #23282d;
+}
+.pblsh--assets-subtabs__tab--active {
+    color: #23282d;
+    font-weight: 600;
+    border-bottom-color: var(--color-blue);
+}
+.pblsh--assets-subtabs__pending {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-left: 0.375rem;
+    border-radius: 50%;
+    background: var(--color-blue);
+    vertical-align: middle;
+}
+/* The working copy at the row's right end: one message, then the actions. */
+.pblsh--assets-subtabs__working-copy {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.25rem 0.75rem;
+    margin-left: auto;
+}
+.pblsh--assets-subtabs__working-copy-text {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.pblsh--assets-subtabs__working-copy-text .components-spinner {
+    margin: 0;
+}
+.pblsh--assets-subtabs__working-copy-conflicts {
+    color: var(--color-red);
+}
+.pblsh--assets-subtabs__working-copy-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
+/* The Live Preview section: fixed zones in a column — the introduction, the box, Set up; in
+   the box the notices, the fields with the JSON beside them, the actions, the other files — as
+   flowing content: each block brings its spacing below, the last one none. The box clips the
+   band's corners, like a slot's box; its body has the card's padding. The section is the
+   container the box's widths are measured in. */
+.pblsh--live-preview {
+    container-type: inline-size;
+}
+.pblsh--live-preview > *,
+.pblsh--live-preview__body > * {
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+}
+.pblsh--live-preview > :last-child,
+.pblsh--live-preview__body > :last-child {
+    margin-bottom: 0;
+}
+/* The box takes half the section while it shows one column — the fields, or the band alone —
+   and the whole section with two: the JSON beside the fields, or the conflict's two files. A
+   column keeps its width when the box doubles: the gap between the two columns is twice the
+   body's padding, so half the section less two paddings is what the whole section less two
+   paddings and the gap gives each of two columns; and the half box is half the section plus one
+   border, since it carries both of its borders on its one column while the whole box carries
+   one on each. */
+.pblsh--live-preview__box {
+    --pblsh-live-preview-gap: calc(2 * var(--pblsh-assets-card-padding));
+    box-sizing: border-box;
+    width: calc(50% + var(--pblsh-assets-box-border));
+    overflow: hidden;
+}
+.pblsh--live-preview__box--wide {
+    width: 100%;
+}
+.pblsh--live-preview__body {
+    padding: var(--pblsh-assets-card-padding);
+}
+/* A body holding nothing but the other files (a delete waiting for the commit or the import):
+   the footer's rule would only underline the band. */
+.pblsh--live-preview__body > .pblsh--assets-footer:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+/* The main row: the fields' column, headed by the switch at its right end, and in expert mode
+   the JSON in a second column of the same width, from the switch's line down; the fields take
+   their height from their controls, the editor stretches to it. The container query above
+   folds the two columns into one where they do not fit. */
+.pblsh--live-preview__main-head {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.75rem;
+}
+.pblsh--live-preview__main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 1.5rem var(--pblsh-live-preview-gap);
+}
+.pblsh--live-preview__main--two-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* Below the width that gives two columns of 24rem each (two columns, the gap of 3rem, the
+   body's padding of 1.5rem on both sides), the JSON goes beneath the fields — and the box takes
+   the whole section in either mode, so switching the mode moves nothing. After the rules it overrides. */
+@container (max-width: 54rem) {
+    .pblsh--live-preview__box {
+        width: 100%;
+    }
+    .pblsh--live-preview__main--two-columns {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+.pblsh--live-preview__fields,
+.pblsh--live-preview__editor {
+    min-width: 0;
+}
+/* The section's introduction: one muted line with its tip, like a group's hints line — spaced by the flow rule. */
+.pblsh--live-preview__intro {
+    color: #8c96a0;
+}
+
+/* The fields, label above control, one after the other; the label line carries the field's
+   state at its right end, so it keeps its height whatever it says. */
+.pblsh--live-preview__field {
+    margin: 0 0 1.25rem;
+}
+.pblsh--live-preview__field:last-child {
+    margin-bottom: 0;
+}
+.pblsh--live-preview__field-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 0.375rem;
+    font-weight: 600;
+}
+.pblsh--live-preview__field-state {
+    font-weight: 400;
+    color: #8c96a0;
+}
+.pblsh--live-preview__field-error {
+    margin-top: 0.375rem;
+    color: var(--color-red);
+}
+/* The plugins as rows, and the theme as one, in framed tables (pblsh--framed-table): the
+   identity, the fact beside it — muted, red where the preview would stop (a required plugin not
+   installed, a plugin or theme the directory lacks). Fixed layout: the fact column has its
+   width, the identity the rest, and an overlong slug ellipsizes instead of widening the table
+   past its frame. */
+.pblsh--live-preview__plugins,
+.pblsh--live-preview__theme,
+.pblsh--live-preview__landing {
+    margin: 0 0 0.5rem;
+}
+/* The landing page's box: controls, not rows — padded like a cell, gray like the tables' feet,
+   the advice above the fields, read before anyone acts. */
+.pblsh--live-preview__landing {
+    padding: 0.75rem;
+    background: #f6f7f7;
+}
+.pblsh--live-preview__landing-lead {
+    margin: 0 0 0.75rem;
+}
+/* The landing page's fact in place of its controls, muted like a row's fact: a line of the box, no column. */
+.pblsh--live-preview__landing-fact {
+    color: #8c96a0;
+}
+.pblsh--live-preview__plugins-table,
+.pblsh--live-preview__theme-table {
+    table-layout: fixed;
+}
+.pblsh--live-preview__row-fact {
+    width: 11rem;
+    color: #8c96a0;
+}
+/* The tables' foot (pblsh--live-preview__foot), gray like the import table's add row, the frame
+   its edge. The plugins': the link, then the question with its answers, then the guidance under
+   its own heading with OK, or the field with Add and Cancel. The theme's: the link, then the
+   field with Change and Cancel, the hint under it. */
+.pblsh--framed-table .pblsh--live-preview__foot {
+    border-bottom: 0;
+    background: #f6f7f7;
+}
+.pblsh--live-preview__foot-question {
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+.pblsh--live-preview__foot-text {
+    margin-bottom: 0.75rem;
+}
+.pblsh--live-preview__foot-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+/* A line of controls — a field with its buttons —, in a foot or in the landing page's box. */
+.pblsh--live-preview__controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+.pblsh--live-preview__controls .components-base-control {
+    flex: 1;
+}
+/* The landing page's: the choice keeps its width; the path field takes the rest of the line
+   beside Change, or a line of its own when the rest is too little for a path. */
+.pblsh--live-preview__controls .pblsh--live-preview__landing-choice {
+    flex: 0 0 auto;
+}
+.pblsh--live-preview__controls .pblsh--live-preview__landing-path {
+    flex: 1 1 10rem;
+}
+.pblsh--live-preview__foot-hint {
+    margin-top: 0.375rem;
+    color: #8c96a0;
+}
+.pblsh--live-preview__row-fact--missing {
+    color: var(--color-red);
+}
+/* An activation redirect still open under an admin landing page: the warning under the fact, with the step's link. */
+.pblsh--live-preview__row-fact-warning {
+    margin-top: 0.25rem;
+    color: var(--color-orange);
+}
+.pblsh--live-preview__more {
+    margin-top: 1.25rem;
+    color: #8c96a0;
+}
+
+/* The JSON beside the fields: a column whose box the editor fills — a framed box with a gray
+   head naming the file by its path, the editor in its body, and a foot gray like the head:
+   the save line at the left, wordpress.org's guide at the right. The body's own height is
+   the one min-height, never its content's, so beside the fields the box stretches to their
+   height and beneath them it keeps the min-height and scrolls. */
+.pblsh--live-preview__editor {
+    display: flex;
+    flex-direction: column;
+}
+.pblsh--live-preview__editor-box {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    border: 1px solid #dcdcde;
+    border-radius: 0.25rem;
+}
+.pblsh--live-preview__editor-head,
+.pblsh--live-preview__editor-foot {
+    padding: 0.25rem 0.75rem;
+    background: #f6f7f7;
+    color: #646970;
+    font-size: 0.8125rem;
+}
+.pblsh--live-preview__editor-head {
+    border-bottom: 1px solid var(--border-color-light);
+}
+.pblsh--live-preview__editor-head code {
+    padding: 0;
+    background: transparent;
+    font-size: inherit;
+    color: inherit;
+}
+.pblsh--live-preview__editor-body {
+    position: relative;
+    flex: 1;
+    min-height: 20rem;
+}
+.pblsh--live-preview__editor-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.25rem 1rem;
+    border-top: 1px solid var(--border-color-light);
+}
+.pblsh--live-preview__save--error {
+    color: var(--color-red);
+}
+
+/* The editor fills the box it is given — the frame is the box's: WordPress's code editor, or
+   the plain textarea, both without a border of their own. */
+.pblsh--blueprint-editor {
+    position: absolute;
+    inset: 0;
+}
+.pblsh--blueprint-editor .CodeMirror {
+    height: 100%;
+    font-size: 0.8125rem;
+}
+.pblsh--blueprint-editor__textarea {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 0;
+    resize: none;
+    font-family: Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+}
+
+/* The actions on the blueprint in one row at the box's right edge: the test, the menu — they
+   move with the edge when the box widens. */
+.pblsh--live-preview__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Changed here and on wordpress.org: both files side by side, each with its decision. */
+.pblsh--live-preview__json {
+    max-height: 32rem;
+    margin: 0;
+    padding: 0.75rem 1rem;
+    overflow: auto;
+    border: 1px solid var(--border-color-light);
+    border-radius: 0.25rem;
+    background: #f6f7f7;
+    font-size: 0.8125rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.pblsh--live-preview__compare {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+.pblsh--live-preview__compare-side {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+}
+.pblsh--live-preview__compare-label {
+    font-weight: 600;
+}
+.pblsh--live-preview__compare-empty {
+    flex: 1;
+    padding: 2rem 1rem;
+    border: 1px dashed #c3c4c7;
+    border-radius: 0.25rem;
+    color: #8c96a0;
+    text-align: center;
+}
+.pblsh--live-preview__compare-side .pblsh--live-preview__json {
+    flex: 1;
+}
+.pblsh--live-preview__compare-decision .components-button {
+    width: 100%;
+    justify-content: center;
+}
+
+/* The publish path row (channel + slug) — the dialog's first row, pinned above the release
+   block: the destination comes first, everything below derives from it. */
+.pblsh--upload-result .pblsh--publish-path {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.125rem 2rem;
+    border-bottom: 1px solid var(--border-color-light);
+    background: var(--surface-color);
+}
+
+.pblsh--upload-result .pblsh--publish-path__value {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+}
+
+.pblsh--upload-result .pblsh--publish-path__sep {
+    display: inline-flex;
+    color: #757575;
+}
+
+/* Publish-path controls: channel and slug share the same trigger/panel anatomy */
+.pblsh--upload-result .pblsh--publish-path__trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding-block: 0.25rem;
+    border-radius: 3px;
+}
+
+.pblsh--upload-result button.pblsh--publish-path__trigger {
+    border: 1px solid var(--border-color-light);
+    background: #fff;
+    padding-inline: 0.5rem;
+}
+
+/* Hover only while the trigger can be used — not while the dialog is busy. */
+.pblsh--upload-result button.pblsh--publish-path__trigger:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--color-blue) 45%, var(--border-color-light));
+}
+
+.pblsh--upload-result .pblsh--publish-path__trigger-icon,
+.pblsh--upload-result .pblsh--publish-path__chevron {
+    display: inline-flex;
+}
+
+.pblsh--upload-result .pblsh--publish-path__chevron {
+    color: #757575;
+}
+
+.pblsh--upload-result .pblsh--publish-path__select {
+    position: relative;
+}
+
+.pblsh--upload-result .pblsh--publish-path__options {
+    position: absolute;
+    top: calc(100% + 4px);
+    inset-inline-start: 0;
+    z-index: 10;
+    width: max-content;
+    max-width: calc(100vw - 5rem);
+    /* The dialog clips overflowing content (overflow: hidden for the rounded corners), so the
+       panel caps its height and only the option list inside scrolls — the custom-slug footer
+       stays outside the scroll area. The inset lives on the inner containers so the list's
+       scrollbar sits at the panel edge; overflow: hidden clips it at the border radius. */
+    /* Fallback estimate for browsers without CSS anchor positioning (older Safari, Firefox
+       ESR < 147) — capable browsers get the anchored panel with the real available space
+       in the @supports block below. Remove this fallback once that base has died out. */
+    max-height: min(24rem, 55vh);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid var(--border-color-light);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Scrollable option list inside the panel */
+.pblsh--upload-result .pblsh--publish-path__list {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0.25rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* Anchor-positioned panel: position: fixed escapes the dialog's overflow clipping, the
+   anchor keeps it glued to the trigger, and the height uses the space actually available
+   below it (flipping above when that fits better). The gate tests position-area — not just
+   anchor-name — because Chrome 125–128 shipped anchor-name with the older area syntax. */
+@supports (anchor-name: --pblsh-probe) and (position-area: block-end) {
+    .pblsh--upload-result .pblsh--publish-path__trigger {
+        anchor-name: --pblsh-publish-path-trigger;
+    }
+
+    .pblsh--upload-result .pblsh--publish-path__options {
+        position: fixed;
+        position-anchor: --pblsh-publish-path-trigger;
+        /* Area below the trigger, growing toward inline-end — mirrors the fallback's placement. */
+        position-area: block-end span-inline-end;
+        position-try-fallbacks: flip-block;
+        top: auto;
+        inset-inline-start: auto;
+        /* 100% = the anchor area's height, i.e. the real space below (or above) the trigger. */
+        max-height: calc(100% - 0.5rem);
+    }
+}
+
+.pblsh--upload-result .pblsh--publish-path__option {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    padding: 0.5rem;
+    border: 0;
+    border-radius: 3px;
+    background: none;
+    text-align: start;
+    line-height: inherit;
+}
+
+.pblsh--upload-result .pblsh--publish-path__option:not(:disabled):hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.pblsh--upload-result .pblsh--publish-path__option.is-selected {
+    background: color-mix(in srgb, var(--color-blue) 8%, #fff);
+}
+
+/* Shared destination-option anatomy — an explicitly shared base owned by the upload-result
+   destination UI: the publish-path panel and the destination-choice list render the same
+   "channel → slug" option content; the interactive chrome stays with each context. */
+.pblsh--upload-result .pblsh--destination-option__text {
+    display: block;
+    flex: 1;
+    min-width: 0;
+}
+
+.pblsh--upload-result .pblsh--destination-option__headline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.pblsh--upload-result .pblsh--destination-option__icon {
+    display: inline-flex;
+}
+
+.pblsh--upload-result .pblsh--destination-option__sep {
+    display: inline-flex;
+    color: #757575;
+}
+
+.pblsh--upload-result .pblsh--destination-option__slug {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+    margin-inline-end: .5rem;
+}
+
+.pblsh--upload-result .pblsh--destination-option__desc {
+    display: block;
+    color: #757575; /* ≈4.6:1 on white — the lightest AA-safe gray; do not lighten. */
+    /* Aligns with the label text: icon size (18px, see getSvgIcon call in renderDestinationOptionText) + headline gap — keep all three in sync. */
+    margin-inline-start: calc(18px + 0.375rem);
+    margin-block-start: .125rem;
+}
+
+.pblsh--upload-result .pblsh--destination-option__badge {
+    display: inline-flex;
+    align-items: center;
+    margin-inline-start: auto;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    font-weight: 600;
+}
+
+.pblsh--upload-result .pblsh--destination-option__badge.is-existing {
+    /* Badge family: same green as the NEW PLUGIN header badge (.pblsh--upload-result--newplugin) — keep both in sync. */
+    background-color: color-mix(in srgb, var(--color-green) 70%, #000);
+    color: #fff;
+}
+
+.pblsh--upload-result .pblsh--destination-option__badge.is-new {
+    /* Outline only: green stays the "existing match" signal, new destinations read as quiet. */
+    padding-block: calc(0.25rem - 1px);
+    border: 1px solid #757575;
+    color: #757575;
+}
+
+/* Custom slug input as the panel's footer, outside the scrollable list — carries its own
+   inset (the panel has none), so its separator runs edge to edge. */
+.pblsh--upload-result .pblsh--publish-path__options .pblsh--slug-edit {
+    flex: none;
+    padding: 0.5rem;
+    border-top: 1px solid var(--border-color-light);
+}
+
+/* Inline slug editor inside the identity row */
+.pblsh--upload-result .pblsh--slug-edit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pblsh--upload-result .pblsh--slug-edit__error {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--color-red);
 }

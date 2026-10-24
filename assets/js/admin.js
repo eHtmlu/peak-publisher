@@ -3,22 +3,41 @@ document.addEventListener('DOMContentLoaded', function() {
     'use strict';
     
     const { __, sprintf } = wp.i18n;
-    const { useState, useEffect, useRef, createElement, render } = wp.element;
+    const { useState, useEffect, useRef, createElement, createPortal, Fragment, render } = wp.element;
     const { useSelect } = wp.data;
     const { Button } = wp.components;
-    const { PluginList, PluginAdditionProcess, PluginEditor/* , SuccessMessage */ , GlobalDropOverlay, Settings } = window.Pblsh.Components;
-    const { showAlert, getDefaultConfig } = Pblsh.Utils;
+    const { PluginList, PluginAdditionProcess, PluginEditor, GlobalDropOverlay, Settings, TipDialog, UpgradeNotice, NoticeBox } = window.Pblsh.Components;
+    const { showAlert } = Pblsh.Utils;
+    const { getImportWatchAt } = Pblsh.AssetsUtils;
+    const IMPORT_WATCH_INTERVAL = 60000;   // ms between two looks of the import watch
+
+    // The page's header place (AdminUI::render_peak_publisher()): every view renders the app's
+    // name and its actions into it through a portal — the place itself sticks below the admin bar.
+    const headerPlace = document.getElementById('pblsh-header');
+    // The page column (AdminUI::render_peak_publisher()): a scroll frame like the dialogs'
+    // (ScrollFrame.js), with the sticky header and footer as its edges — it carries
+    // is-clipped-top / is-clipped-bottom while content continues under either. The window
+    // is its scroller, so the app measures it (measurePage).
+    const pageElement = headerPlace.closest('.pblsh-app');
+
+    // Notices WordPress leaves above the page — its mover (common.js) skips those marked
+    // "inline", the core update nag among them — go right before its marker at the top of
+    // .wrap: the header attaches to the admin bar, and they lead the notices WordPress moves
+    // after the marker. Before it, not after: whichever of the two movers runs first, the order
+    // comes out the same.
+    document.querySelector('.pblsh-app .wp-header-end').before(...document.querySelectorAll('#wpbody-content > :is(div.updated, div.error, div.notice)'));
 
     // Permalink check — shown instead of the app when permalinks are set to "Plain"
     const PermalinkNotice = () => {
         const { permalinkPlain, permalinkDayAndName } = PblshData.i18n;
-        return createElement('div', { className: 'pblsh-app' },
-            createElement('div', { className: 'pblsh--header' },
-                createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher'))
+        return createElement(Fragment, null,
+            createPortal(
+                createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
+                headerPlace
             ),
             createElement('div', { className: 'pblsh--permalink-notice' },
                 createElement('div', { className: 'pblsh--permalink-notice__icon' },
-                    Pblsh.Utils.getSvgIcon('chat_alert', { size: 48 })
+                    Pblsh.Utils.getSvgIcon('alert_outline', { size: 48 })
                 ),
                 createElement('h3', { className: 'pblsh--permalink-notice__title' },
                     __('Pretty Permalinks Required', 'peak-publisher')
@@ -48,6 +67,33 @@ document.addEventListener('DOMContentLoaded', function() {
         );
     };
 
+    // A plugin's tabs — its releases and its assets view — loaded behind what the stores hold;
+    // a failure is reported like any load.
+    const loadPluginTabs = (id) => {
+        window.Pblsh.Controllers.Releases.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
+        window.Pblsh.Controllers.Assets.fetchForPlugin(id).catch((e) => showAlert(e.message, 'error'));
+    };
+
+    // What an answer from wordpress.org changes beyond the store, whoever asked — the automatic
+    // check (every plugin, whatever is due), the editor's Refresh link (that plugin, straight
+    // against SVN), the import watch (that plugin's stamp). The store took the rows; a plugin
+    // whose copy moved underneath this client (Controllers.Plugins.refreshWporg: its token
+    // differs — the SVN copy, the directory stamp, the working copy, whoever moved it; the row
+    // brings the forecast) also gets its tabs reloaded, so its header and its tabs show the
+    // same state. Which plugins that concerns is decided when the answer arrives: every one
+    // whose tabs the client holds or is loading by then, whichever view the request started
+    // from. A wordpress.org plugin added or removed elsewhere — another tab, another admin — is
+    // no row's news: the list is loaded anew.
+    const takeWporgAnswer = ({ moved, listOutdated }) => {
+        const releases = wp.data.select('pblsh/releases');
+        moved.filter((id) => releases.hasLoadedForPlugin(id) || releases.isLoadingForPlugin(id)).forEach(loadPluginTabs);
+        if (listOutdated) {
+            window.Pblsh.Controllers.Plugins.fetchList().catch((e) => showAlert(e.message, 'error'));
+        }
+    };
+    const refreshWporg = async (pluginId = null) => takeWporgAnswer(await window.Pblsh.Controllers.Plugins.refreshWporg(pluginId));
+    const watchWporgImport = async (pluginId) => takeWporgAnswer(await window.Pblsh.Controllers.Plugins.watchWporgImport(pluginId));
+
     // Main App Component
     const PeakPublisherApp = () => {
         // Block the entire app when permalinks are set to "Plain"
@@ -58,6 +104,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const [view, setView] = useState('list'); // 'list' | 'editor' | 'addition-process'
         const [currentPluginId, setCurrentPluginId] = useState(null);
         const [initialTab, setInitialTab] = useState(null);
+        const [initialSection, setInitialSection] = useState(null);   // the assets tab's section
+        const [additionInitial, setAdditionInitial] = useState(null); // deep-link seed for the addition process
+        // Every start of the add-new flow — "Add New Plugin", "Import plugins…" from the settings,
+        // a deep link — is a fresh run: the flow reads where it starts when it mounts.
+        const [additionRun, setAdditionRun] = useState(0);
+        const [activeUploadContext, setActiveUploadContext] = useState({});
         const isLoading = useSelect((select) => select('pblsh/plugins').isLoadingList(), []);
         const hasLoadedList = useSelect((select) => {
             try { return !!select('pblsh/plugins').hasLoadedList(); } catch (e) { return false; }
@@ -67,9 +119,81 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const [isNew, setIsNew] = useState(false);
         const settingsDialogRef = useRef(null);
-        const pendingReleaseStatus = useSelect((select) => select('pblsh/releases').getPendingReleaseIds(), []);
-        const isLoadingReleases = useSelect((select) => currentPluginId ? select('pblsh/releases').isLoadingForPlugin(currentPluginId) : false, [currentPluginId]);
         const currentPlugin = useSelect((select) => currentPluginId ? select('pblsh/plugins').getById(currentPluginId) : null, [currentPluginId]);
+
+        // While the list or a plugin is in view, what it shows of wordpress.org is at most one
+        // check interval old. The server keeps the one clock — a stamp check at most every five
+        // minutes, site-wide — and names with every answer when the next check is due; the client
+        // asks then and not before, so in between this costs neither server a request. That
+        // moment is the timer's to find, and every look's that comes after it: showing the list,
+        // opening a plugin, the browser tab coming back into view or getting the focus. A hidden
+        // tab asks nothing. A failed check stays quiet; the status line says how old the data is,
+        // and the editor's Refresh link reports its own.
+        const nextWporgCheckAt = useSelect((select) => select('pblsh/plugins').getNextWporgCheckAt(), []);
+        const showsWporgData = hasLoadedList && (view === 'list' || view === 'editor')
+            && plugins.some((plugin) => plugin.hosting_type === 'wporg');
+        const askWporg = wp.element.useCallback(() => {
+            if (!showsWporgData || document.visibilityState !== 'visible' || wp.data.select('pblsh/plugins').isRefreshingWporg()) return;
+            refreshWporg().catch(() => {});
+        }, [showsWporgData]);
+        // The timer asks when it fires — its running out is the moment, whatever a clock read a
+        // millisecond early would say; a look asks when the moment has passed.
+        useEffect(() => {
+            const timer = setTimeout(askWporg, Math.max(0, nextWporgCheckAt - Date.now()));
+            return () => clearTimeout(timer);
+        }, [nextWporgCheckAt, askWporg]);
+        const checkWporg = wp.element.useCallback(() => {
+            if (Date.now() >= wp.data.select('pblsh/plugins').getNextWporgCheckAt()) askWporg();
+        }, [askWporg]);
+        useEffect(() => { checkWporg(); }, [view, currentPluginId, checkWporg]);
+        useEffect(() => {
+            document.addEventListener('visibilitychange', checkWporg);
+            window.addEventListener('focus', checkWporg);
+            return () => {
+                document.removeEventListener('visibilitychange', checkWporg);
+                window.removeEventListener('focus', checkWporg);
+            };
+        }, [checkWporg]);
+        // What a refresh found changed on wordpress.org is told while the plugin stands open;
+        // leaving it settles that.
+        useEffect(() => () => {
+            if (currentPluginId) wp.data.dispatch('pblsh/plugins').clearWporgChanges(currentPluginId);
+        }, [currentPluginId]);
+
+        // The import watch: after an own commit, while a forecast stands that the stamp can end
+        // (its `watch`: assets to show, the current release's folder touched), the plugin's stamp
+        // is compared every minute from the forecast's time on, for ten minutes
+        // (AssetsUtils.getImportWatchAt()) — with the editor showing this plugin and the tab
+        // visible, nothing else. The moment is a function of the state — the forecast, the clock
+        // —, not of the session: whoever leaves the editor or the tab and comes back inside the
+        // window is in the beat at once. Before the forecast's time one timer to it; after the
+        // window nothing but the five-minute clock. A stamp that moved comes back as the plugin's
+        // row (takeWporgAnswer: the forecast and the bands follow); one that did not is asked
+        // again a minute later.
+        const importForecast = view === 'editor' && currentPlugin && currentPlugin.hosting_type === 'wporg' ? currentPlugin.wporg_import : null;
+        const [importWatchRun, setImportWatchRun] = useState(0);
+        const lastImportWatch = useRef({ id: null, at: 0 });
+        useEffect(() => {
+            const reconsider = () => setImportWatchRun((run) => run + 1);
+            document.addEventListener('visibilitychange', reconsider);
+            window.addEventListener('focus', reconsider);
+            return () => {
+                document.removeEventListener('visibilitychange', reconsider);
+                window.removeEventListener('focus', reconsider);
+            };
+        }, []);
+        useEffect(() => {
+            if (!importForecast || document.visibilityState !== 'visible') return undefined;
+            const now = Date.now();
+            const due = getImportWatchAt(importForecast, now);
+            if (due === null) return undefined;
+            const last = lastImportWatch.current.id === currentPluginId ? lastImportWatch.current.at : 0;
+            const timer = setTimeout(() => {
+                lastImportWatch.current = { id: currentPluginId, at: Date.now() };
+                watchWporgImport(currentPluginId).catch(() => {}).finally(() => setImportWatchRun((run) => run + 1));
+            }, Math.max(0, Math.max(due, last + IMPORT_WATCH_INTERVAL) - now));
+            return () => clearTimeout(timer);
+        }, [currentPluginId, importForecast && importForecast.expected_at, importForecast && importForecast.watch, importWatchRun]);
 
         // Helpers for URL state
         const parseQuery = () => {
@@ -79,6 +203,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     plugin: params.get('plugin'),
                     view: params.get('view'),
                     tab: params.get('tab'),
+                    section: params.get('section'),
+                    channel: params.get('channel'),
+                    import: params.get('import'),
                 };
             } catch (e) {
                 return { plugin: null, view: null };
@@ -87,40 +214,51 @@ document.addEventListener('DOMContentLoaded', function() {
         const setQuery = (next) => {
             try {
                 const params = new URLSearchParams(window.location.search);
-                if ('plugin' in next) {
-                    if (next.plugin) { params.set('plugin', String(next.plugin)); } else { params.delete('plugin'); }
-                }
-                if ('view' in next) {
-                    if (next.view) { params.set('view', String(next.view)); } else { params.delete('view'); }
-                }
-                if ('tab' in next) {
-                    if (next.tab) { params.set('tab', String(next.tab)); } else { params.delete('tab'); }
-                }
+                ['plugin', 'view', 'tab', 'section', 'channel', 'import'].forEach((key) => {
+                    if (key in next) {
+                        if (next[key]) { params.set(key, String(next[key])); } else { params.delete(key); }
+                    }
+                });
                 const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
                 window.history.replaceState({}, '', newUrl);
             } catch (e) {}
         };
 
-        // Load plugins on mount + restore view from URL
-        useEffect(() => {
-            (async () => {
-                try { await window.Pblsh.Controllers.Settings.fetch(); } catch (e) {}
+        // What the app starts with: the settings, the wordpress.org accounts, the plugins, then
+        // the view the URL names. A list that cannot be loaded is told in its place, with the
+        // way to try again — nothing else can start without it.
+        const [listError, setListError] = useState(null);
+        const loadApp = async () => {
+            setListError(null);
+            // Independent of each other, so in one go; a failure is told where it matters
+            // (the settings dialog, the account form), not here.
+            await Promise.all([
+                window.Pblsh.Controllers.Settings.fetch().catch(() => {}),
+                window.Pblsh.Controllers.WporgAccounts.fetch().catch(() => {}),
+            ]);
+            try {
                 await window.Pblsh.Controllers.Plugins.fetchList();
-                const q = parseQuery();
-                if (q && q.plugin) {
-                    const idNum = Number(q.plugin);
-                    if (!isNaN(idNum)) {
-                        if (q.tab) setInitialTab(q.tab);
-                        await handleEdit(idNum);
-                        return;
-                    }
-                }
-                if (q && q.view === 'addition') {
-                    handleAddNewPlugin();
+            } catch (error) {
+                setListError(error);
+                return;
+            }
+            const q = parseQuery();
+            if (q && q.plugin) {
+                const idNum = Number(q.plugin);
+                if (!isNaN(idNum)) {
+                    if (q.tab) setInitialTab(q.tab);
+                    if (q.section) setInitialSection(q.section);
+                    await handleEdit(idNum);
                     return;
                 }
-            })();
-        }, []);
+            }
+            if (q && q.view === 'addition') {
+                // Deep link: ?view=addition&channel=wporg&import=open opens the wporg
+                // import route directly (used by the Settings account card).
+                handleAddNewPlugin(q.channel || q.import ? { channel: q.channel, importOpen: q.import === 'open' } : null);
+            }
+        };
+        useEffect(() => { loadApp(); }, []);
 
         
         const togglePluginStatus = async (pluginId, nextStatus) => {
@@ -131,37 +269,52 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
 
-        const toggleReleaseStatus = async (releaseId, nextStatus) => {
-            try {
-                if (!currentPluginId) return;
-                await window.Pblsh.Controllers.Releases.toggleReleaseStatus(currentPluginId, releaseId, nextStatus);
-            } catch (error) {
-                showAlert(error.message, 'error');
-            }
-        };
 
 
-        const handleAddNewPlugin = () => {
+        const handleAddNewPlugin = (initial = null) => {
             // keep local draft for UI only
             setIsNew(true);
+            setActiveUploadContext({});
+            setAdditionInitial(initial && typeof initial === 'object' ? initial : null);
+            setAdditionRun((run) => run + 1);
             setView('addition-process');
-            setQuery({ view: 'addition', plugin: null });
+            setQuery({
+                view: 'addition',
+                plugin: null,
+                channel: initial?.channel || null,
+                import: initial?.importOpen ? 'open' : null,
+            });
+        };
+
+        const handleAdditionStateChange = ({ channel = null, importOpen = false } = {}) => {
+            // The wizard reports its route; the URL mirrors it so reloads and
+            // copied links land where the user actually is.
+            setQuery({ channel: channel || null, import: importOpen ? 'open' : null });
+        };
+
+        const handleOpenWporgImport = () => {
+            // "Import plugins…" from the Settings account card — the import's single home
+            // is the add-new flow's wporg "Add" step.
+            closeSettings();
+            handleAddNewPlugin({ channel: 'wporg', importOpen: true });
         };
 
         const handleEdit = async (id) => {
             try {
                 setIsNew(false);
                 setView('editor');
+                setActiveUploadContext({});
                 setCurrentPluginId(id);
-                setQuery({ plugin: id, view: null });
+                setQuery({ plugin: id, view: null, channel: null, import: null });
                 await window.Pblsh.Controllers.Plugins.fetchById(id);
-                try {
-                    const sel = wp.data.select('pblsh/releases');
-                    const alreadyLoaded = typeof sel.hasLoadedForPlugin === 'function' ? sel.hasLoadedForPlugin(id) : false;
-                    if (!alreadyLoaded) {
-                        await window.Pblsh.Controllers.Releases.fetchForPlugin(id);
-                    }
-                } catch (e) {}
+                // Not there — removed elsewhere, or a link to a plugin that is gone: nothing to
+                // load, the effect on the open plugin says so and returns to the list.
+                if (!wp.data.select('pblsh/plugins').getById(id)) return;
+                // The plugin may have changed outside this client since the last visit. What the
+                // server holds comes with this load; whether wordpress.org moved since is the
+                // directory check's to find out (checkWporg, asked by this very open) — its
+                // answer reloads the tabs again.
+                loadPluginTabs(id);
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -174,7 +327,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (currentPluginId === plugin.id) setCurrentPluginId(null);
             } catch (error) {
                 showAlert(error.message, 'error');
-                window.Pblsh.Controllers.Plugins.fetchList();
+                // What the server holds now, whatever the failed delete left behind.
+                window.Pblsh.Controllers.Plugins.fetchList().catch((e) => showAlert(e.message, 'error'));
             }
         };
 
@@ -185,8 +339,19 @@ document.addEventListener('DOMContentLoaded', function() {
             setCurrentPluginId(null);
             setIsNew(false);
             setInitialTab(null);
-            setQuery({ plugin: null, view: null, tab: null });
+            setInitialSection(null);
+            setActiveUploadContext({});
+            setQuery({ plugin: null, view: null, tab: null, section: null, channel: null, import: null });
         };
+
+        // The open plugin is gone from the list — removed elsewhere while it stood open, or a
+        // link to one that no longer exists: said once, then back to the list.
+        useEffect(() => {
+            if (view === 'editor' && currentPluginId && hasLoadedList && !currentPlugin) {
+                showAlert(__('This plugin no longer exists. It was removed in the meantime.', 'peak-publisher'), 'warning');
+                handleCancel();
+            }
+        }, [view, currentPluginId, currentPlugin, hasLoadedList]);
 
 
         const openSettings = () => {
@@ -200,64 +365,86 @@ document.addEventListener('DOMContentLoaded', function() {
             try { if (dlg.open) dlg.close(); } catch (e) {}
         };
 
-        // Render header based on current view
+        // The page's clipping and the docked title, measured on scroll, on resize, when the
+        // page's size changes and after every render, since the content follows the state —
+        // the counterpart of ScrollFrame's measure for the window. The view's title in the
+        // body (data-pblsh-title: the editor's plugin name, the add-new flow's heading) docks
+        // into the header once it has scrolled under it: the header's center then shows it in
+        // place of the app's label.
+        const [docked, setDocked] = useState(false);
+        const measurePage = wp.element.useCallback(() => {
+            const scroller = document.scrollingElement;
+            pageElement.classList.toggle('is-clipped-top', scroller.scrollTop > 0);
+            pageElement.classList.toggle('is-clipped-bottom', scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1);
+            const title = document.querySelector('[data-pblsh-title]');
+            const isDocked = !!title && title.getBoundingClientRect().bottom <= headerPlace.getBoundingClientRect().bottom;
+            setDocked((state) => state === isDocked ? state : isDocked);
+        }, []);
+        useEffect(() => {
+            window.addEventListener('scroll', measurePage, { passive: true });
+            window.addEventListener('resize', measurePage);
+            const resizeObserver = new ResizeObserver(measurePage);
+            resizeObserver.observe(pageElement);
+            return () => {
+                window.removeEventListener('scroll', measurePage);
+                window.removeEventListener('resize', measurePage);
+                resizeObserver.disconnect();
+            };
+        }, [measurePage]);
+        useEffect(measurePage);
+
+        // The header for the current view — rendered into the header place. Its title is the
+        // app's name, always: a view names itself in the body, and once that title has
+        // scrolled under the header, the header's center shows it instead (the title stack,
+        // docked by measurePage). The settings stay within reach in every view; the add-new
+        // flow trades "Add New Plugin" for its Cancel; the editor leads back to the list from
+        // the header's start.
         const renderHeader = () => {
-            if (view === 'addition-process') {
-                return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, 
-                        __('Peak Publisher', 'peak-publisher'),
-                        ' - ',
-                        __('Add New Plugin', 'peak-publisher')
+            const adding = view === 'addition-process';
+            // What docks: the plugin with its icon in the editor — icon and name are a plugin's
+            // identity in the list and the card alike —, the heading in the add-new flow.
+            const dockingTitle = view === 'editor'
+                ? (currentPlugin ? { text: currentPlugin.name, icon: currentPlugin.icon_url } : null)
+                : (adding ? { text: __('Add New Plugin', 'peak-publisher') } : null);
+            return createElement(Fragment, null,
+                view === 'editor' && createElement(Button, {
+                    isTertiary: true,
+                    className: 'pblsh--header__back',
+                    label: __('Back to list', 'peak-publisher'),
+                    icon: Pblsh.Utils.getSvgIcon('arrow_back', { size: 24 }),
+                    onClick: handleCancel,
+                    __next40pxDefaultSize: true,
+                }),
+                createElement('div', { className: 'pblsh--header__titles' + (docked && dockingTitle ? ' is-docked' : '') },
+                    createElement('h1', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
+                    dockingTitle && createElement('div', { className: 'pblsh--header__docked-title', 'aria-hidden': 'true' },
+                        dockingTitle.icon && createElement('img', { className: 'pblsh--header__docked-icon', src: dockingTitle.icon, alt: '', width: 24, height: 24 }),
+                        createElement('span', { className: 'pblsh--header__docked-text' }, dockingTitle.text),
                     ),
-                    createElement('div', { className: 'pblsh--header__actions' },
-                        createElement(Button, {
+                ),
+                createElement('div', { className: 'pblsh--header__actions' },
+                    adding
+                        ? createElement(Button, {
                             isSecondary: true,
                             onClick: handleCancel,
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
-                        }, __('Cancel', 'peak-publisher')),
-                    )
-                );
-            }
-            else if (view === 'editor') {
-                return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--header__actions' },
-                        createElement(Button, {
+                        }, __('Cancel', 'peak-publisher'))
+                        : createElement(Button, {
                             isPrimary: true,
-                            onClick: handleAddNewPlugin,
+                            onClick: () => handleAddNewPlugin(),
                             disabled: isLoading,
                             __next40pxDefaultSize: true,
                         }, __('Add New Plugin', 'peak-publisher')),
-                        createElement(Button, {
-                            isTertiary: true,
-                            onClick: openSettings,
-                            label: __('Settings', 'peak-publisher'),
-                            icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
-                            __next40pxDefaultSize: true,
-                        })
-                    )
-                );
-            } else {
-                return createElement('div', { className: 'pblsh--header' },
-                    createElement('h2', { className: 'pblsh--header__title' }, __('Peak Publisher', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--header__actions' },
-                        createElement(Button, {
-                            isPrimary: true,
-                            onClick: handleAddNewPlugin,
-                            disabled: isLoading,
-                            __next40pxDefaultSize: true,
-                        }, __('Add New Plugin', 'peak-publisher')),
-                        createElement(Button, {
-                            isTertiary: true,
-                            onClick: openSettings,
-                            label: __('Settings', 'peak-publisher'),
-                            icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
-                            __next40pxDefaultSize: true,
-                        })
-                    ),
-                );
-            }
+                    createElement(Button, {
+                        isTertiary: true,
+                        onClick: openSettings,
+                        label: __('Settings', 'peak-publisher'),
+                        icon: Pblsh.Utils.getSvgIcon('cog', { size: 24 }),
+                        __next40pxDefaultSize: true,
+                    }),
+                ),
+            );
         };
 
         // Render main content
@@ -269,7 +456,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 setCurrentPluginId(pluginId);
                 setIsNew(false);
                 setView('editor');
-                setQuery({ plugin: pluginId, view: null });
+                setActiveUploadContext({});
+                setQuery({ plugin: pluginId, view: null, channel: null, import: null });
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -282,6 +470,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 await window.Pblsh.Controllers.Plugins.fetchById(currentPluginId);
                 await window.Pblsh.Controllers.Plugins.fetchList();
                 await window.Pblsh.Controllers.Releases.fetchForPlugin(currentPluginId);
+                // The assets view follows the plugin: the captions, the mirror after a pull.
+                await window.Pblsh.Controllers.Assets.fetchForPlugin(currentPluginId);
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -290,7 +480,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const renderMainContent = () => {
             if (view === 'addition-process') {
                 return createElement(PluginAdditionProcess, {
+                    key: additionRun,
                     onCreated: handleCreated,
+                    // The flow's affirmative exit lands where Cancel lands —
+                    // back on the plugin list.
+                    onFinished: handleCancel,
+                    onStateChange: handleAdditionStateChange,
+                    setActiveUploadContext,
+                    initialChannel: additionInitial?.channel || null,
+                    initialImport: !!additionInitial?.importOpen,
                 });
             }
             else if (view === 'editor') {
@@ -298,58 +496,58 @@ document.addEventListener('DOMContentLoaded', function() {
                     pluginData: currentPlugin,
                     isNew,
                     refreshPlugin: refreshCurrentPlugin,
-                    onToggleReleaseStatus: toggleReleaseStatus,
-                    pendingReleaseIds: pendingReleaseStatus,
+                    refreshWporg,
                     onTogglePluginStatus: togglePluginStatus,
                     pendingPluginStatus: pendingPluginStatus,
-                    isLoadingReleases: isLoadingReleases,
-                    onBack: handleCancel,
                     initialTab: initialTab,
-                    onTabChange: (tab) => setQuery({ tab: tab === 'releases' ? null : tab }),
+                    onTabChange: (tab) => setQuery(tab === 'releases' ? { tab: null, section: null } : { tab }),
+                    initialSection: initialSection,
+                    onSectionChange: (section) => setQuery({ section: section === 'icons' ? null : section }),
                 });
             } else {
-                if (isLoading || !hasLoadedList) {
+                if (listError) {
+                    return createElement(NoticeBox, { variant: 'error', className: 'pblsh--list-load-error', title: __('The plugins could not be loaded', 'peak-publisher'), error: listError },
+                        createElement('p', null, createElement(Button, { isLink: true, onClick: loadApp }, __('Try again', 'peak-publisher'))),
+                    );
+                }
+                // A spinner only until the first list is in; a reload keeps the list it replaces.
+                if (!hasLoadedList) {
                     return createElement('div', { className: 'pblsh--loading' },
                         createElement('div', { className: 'pblsh--loading__spinner' })
                     );
                 }
-                return createElement(PluginList, {
-                    plugins: plugins,
-                    onEdit: handleEdit,
-                    onDelete: handleDelete,
-                    onCreateNew: handleAddNewPlugin,
-                    onToggleStatus: togglePluginStatus,
-                    pendingPluginStatus: pendingPluginStatus,
-                });
+                return createElement(wp.element.Fragment, null,
+                    createElement(UpgradeNotice, { onOpenPlugin: handleEdit }),
+                    createElement(PluginList, {
+                        plugins: plugins,
+                        onEdit: handleEdit,
+                        onDelete: handleDelete,
+                        onCreateNew: () => handleAddNewPlugin(),
+                    }),
+                );
             }
         };
 
-        // Render footer
-        const renderFooter = () => {
-            /* return createElement('div', { className: 'pblsh--footer' },
-                
-            ); */
-        };
-
-        return createElement('div', { className: 'pblsh-app' },
+        return createElement(Fragment, null,
             // Global drop overlay (always mounted)
-            createElement(GlobalDropOverlay, { onCreated: handleCreated }),
+            createElement(GlobalDropOverlay, { onCreated: handleCreated, activeUploadContext }),
 
-            // Header (always visible)
-            renderHeader(),
+            // Header (always visible), in the page's header place
+            createPortal(renderHeader(), headerPlace),
 
             // Main content (with loading state)
             renderMainContent(),
-
-            // Footer (always visible)
-            renderFooter(),
 
             // Settings dialog (always mounted)
             createElement('dialog', { className: 'pblsh--modal pblsh--modal--settings', ref: settingsDialogRef, onClick: (e) => { if (e.target === e.currentTarget) { closeSettings(); } } },
                 createElement(Settings, {
                     onClose: closeSettings,
+                    onOpenWporgImport: handleOpenWporgImport,
                 })
-            )
+            ),
+
+            // Tip dialog host — opened via the 'pblsh:open-tip' event from TipLink
+            createElement(TipDialog)
         );
     };
 

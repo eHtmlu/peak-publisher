@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Peak Publisher
- * Description: The easiest way to self-host, manage and publish your own custom plugins.
- * Version: 1.3.1
+ * Description: One place for all your plugins: publish to wordpress.org without SVN, self-host the rest, and serve updates.
+ * Version: 2.0.0
  * Requires at least: 5.8
  * Requires PHP: 8.1
  * Author: wppeak.com
@@ -25,10 +25,29 @@ define('PBLSH_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('PBLSH_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 
-// General setup.
+// Include helper functions.
+require_once __DIR__ . '/includes/encryption.php';
+require_once __DIR__ . '/includes/wporg_accounts.php';
+require_once __DIR__ . '/includes/settings.php';
+require_once __DIR__ . '/includes/uploads.php';
+require_once __DIR__ . '/includes/hosting.php';
+require_once __DIR__ . '/includes/wporg_cache.php';
+require_once __DIR__ . '/includes/wporg_api.php';
+require_once __DIR__ . '/includes/wporg_directory.php';
+require_once __DIR__ . '/includes/operations_log.php';
+require_once __DIR__ . '/includes/wporg_import_timing.php';
+require_once __DIR__ . '/includes/wporg_assets.php';
+require_once __DIR__ . '/includes/wporg_blueprint.php';
+require_once __DIR__ . '/includes/wporg_deploy.php';
 require_once __DIR__ . '/includes/functions.php';
-require_once __DIR__ . '/includes/init.php';
+require_once __DIR__ . '/includes/readme.php';
+require_once __DIR__ . '/includes/releases.php';
+require_once __DIR__ . '/includes/assets.php';
+require_once __DIR__ . '/includes/upgrade.php';
 
+
+// Initialize general setup.
+require_once __DIR__ . '/includes/init.php';
 
 
 // Initialize admin interface.

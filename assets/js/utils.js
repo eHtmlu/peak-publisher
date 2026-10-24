@@ -1,32 +1,124 @@
 
 lodash.set(window, 'Pblsh.Utils', {
 
+    // Answers that arrive out of order must not put an older state over a newer
+    // one. An order hands out numbers — whoever takes one later is the newer — and
+    // lets an answer claim its key's place (a plugin's) only when no newer one holds
+    // it. A load takes its number when it is asked for; an answer that is the
+    // state after a write takes it when it arrives.
+    createAnswerOrder: () => {
+        let newest = 0;
+        const shown = {};
+        return {
+            take: () => ++newest,
+            claim: (key, number) => {
+                if (number < (shown[key] || 0)) return false;
+                shown[key] = number;
+                return true;
+            },
+        };
+    },
+
+    // Relative wording for a past moment ("just now" … "3 days ago"); beyond a
+    // month the absolute date reads better. Returns null for missing/invalid
+    // input so callers choose their own fallback.
+    formatRelativeTime: (value) => {
+        const { __, _n, sprintf } = wp.i18n;
+        const then = value ? new Date(value) : null;
+        if (!then || isNaN(then.getTime())) return null;
+        const minutes = Math.round((Date.now() - then.getTime()) / 60000);
+        if (minutes < 1) return __('just now', 'peak-publisher');
+        if (minutes < 60) return sprintf(_n('%d minute ago', '%d minutes ago', minutes, 'peak-publisher'), minutes);
+        const hours = Math.round(minutes / 60);
+        if (hours < 24) return sprintf(_n('%d hour ago', '%d hours ago', hours, 'peak-publisher'), hours);
+        const days = Math.round(hours / 24);
+        if (days <= 30) return sprintf(_n('%d day ago', '%d days ago', days, 'peak-publisher'), days);
+        // Calendar averages, rounded like the units before them.
+        const months = Math.round(days / 30.4375);
+        if (months < 12) return sprintf(_n('%d month ago', '%d months ago', months, 'peak-publisher'), months);
+        const years = Math.round(days / 365.25);
+        return sprintf(_n('%d year ago', '%d years ago', years, 'peak-publisher'), years);
+    },
+
+    // How long formatRelativeTime() keeps saying what it says now, in ms: until
+    // the age rounds to the next minute — every wording it has changes on such a
+    // boundary or not at all. null for missing/invalid input.
+    msUntilRelativeTimeChanges: (value) => {
+        const then = value ? new Date(value) : null;
+        if (!then || isNaN(then.getTime())) return null;
+        const age = Date.now() - then.getTime();
+        return (Math.round(age / 60000) + 0.5) * 60000 - age;
+    },
+
+    // Channel presentation — one home for every surface that renders a channel
+    // (choice cards, destination rows, publish-path trigger). Label and
+    // description come from the server config (authoritative source:
+    // get_channel_texts()); the icon names are client-side.
+    getChannelLabel: (key) => (window.PblshData?.channelTexts || {})[key]?.label || key,
+    getChannelDescription: (key) => (window.PblshData?.channelTexts || {})[key]?.description || '',
+    getChannelIcon: (key) => ({ wporg: 'wordpress', self_hosted: 'server' })[key],
+
+    // The plugin's distribution status as the status button shows it: the post status
+    // self-hosted (public/draft), the directory's verdict on wordpress.org (public/closed).
+    getPluginStatus: (status) => {
+        const { __ } = wp.i18n;
+        return {
+            publish: { label: __('Public', 'peak-publisher'), modifier: 'public' },
+            draft: { label: __('Draft', 'peak-publisher'), modifier: 'draft' },
+            closed: { label: __('Closed', 'peak-publisher'), modifier: 'closed' },
+        }[status] || { label: status, modifier: 'draft' };
+    },
+
+    // The plugin's public page in the wordpress.org directory.
+    getWporgPluginUrl: (slug) => 'https://wordpress.org/plugins/' + encodeURIComponent(slug) + '/',
+    getWporgThemeUrl: (slug) => 'https://wordpress.org/themes/' + encodeURIComponent(slug) + '/',
+    // A slug as typed, or the slug out of a pasted wordpress.org address (its path segment under
+    // plugins/ or themes/, `kind`), lowercased — nobody has to know a slug to fill such a field.
+    // `valid` says whether it is spelled as wordpress.org spells slugs; `slug` is what was read
+    // either way, for the message.
+    wporgSlugFromInput: (value, kind) => {
+        let raw = String(value || '').trim();
+        const match = raw.match(new RegExp('wordpress\\.org\\/' + kind + '\\/([^\\/?#]+)', 'i'));
+        if (match) raw = match[1];
+        const slug = raw.toLowerCase();
+        return { slug, valid: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) };
+    },
+    // The WordPress stable branch (x.y) a Tested up to is judged against — a site fact from
+    // core's own version check (AdminUI, wordpress_stable_branch()); never empty, the running
+    // version is its floor. The upload checklist judges against the branch its facts recorded.
+    getStableBranch: () => window.PblshData.wordpressStableBranch,
+    // Get the deep link to one of the plugin's FAQ entries on wordpress.org (server-provided, see get_peak_publisher_faq_urls())
+    getFaqUrl: (key) => (window.PblshData?.faqUrls || {})[key],
+    // Generated fallback icon for plugins without directory assets (mirrors the
+    // wordpress.org directory's geopattern fallback).
+    getGeopatternIconUrl: (slug) => (window.PblshData?.geopatternIconBase || '') + encodeURIComponent(slug) + '.svg',
+
+    // Copy text to the clipboard; falls back to the execCommand path where the
+    // Clipboard API is unavailable. Resolves to whether the copy succeeded.
+    copyText: async (text) => {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch (e) {}
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return ok;
+    },
+
     // Show alert message (for errors and warnings)
     showAlert: (message, type = 'error') => {
         if (type === 'error' || type === 'warning') {
             alert(message);
         }
-        // For success messages, use the SuccessMessage component instead
-    },
-
-    // Get default theme configuration
-    getDefaultConfig: () => {
-        return {
-            name: '',
-            plugin_uri: '',
-            author: '',
-            author_uri: '',
-            description: '',
-            requires_at_least: '',
-            tested_up_to: '',
-            requires_php: '',
-            version: '1.0.0',
-            license: '',
-            license_uri: '',
-            text_domain: '',
-            slug: '',
-            icon: '',
-        };
     },
 
     // SVG Icons for theme settings
@@ -37,43 +129,46 @@ lodash.set(window, 'Pblsh.Utils', {
         } = options;
 
         const iconPaths = {
-            store: 'M12,18H6V14H12M21,14V12L20,7H4L3,12V14H4V20H14V14H18V20H20V14M20,4H4V6H20V4Z',
             cog: 'M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z',
-            mirror_rectangle: 'M8.29 10.28L11.53 7.03L12.59 8.09L9.35 11.34L8.29 10.28M8.7 14.61L14.36 8.95L15.42 10L9.76 15.67L8.7 14.61M18 3V21H6V3H18M20 1H4V23H20V1Z',
-            palette: 'M17.5,12A1.5,1.5 0 0,1 16,10.5A1.5,1.5 0 0,1 17.5,9A1.5,1.5 0 0,1 19,10.5A1.5,1.5 0 0,1 17.5,12M14.5,8A1.5,1.5 0 0,1 13,6.5A1.5,1.5 0 0,1 14.5,5A1.5,1.5 0 0,1 16,6.5A1.5,1.5 0 0,1 14.5,8M9.5,8A1.5,1.5 0 0,1 8,6.5A1.5,1.5 0 0,1 9.5,5A1.5,1.5 0 0,1 11,6.5A1.5,1.5 0 0,1 9.5,8M6.5,12A1.5,1.5 0 0,1 5,10.5A1.5,1.5 0 0,1 6.5,9A1.5,1.5 0 0,1 8,10.5A1.5,1.5 0 0,1 6.5,12M12,3A9,9 0 0,0 3,12A9,9 0 0,0 12,21A1.5,1.5 0 0,0 13.5,19.5C13.5,19.11 13.35,18.76 13.11,18.5C12.88,18.23 12.73,17.88 12.73,17.5A1.5,1.5 0 0,1 14.23,16H16A5,5 0 0,0 21,11C21,6.58 16.97,3 12,3Z',
-            image_area: 'M20,5A2,2 0 0,1 22,7V17A2,2 0 0,1 20,19H4C2.89,19 2,18.1 2,17V7C2,5.89 2.89,5 4,5H20M5,16H19L14.5,10L11,14.5L8.5,11.5L5,16Z',
-            border_radius: 'M3 16C3 18.8 5.2 21 8 21H10V19H8C6.3 19 5 17.7 5 16V14H3V16M21 8C21 5.2 18.8 3 16 3H14V5H16C17.7 5 19 6.3 19 8V10H21V8M16 21C18.8 21 21 18.8 21 16V14H19V16C19 17.7 17.7 19 16 19H14V21H16M8 3C5.2 3 3 5.2 3 8V10H5V8C5 6.3 6.3 5 8 5H10V3H8Z',
-            pin: 'M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z',
-            arrow_all: 'M13,11H18L16.5,9.5L17.92,8.08L21.84,12L17.92,15.92L16.5,14.5L18,13H13V18L14.5,16.5L15.92,17.92L12,21.84L8.08,17.92L9.5,16.5L11,18V13H6L7.5,14.5L6.08,15.92L2.16,12L6.08,8.08L7.5,9.5L6,11H11V6L9.5,7.5L8.08,6.08L12,2.16L15.92,6.08L14.5,7.5L13,6V11Z',
-            format_text: 'M18.5,4L19.66,8.35L18.7,8.61C18.25,7.74 17.79,6.87 17.26,6.43C16.73,6 16.11,6 15.5,6H13V16.5C13,17 13,17.5 13.33,17.75C13.67,18 14.33,18 15,18V19H9V18C9.67,18 10.33,18 10.67,17.75C11,17.5 11,17 11,16.5V6H8.5C7.89,6 7.27,6 6.74,6.43C6.21,6.87 5.75,7.74 5.3,8.61L4.34,8.35L5.5,4H18.5Z',
-            box_shadow: 'M3,3H18V18H3V3M19,19H21V21H19V19M19,16H21V18H19V16M19,13H21V15H19V13M19,10H21V12H19V10M19,7H21V9H19V7M16,19H18V21H16V19M13,19H15V21H13V19M10,19H12V21H10V19M7,19H9V21H7V19Z',
-            aspect_ratio: 'M19,12H17V15H14V17H19V12M7,9H10V7H5V12H7V9M21,3H3A2,2 0 0,0 1,5V19A2,2 0 0,0 3,21H21A2,2 0 0,0 23,19V5A2,2 0 0,0 21,3M21,19H3V5H21V19Z',
-            close_box: 'M19,3H16.3H7.7H5A2,2 0 0,0 3,5V7.7V16.4V19A2,2 0 0,0 5,21H7.7H16.4H19A2,2 0 0,0 21,19V16.3V7.7V5A2,2 0 0,0 19,3M15.6,17L12,13.4L8.4,17L7,15.6L10.6,12L7,8.4L8.4,7L12,10.6L15.6,7L17,8.4L13.4,12L17,15.6L15.6,17Z',
-            checkbox_marked: 'M10,17L5,12L6.41,10.58L10,14.17L17.59,6.58L19,8M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z',
-            help_box: 'M11,18H13V16H11V18M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6M5,3H19A2,2 0 0,1 21,5V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V5A2,2 0 0,1 5,3Z',
-            content_copy: 'M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z',
             download: 'M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z',
             delete_forever: 'M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19M8.46,11.88L9.87,10.47L12,12.59L14.12,10.47L15.53,11.88L13.41,14L15.53,16.12L14.12,17.53L12,15.41L9.88,17.53L8.47,16.12L10.59,14L8.46,11.88M15.5,4L14.5,3H9.5L8.5,4H5V6H19V4H15.5Z',
             dots_horizontal: 'M16,12A2,2 0 0,1 18,10A2,2 0 0,1 20,12A2,2 0 0,1 18,14A2,2 0 0,1 16,12M10,12A2,2 0 0,1 12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12M4,12A2,2 0 0,1 6,10A2,2 0 0,1 8,12A2,2 0 0,1 6,14A2,2 0 0,1 4,12Z',
             pencil: 'M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z',
-            dots_grid: 'M12 16C13.1 16 14 16.9 14 18S13.1 20 12 20 10 19.1 10 18 10.9 16 12 16M12 10C13.1 10 14 10.9 14 12S13.1 14 12 14 10 13.1 10 12 10.9 10 12 10M12 4C13.1 4 14 4.9 14 6S13.1 8 12 8 10 7.1 10 6 10.9 4 12 4M6 16C7.1 16 8 16.9 8 18S7.1 20 6 20 4 19.1 4 18 4.9 16 6 16M6 10C7.1 10 8 10.9 8 12S7.1 14 6 14 4 13.1 4 12 4.9 10 6 10M6 4C7.1 4 8 4.9 8 6S7.1 8 6 8 4 7.1 4 6 4.9 4 6 4M18 16C19.1 16 20 16.9 20 18S19.1 20 18 20 16 19.1 16 18 16.9 16 18 16M18 10C19.1 10 20 10.9 20 12S19.1 14 18 14 16 13.1 16 12 16.9 10 18 10M18 4C19.1 4 20 4.9 20 6S19.1 8 18 8 16 7.1 16 6 16.9 4 18 4Z',
-            image: 'M8.5,13.5L11,16.5L14.5,12L19,18H5M21,19V5C21,3.89 20.1,3 19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19Z',
 
             check_circle: 'M12 2C6.5 2 2 6.5 2 12S6.5 22 12 22 22 17.5 22 12 17.5 2 12 2M10 17L5 12L6.41 10.59L10 14.17L17.59 6.58L19 8L10 17Z',
             close_circle: 'M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z',
-            folder_zip: 'M20 6H12L10 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6M18 12H16V14H18V16H16V18H14V16H16V14H14V12H16V10H14V8H16V10H18V12Z',
             security: 'M12,12H19C18.47,16.11 15.72,19.78 12,20.92V12H5V6.3L12,3.19M12,1L3,5V11C3,16.55 6.84,21.73 12,23C17.16,21.73 21,16.55 21,11V5L12,1Z',
             cloud_upload: 'M11 20H6.5Q4.22 20 2.61 18.43 1 16.85 1 14.58 1 12.63 2.17 11.1 3.35 9.57 5.25 9.15 5.88 6.85 7.75 5.43 9.63 4 12 4 14.93 4 16.96 6.04 19 8.07 19 11 20.73 11.2 21.86 12.5 23 13.78 23 15.5 23 17.38 21.69 18.69 20.38 20 18.5 20H13V12.85L14.6 14.4L16 13L12 9L8 13L9.4 14.4L11 12.85Z',
+            wordpress: 'M12,0C18.627,0 24,5.373 24,12C24,18.627 18.627,24 12,24C5.373,24 0,18.627 0,12C0,5.373 5.373,0 12,0ZM12,0.72C10.477,0.72 9,1.018 7.61,1.606C6.941,1.889 6.297,2.239 5.694,2.646C5.096,3.05 4.534,3.513 4.024,4.024C3.513,4.534 3.05,5.096 2.646,5.694C2.239,6.297 1.889,6.941 1.606,7.61C1.018,9 0.72,10.477 0.72,12C0.72,13.523 1.018,15 1.606,16.39C1.889,17.059 2.239,17.703 2.646,18.306C3.05,18.904 3.513,19.466 4.024,19.976C4.534,20.487 5.096,20.95 5.694,21.354C6.297,21.761 6.941,22.111 7.61,22.394C9,22.982 10.477,23.28 12,23.28C13.523,23.28 15,22.982 16.39,22.394C17.059,22.111 17.703,21.761 18.306,21.354C18.904,20.95 19.466,20.487 19.976,19.976C20.487,19.466 20.95,18.904 21.354,18.306C21.761,17.703 22.111,17.059 22.394,16.39C22.982,15 23.28,13.523 23.28,12C23.28,10.477 22.982,9 22.394,7.61C22.111,6.941 21.761,6.297 21.354,5.694C20.95,5.096 20.487,4.534 19.976,4.024C19.466,3.513 18.904,3.05 18.306,2.646C17.703,2.239 17.059,1.889 16.39,1.606C15,1.018 13.523,0.72 12,0.72ZM18.751,11.495C18.751,12.351 18.482,13.363 18.024,14.792L16.992,18.061L13.378,7.311C13.98,7.28 14.523,7.216 14.523,7.216C15.062,7.153 14.998,6.361 14.459,6.392C14.459,6.392 12.839,6.519 11.794,6.519C10.811,6.519 9.16,6.392 9.16,6.392C8.621,6.361 8.557,7.184 9.096,7.216C9.096,7.216 9.607,7.28 10.145,7.311L11.703,11.58L9.514,18.143L5.873,7.311C6.476,7.28 7.017,7.216 7.017,7.216C7.556,7.153 7.492,6.361 6.954,6.392C6.954,6.392 5.334,6.519 4.288,6.519C4.101,6.519 3.88,6.515 3.645,6.507C5.433,3.793 8.506,2 12,2C14.603,2 16.974,2.995 18.753,4.625C18.71,4.623 18.668,4.617 18.623,4.617C17.641,4.617 16.944,5.473 16.944,6.392C16.944,7.216 17.42,7.913 17.926,8.738C18.307,9.403 18.751,10.259 18.751,11.495ZM20.775,7.202C21.556,8.627 22,10.261 22,12C22,15.689 20.001,18.91 17.028,20.643L20.082,11.812C20.653,10.386 20.843,9.245 20.843,8.231C20.843,7.863 20.818,7.521 20.775,7.202ZM2,12C2,10.55 2.311,9.174 2.866,7.93L7.636,20.999C4.3,19.378 2,15.958 2,12ZM12.176,12.874L15.249,21.295C15.27,21.345 15.294,21.39 15.321,21.433C14.282,21.799 13.165,22 12,22C11.019,22 10.071,21.856 9.175,21.593L12.176,12.874Z',
+            wordpress_simplified: 'M21.467,6.824C22.309,8.36 22.789,10.124 22.789,12C22.789,15.98 20.632,19.455 17.424,21.325L20.719,11.798C21.335,10.258 21.54,9.028 21.54,7.933C21.54,7.536 21.514,7.167 21.467,6.824M13.487,6.941C14.136,6.907 14.722,6.839 14.722,6.839C15.303,6.77 15.234,5.916 14.653,5.95C14.653,5.95 12.905,6.087 11.777,6.087C10.717,6.087 8.936,5.95 8.936,5.95C8.354,5.916 8.286,6.804 8.867,6.839C8.867,6.839 9.418,6.907 9.999,6.941L11.68,11.547L9.318,18.628L5.39,6.941C6.04,6.907 6.624,6.839 6.624,6.839C7.205,6.77 7.137,5.916 6.555,5.95C6.555,5.95 4.808,6.087 3.68,6.087C3.477,6.087 3.239,6.082 2.986,6.074C4.915,3.145 8.231,1.211 12,1.211C14.809,1.211 17.366,2.285 19.285,4.043C19.239,4.041 19.194,4.035 19.146,4.035C18.086,4.035 17.334,4.958 17.334,5.95C17.334,6.839 17.847,7.591 18.394,8.48C18.804,9.199 19.283,10.122 19.283,11.456C19.283,12.379 18.928,13.45 18.462,14.943L17.386,18.539L13.487,6.941ZM12,22.789C10.941,22.789 9.919,22.634 8.952,22.35L12.189,12.943L15.505,22.029C15.527,22.082 15.554,22.132 15.583,22.178C14.461,22.573 13.256,22.789 12,22.789M1.211,12C1.211,10.435 1.547,8.951 2.145,7.609L7.292,21.71C3.692,19.961 1.211,16.27 1.211,12M12,0C5.383,0 0,5.383 0,12C0,18.617 5.383,24 12,24C18.617,24 24,18.617 24,12C24,5.383 18.617,0 12,0',
+            server: 'M4,1H20A1,1 0 0,1 21,2V6A1,1 0 0,1 20,7H4A1,1 0 0,1 3,6V2A1,1 0 0,1 4,1M4,9H20A1,1 0 0,1 21,10V14A1,1 0 0,1 20,15H4A1,1 0 0,1 3,14V10A1,1 0 0,1 4,9M4,17H20A1,1 0 0,1 21,18V22A1,1 0 0,1 20,23H4A1,1 0 0,1 3,22V18A1,1 0 0,1 4,17M9,5H10V3H9V5M9,13H10V11H9V13M9,21H10V19H9V21M5,3V5H7V3H5M5,11V13H7V11H5M5,19V21H7V19H5Z',
             shimmer: 'M10.6 9.6L9 15L7.4 9.6L2 8L7.4 6.4L9 1L10.6 6.4L16 8L10.6 9.6M17 14.2L21 12L18.8 16L21 20L17 17.8L13 20L15.2 16L13 12L17 14.2M10 16L8.3 19L10 22L7 20.3L4 22L5.7 19L4 16L7 17.7L10 16',
             check_bold: 'M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z',
             close_thick: 'M20 6.91L17.09 4L12 9.09L6.91 4L4 6.91L9.09 12L4 17.09L6.91 20L12 14.91L17.09 20L20 17.09L14.91 12L20 6.91Z',
+            chevron_down: 'M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z',
+            arrow_right: 'M4,11V13H16L10.5,18.5L11.92,19.92L19.84,12L11.92,4.08L10.5,5.5L16,11H4Z',
 
-            circle_medium: 'M12,8A4,4 0 0,0 8,12A4,4 0 0,0 12,16A4,4 0 0,0 16,12A4,4 0 0,0 12,8Z',
             circle: 'M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z',
             arrow_back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
             chart_line: 'M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z',
             information_outline: 'M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z',
-            chat_alert: 'M12,3C17.5,3 22,6.58 22,11C22,15.42 17.5,19 12,19C10.76,19 9.57,18.82 8.47,18.5C5.55,21 2,21 2,21C4.33,18.67 4.7,17.1 4.75,16.5C3.05,15.07 2,13.13 2,11C2,6.58 6.5,3 12,3M11,14V16H13V14H11M11,12H13V6H11V12Z',
+            lock: 'M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z',
+            open_in_new: 'M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z',
+            help_circle_outline: 'M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z',
+            alert: 'M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2L1,21Z',
+            alert_outline: 'M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16Z',
+            alert_octagon_outline: 'M8.27,3L3,8.27V15.73L8.27,21H15.73L21,15.73V8.27L15.73,3H8.27M8.41,5H15.58L19,8.41V15.58L15.58,19H8.41L5,15.58V8.41L8.41,5M11,7H13V13H11V7M11,15H13V17H11V15Z',
+            account: 'M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z',
+            update: 'M21,10.12H14.22L16.96,7.3C14.23,4.6 9.81,4.5 7.08,7.2C4.35,9.91 4.35,14.28 7.08,17C9.81,19.7 14.23,19.7 16.96,17C18.32,15.65 19,14.08 19,12.1H21C21,14.08 20.12,16.65 18.36,18.39C14.85,21.87 9.15,21.87 5.64,18.39C2.14,14.92 2.11,9.28 5.62,5.81C9.13,2.34 14.76,2.34 18.27,5.81L21,3V10.12M12.5,8V12.25L16,14.33L15.28,15.54L11,13V8H12.5Z',
+            rocket_launch: 'M13.13 22.19L11.5 18.36C13.07 17.78 14.54 17 15.9 16.09L13.13 22.19M5.64 12.5L1.81 10.87L7.91 8.1C7 9.46 6.22 10.93 5.64 12.5M21.61 2.39C21.61 2.39 16.66 .269 11 5.93C8.81 8.12 7.5 10.53 6.65 12.64C6.37 13.39 6.56 14.21 7.11 14.77L9.24 16.89C9.79 17.45 10.61 17.63 11.36 17.35C13.5 16.53 15.88 15.19 18.07 13C23.73 7.34 21.61 2.39 21.61 2.39M14.54 9.46C13.76 8.68 13.76 7.41 14.54 6.63S16.59 5.85 17.37 6.63C18.14 7.41 18.15 8.68 17.37 9.46C16.59 10.24 15.32 10.24 14.54 9.46M8.88 16.53L7.47 15.12L8.88 16.53M6.24 22L9.88 18.36C9.54 18.27 9.21 18.12 8.91 17.91L4.83 22H6.24M2 22H3.41L8.18 17.24L6.76 15.83L2 20.59V22Z',
+            send: 'M2,21L23,12L2,3V10L17,12L2,14V21Z',
+            scale_balance: 'M12,3C10.73,3 9.6,3.8 9.18,5H3V7H4.95L2,14C1.53,16 3,17 5.5,17C8,17 9.56,16 9,14L6.05,7H9.18C9.5,7.85 10.15,8.5 11,8.82V20H2V22H22V20H13V8.82C13.85,8.5 14.5,7.85 14.82,7H17.95L15,14C14.53,16 16,17 18.5,17C21,17 22.56,16 22,14L19.05,7H21V5H14.82C14.4,3.8 13.27,3 12,3M12,5A1,1 0 0,1 13,6A1,1 0 0,1 12,7A1,1 0 0,1 11,6A1,1 0 0,1 12,5M5.5,10.25L7,14H4L5.5,10.25M18.5,10.25L20,14H17L18.5,10.25Z',
+            account_group: 'M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z',
+            star: 'M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z',
+            star_half_full: 'M12,15.4V6.1L13.71,10.13L18.09,10.5L14.77,13.39L15.76,17.67M22,9.24L14.81,8.63L12,2L9.19,8.63L2,9.24L7.45,13.97L5.82,21L12,17.27L18.18,21L16.54,13.97L22,9.24Z',
+            star_outline: 'M12,15.39L8.24,17.66L9.23,13.38L5.91,10.5L10.29,10.13L12,6.09L13.71,10.13L18.09,10.5L14.77,13.38L15.76,17.66M22,9.24L14.81,8.63L12,2L9.19,8.63L2,9.24L7.45,13.97L5.82,21L12,17.27L18.18,21L16.54,13.97L22,9.24Z',
+            clock_outline: 'M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z',
+            circle_outline: 'M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z',
         };
 
         const pathData = iconPaths[iconType] || iconPaths.cog;

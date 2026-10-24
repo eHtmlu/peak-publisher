@@ -5,6 +5,14 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The REST API the client sites talk to (namespace pblsh/v1): update check, plugin info and
+ * ZIP download of the self-hosted plugins, and the generated geopattern icon. Everything but
+ * the icon passes check_permission() — the IP whitelist of the settings, open while the list
+ * is empty. A request without a version means the current release (resolve_current_release());
+ * a draft plugin serves nothing. The update check also records the installation. Loaded for
+ * every REST request that is not the admin API's.
+ */
 class PublicAPI {
     private static $instance = null;
 
@@ -57,53 +65,11 @@ class PublicAPI {
     }
 
     public function check_permission(): bool {
-        $settings = get_peak_publisher_settings();
-        $ip_whitelist = $settings['ip_whitelist'];
-
+        $ip_whitelist = get_peak_publisher_settings()['ip_whitelist'];
         if (empty($ip_whitelist)) {
             return true;
         }
-
-        $ip_types = [
-            4 => ['dns_type' => DNS_A, 'filter_option' => FILTER_FLAG_IPV4, 'allowed_ips' => [], 'cidr_ranges' => []],
-            6 => ['dns_type' => DNS_AAAA, 'filter_option' => FILTER_FLAG_IPV6, 'allowed_ips' => [], 'cidr_ranges' => []],
-        ];
-
-        // split into ip addresses, cidr ranges and domain names
-        $domain_names = [];
-        foreach ($ip_whitelist as $item) {
-
-            // cidr range
-            if (str_contains($item, '/')) {
-                [$ip, $subnet] = explode('/', $item, 2);
-        
-                // Prüfen, ob Prefix eine Zahl ist
-                if (ctype_digit($subnet)) {
-                    $subnet = (int) $subnet;
-                    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && $subnet >= 0 && $subnet <= 32) {
-                        $ip_types[4]['cidr_ranges'][] = [$ip, $subnet];
-                    } else if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) && $subnet >= 0 && $subnet <= 128) {
-                        $ip_types[6]['cidr_ranges'][] = [$ip, $subnet];
-                    }
-                }
-                continue;
-            }
-        
-            if (filter_var($item, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-                $ip_types[4]['allowed_ips'][] = $item;
-                continue;
-            }
-            
-            if (filter_var($item, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-                $ip_types[6]['allowed_ips'][] = $item;
-                continue;
-            }
-            
-            if (filter_var($item, FILTER_VALIDATE_DOMAIN)) {
-                $domain_names[] = $item;
-                continue;
-            }
-        }
+        $lists = classify_ip_whitelist($ip_whitelist);
 
         // get client ip and determine ip type
         if (!isset($_SERVER['REMOTE_ADDR'])) {
@@ -111,21 +77,21 @@ class PublicAPI {
         }
         $client_ip = filter_var(wp_unslash($_SERVER['REMOTE_ADDR']), FILTER_VALIDATE_IP);
         if (filter_var($client_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            $ip_type = $ip_types[4];
+            [ $family, $dns_type, $record_key ] = [ $lists[4], DNS_A, 'ip' ];
         } else if (filter_var($client_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            $ip_type = $ip_types[6];
+            [ $family, $dns_type, $record_key ] = [ $lists[6], DNS_AAAA, 'ipv6' ];
         } else {
             return false;
         }
-        
+
         // check if client ip is in any of the allowed ip addresses
-        if (in_array($client_ip, $ip_type['allowed_ips'])) {
+        if (in_array($client_ip, $family['addresses'], true)) {
             return true;
         }
 
         // check if client ip is in any of the allowed cidr ranges
-        foreach ($ip_type['cidr_ranges'] as $cidr_range) {
-            if ($this->ip_in_range($client_ip, $cidr_range[0], $cidr_range[1])) {
+        foreach ($family['ranges'] as [ $subnet, $bits ]) {
+            if (ip_in_cidr($client_ip, $subnet, $bits)) {
                 return true;
             }
         }
@@ -137,23 +103,39 @@ class PublicAPI {
         }
 
         // check if domain is in any of the allowed domain names
-        if (in_array($untrusted_client_domain, $domain_names)) {
+        if (in_array($untrusted_client_domain, $lists['domains'], true)) {
 
-            // resolve domain to ip addresses to get trustworthy values
-            $dns_records = dns_get_record($untrusted_client_domain, $ip_type['dns_type']);
+            // resolve domain to ip addresses to get trustworthy values; dns_get_record() names
+            // an A record's address `ip` and an AAAA record's `ipv6`
+            $dns_records = dns_get_record($untrusted_client_domain, $dns_type);
 
             // check if any of the trustworthy ip addresses matches the client ip
             foreach ($dns_records as $dns_record) {
-                if ($client_ip === $dns_record['ip']) {
+                if ($client_ip === ($dns_record[$record_key] ?? null)) {
                     return true;
                 }
             }
         }
-        
+
         return false;
     }
 
+    /**
+     * The WordPress version of the asking site, from the User-Agent core sends with every
+     * request of its own ("WordPress/7.1.2; https://example.com"); '' when it names none.
+     */
+    private function client_wordpress_version(): string {
+        $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
+        return preg_match('/^WordPress\/([\d.]+(?:-[\w.]+)?)/', $user_agent, $m) ? $m[1] : '';
+    }
+
     private function get_untrusted_client_domain_from_user_agent() {
+
+        // The IDN conversion below needs the intl extension; without it no domain can be
+        // confirmed (the settings refuse domain entries then, whitelist_requirements_error()).
+        if (!function_exists('idn_to_ascii')) {
+            return false;
+        }
 
         // Get a sanitized user agent
         $sanitized_user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
@@ -189,34 +171,6 @@ class PublicAPI {
         return $validated_untrusted_client_domain;
     }
 
-    public function ip_in_range(string $ip, string $subnet, int $bits): bool {
-
-        // not yet implemented, so we return always false to deny access
-        return false;
-        
-        /* if (strpos($range, '/') === false) {
-            return $ip === $range;
-        }
-        list($subnet, $bits) = explode('/', $range, 2);
-        $bits = (int) $bits;
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            $ip_long = ip2long($ip);
-            $subnet_long = ip2long($subnet);
-            $mask = -1 << (32 - $bits);
-            $subnet_long &= $mask;
-            return ($ip_long & $mask) === $subnet_long;
-        }
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) && filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            $ip_bin = self::inet6_to_bits($ip);
-            $subnet_bin = self::inet6_to_bits($subnet);
-            return substr($ip_bin, 0, $bits) === substr($subnet_bin, 0, $bits);
-        } */
-    }
-
-    public function checkdnsrr(string $domain, string $type): bool {
-        return gethostbyname($domain) !== $domain;
-    }
-
     /**
      * Handle the plugin information API request.
      * 
@@ -244,19 +198,19 @@ class PublicAPI {
         }
         $plugin = $plugin_infos['plugin'];
         $releases = $plugin_infos['releases'];
-        $latest_release = $plugin_infos['release'];
-        $latest_release_content = json_decode((string) $latest_release->post_content, true);
-        $latest_version = $latest_release->post_title;
+        $current_release = $plugin_infos['release'];
+        $current_release_content = json_decode((string) $current_release->post_content, true);
+        $current_version = $current_release->post_title;
         $plugin_data = $plugin_infos['release_data']['plugin_data'];
 
 
         // Based on the original code from WordPress.org  ( https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php )
-        $post = $latest_release;
+        $post = $current_release;
 
 		$result            = array();
 		$result['name']    = $plugin_data['Name'];
 		$result['slug']    = $plugin->post_name;
-		$result['version'] = $latest_version ?: '0.0';
+		$result['version'] = $current_version ?: '0.0';
 
         $author = (string) ($plugin_data['Author'] ?? '');
         $author_uri = (string) ($plugin_data['AuthorURI'] ?? '');
@@ -272,9 +226,12 @@ class PublicAPI {
 		$result['contributors']   = array();
 
 		$result['requires']         = empty($plugin_data['RequiresWP']) ? false : $plugin_data['RequiresWP'];
-		$result['tested']           = empty($latest_release_content['plugin_readme_txt']['content']['tested']) ? false : $latest_release_content['plugin_readme_txt']['content']['tested'];
+		// The effective Tested up to as wordpress.org derives it (release_tested_up_to()),
+		// served as the asking site's branch needs it (served_tested_up_to()).
+		$tested                     = served_tested_up_to(release_tested_up_to($current_release)['value'], $this->client_wordpress_version());
+		$result['tested']           = $tested === '' ? false : $tested;
 		$result['requires_php']     = empty($plugin_data['RequiresPHP']) ? false : $plugin_data['RequiresPHP'];
-		$result['requires_plugins'] = empty($plugin_data['RequiresPlugins']) ? [] : array_map('trim', explode(',', $plugin_data['RequiresPlugins']));
+		$result['requires_plugins'] = requires_plugins_slugs((string) ($plugin_data['RequiresPlugins'] ?? ''));
 		$result['compatibility']    = array();
 
 		// Determine the last_updated date.
@@ -286,23 +243,19 @@ class PublicAPI {
 		$result['last_updated']             = gmdate( 'Y-m-d g:ia \G\M\T', strtotime( $last_updated ) );
 		$result['added']                    = gmdate( 'Y-m-d', strtotime( $plugin->post_date_gmt ) );
 		$result['homepage']                 = empty($plugin_data['PluginURI']) ? '' : $plugin_data['PluginURI'];
-		$result['sections']                 = array();
-
-        $sections = $latest_release_content['plugin_readme_txt']['content']['sections'] ?? [];
-
-        foreach ($sections as $section_key => $section_content) {
-            $result['sections'][$section_key] = apply_filters( 'the_content', $section_content, $section_key);
-        }
+		$result['sections']                 = render_readme_sections($current_release_content['plugin_readme_txt']['content']['sections'] ?? []);
 		$result['sections']['screenshots'] = ''; // placeholder to put screenshots prior to reviews at the end.
 
 		if ( ! empty( $result['sections']['faq'] ) ) {
 			$result['sections']['faq'] = $this->get_simplified_faq_markup( $result['sections']['faq'] );
 		}
 
-		$result['short_description'] = $latest_release_content['plugin_readme_txt']['content']['short_description'] ?? $plugin_data['Description'] ?? '';
+		$result['short_description'] = $current_release_content['plugin_readme_txt']['content']['short_description'] ?? $plugin_data['Description'] ?? '';
 		$result['description']       = $result['sections']['description'] ?? $result['short_description'];
-		$result['download_link']     = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $latest_release->post_title);
-		$result['upgrade_notice']    = $latest_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';
+		$result['download_link']     = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $current_release->post_title);
+		// The all-time figure, as wordpress.org serves it: every delivered release ZIP, counted here.
+		$result['downloaded']        = summarize_plugin_downloads(get_plugin_downloads((int) $plugin->ID))['total'];
+		$result['upgrade_notice']    = $current_release_content['plugin_readme_txt']['content']['upgrade_notice'] ?? '';
 
         require_once __DIR__ . '/AssetManager.php';
         $asset_manager = AssetManager::init();
@@ -315,7 +268,7 @@ class PublicAPI {
 					'caption' => $image['caption'],
 				];
 			},
-			$asset_manager->get_api_screenshots($plugin->post_name, $latest_release_content['plugin_readme_txt']['content']['screenshots'] ?? [])
+			$asset_manager->get_api_screenshots($plugin, $current_release_content['plugin_readme_txt']['content']['screenshots'] ?? [])
 		);
 
 		if ( $result['screenshots'] ) {
@@ -327,7 +280,7 @@ class PublicAPI {
         $terms = array_map(fn($term) => (object) [
             'slug' => sanitize_title($term),
             'name' => $term
-        ], $latest_release_content['plugin_readme_txt']['content']['tags'] ?? []);
+        ], $current_release_content['plugin_readme_txt']['content']['tags'] ?? []);
 
 		$result['tags'] = array();
 		if ( $terms ) {
@@ -336,25 +289,25 @@ class PublicAPI {
 			}
 		}
 
-		$result['stable_tag'] = $latest_version ?: 'trunk';
+		// The current release is what sites receive — the Stable tag of this plugin.
+		$result['stable_tag'] = $current_version;
 
+		// Every release is downloadable by version, as every tag on wordpress.org;
+		// 'trunk' is the alias for the current release (the version-less download URL).
 		$result['versions'] = array();
-		if ( $versions = array_keys($releases) ) {
-			if ( 'trunk' != $result['stable_tag'] ) {
-				array_push( $versions, 'trunk' );
-			}
-			foreach ( $versions as $version ) {
-				$result['versions'][ $version ] = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . ($version === 'trunk' ? '' : '/' . $version));
-			}
+		$versions = array_keys($releases);
+		array_push( $versions, 'trunk' );
+		foreach ( $versions as $version ) {
+			$result['versions'][ $version ] = rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . ($version === 'trunk' ? '' : '/' . $version));
 		}
 
-		$result['donate_link'] = $latest_release_content['plugin_readme_txt']['content']['donate_link'] ?? '';
+		$result['donate_link'] = $current_release_content['plugin_readme_txt']['content']['donate_link'] ?? '';
 
 		// Banners & icons — mirrors the wordpress.org API structure.
 		// @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
 		// NOTE: Intentionally duplicated in handle_update_check() — kept as a 1:1 copy of the wp.org reference.
 		$result['banners'] = array();
-		if ( $banners = $asset_manager->get_plugin_banner($plugin->post_name) ) {
+		if ( $banners = $asset_manager->get_plugin_banner($plugin) ) {
 			if ( isset( $banners['banner'] ) ) {
 				$result['banners']['low'] = $banners['banner'];
 			}
@@ -364,7 +317,7 @@ class PublicAPI {
 		}
 
 		$result['icons'] = array();
-		if ( $icons = $asset_manager->get_plugin_icon($plugin->post_name) ) {
+		if ( $icons = $asset_manager->get_plugin_icon($plugin) ) {
 			if ( ! empty( $icons['icon'] ) && empty( $icons['generated'] ) ) {
 				$result['icons']['1x'] = $icons['icon'];
 			} elseif ( ! empty( $icons['icon'] ) && ! empty( $icons['generated'] ) ) {
@@ -420,6 +373,10 @@ class PublicAPI {
             return new \WP_Error('no_file', 'File not found', ['status' => 404]);
         }
 
+        // Every delivery counts, a site's update as much as a download by hand — the
+        // download history (record_plugin_download()).
+        record_plugin_download((int) $plugin_infos['plugin']->ID);
+
         $filename = basename($zip_abs);
         nocache_headers();
         $filename = sanitize_file_name($filename);
@@ -461,10 +418,14 @@ class PublicAPI {
             $plugin = $plugin_infos['plugin'];
             $release = $plugin_infos['release'];
             $release_data = $plugin_infos['release_data'];
-            $latest_version = $release->post_title;
+            $current_version = $release->post_title;
             $plugin_data = $release_data['plugin_data'];
+            // `tested` like wordpress.org's update API: the sites' update screen says
+            // "Compatibility: Yes / Not tested" from it, comparing with the site's full version
+            // — served as the asking site's branch needs it (served_tested_up_to()).
+            $tested = served_tested_up_to(release_tested_up_to($release)['value'], $this->client_wordpress_version());
 
-            $requires_plugins = (array) ($plugin_data['RequiresPlugins'] ? array_map('trim', explode(',', $plugin_data['RequiresPlugins'])) : []);
+            $requires_plugins = requires_plugins_slugs((string) ($plugin_data['RequiresPlugins'] ?? ''));
 
             // Record installation ping (only if a site URL could be extracted)
             $client_installed_version = (string) ($plugin_payload['Version'] ?? '');
@@ -476,7 +437,7 @@ class PublicAPI {
             // @see https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/api/routes/class-plugin.php
             // NOTE: Intentionally duplicated in handle_info() — kept as a 1:1 copy of the wp.org reference.
             $result['banners'] = array();
-            if ( $banners = $asset_manager->get_plugin_banner($plugin->post_name) ) {
+            if ( $banners = $asset_manager->get_plugin_banner($plugin) ) {
                 if ( isset( $banners['banner'] ) ) {
                     $result['banners']['low'] = $banners['banner'];
                 }
@@ -486,7 +447,7 @@ class PublicAPI {
             }
 
             $result['icons'] = array();
-            if ( $icons = $asset_manager->get_plugin_icon($plugin->post_name) ) {
+            if ( $icons = $asset_manager->get_plugin_icon($plugin) ) {
                 if ( ! empty( $icons['icon'] ) && empty( $icons['generated'] ) ) {
                     $result['icons']['1x'] = $icons['icon'];
                 } elseif ( ! empty( $icons['icon'] ) && ! empty( $icons['generated'] ) ) {
@@ -503,12 +464,13 @@ class PublicAPI {
             $results['plugins'][$plugin_basename] = array_merge(
                 ['slug' => $plugin->post_name],
                 ['plugin' => $plugin_basename],
-                ['version' => $latest_version],
-                ['package' => rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $latest_version)],
+                ['version' => $current_version],
+                ['package' => rest_url(self::NAMESPACE . '/plugins/download/' . $plugin->post_name . '/' . $current_version)],
                 empty($result['icons']) ? [] : [ 'icons' => $result['icons'] ],
                 empty($result['banners']) ? [] : [ 'banners' => $result['banners'] ],
                 empty($plugin_data['RequiresWP']) ? [] : [ 'requires' => $plugin_data['RequiresWP'] ],
                 empty($plugin_data['RequiresPHP']) ? [] : [ 'requires_php' => $plugin_data['RequiresPHP'] ],
+                $tested === '' ? [] : [ 'tested' => $tested ],
                 empty($requires_plugins) ? [] : [ 'requires_plugins' => $requires_plugins ]
             );
         }
@@ -516,6 +478,13 @@ class PublicAPI {
         return $results;
     }
 
+    /**
+     * The plugin and the release a public request refers to. Releases are every release
+     * post of the plugin — none is hidden, each is downloadable by version, as every tag on
+     * wordpress.org; the plugin status stays the distribution switch (a draft plugin serves
+     * nothing). Without a version the request means the current release; null when the
+     * plugin has none: no update, "Plugin not found", download 404.
+     */
     private function get_plugin_infos(string $slug, ?string $version = ''): ?array {
         $plugins = get_posts([
             'post_type' => 'pblsh_plugin',
@@ -528,15 +497,16 @@ class PublicAPI {
         }
         $plugin = $plugins[0];
 
-        $releases_query = new \WP_Query([
+        $release_posts = get_posts([
             'post_type' => 'pblsh_release',
-            'post_status' => 'publish',
+            'post_status' => 'any',
             'post_parent' => $plugin->ID,
             'posts_per_page' => -1,
         ]);
+        $current = resolve_current_release($plugin, $release_posts);
 
         $releases = [];
-        foreach ($releases_query->posts as $release) {
+        foreach ($release_posts as $release) {
             $releases[$release->post_title] = $release;
         }
 
@@ -544,7 +514,7 @@ class PublicAPI {
             return null;
         }
 
-        // order releases by version (ascending); latest will be array_key_last
+        // order releases by version (ascending)
         uksort($releases, function($a, $b) {
             return version_compare($a, $b);
         });
@@ -560,7 +530,7 @@ class PublicAPI {
             }
         }
         else {
-            $requested_release = $releases[array_key_last($releases)];
+            $requested_release = $current['release'];
         }
 
         if (!$requested_release) {
@@ -693,7 +663,9 @@ class PublicAPI {
 	protected function get_simplified_faq_markup( $markup ) {
 
         /*
-        // Original wordpress.org implementation.
+        // Original wordpress.org implementation, kept for the diff until wordpress.org fixes it
+        // (Meta Trac ticket in preparation, 2026-10-23): it misses the <dt id="..."> the parser
+        // writes since the FAQ topics became linkable.
         $markup = str_replace(
             array( '<dl>', '</dl>', '<dt>', '</dt>', '<h3>', '</h3>', '<dd>', '</dd>' ),
             array( '',     '',      '<h4>', '</h4>', '',      '',     '<p>',  '</p>'  ),
@@ -779,7 +751,7 @@ class PublicAPI {
             $color = $m[2];
         }
 
-        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/libs/geopattern-1.1.0/geopattern_loader.php';
+        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/libs/geopattern-1.1.2/geopattern_loader.php';
 
         $icon = new \Pblsh\Vendor\RedeyeVentures\GeoPattern\GeoPattern();
         $icon->setString( $slug );

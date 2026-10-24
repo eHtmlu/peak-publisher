@@ -5,6 +5,17 @@ namespace Pblsh;
 defined('ABSPATH') || exit;
 
 
+/**
+ * The upload of a plugin version, from the uploaded ZIP to the published release; one instance
+ * per request, created by AdminAPI's upload routes. process() runs the phases the client
+ * steps through, finalize() publishes to the chosen target — self-hosted: the final ZIP and
+ * the plugin and release posts; wordpress.org: a deploy of the workspace through
+ * WporgOperations, no ZIP —, discard_upload() drops the upload. Between the requests an
+ * upload lives in its working directory under tmp/: the files and cache.json with the upload
+ * state $data, which finalize persists verbatim with the release as the record of what
+ * happened, and from finalize on its status (PBLSH_FINALIZE_STATUS_FILE). The server enforces
+ * hard facts only; the checklist and its decisions are the client's.
+ */
 class UploadWorkflow {
     /**
      * Absolute path to the current upload temp directory (pblsh/tmp/<upload_id>/).
@@ -51,8 +62,15 @@ class UploadWorkflow {
     }
 
     /**
-     * Finalizes a previously validated upload: creates the plugin and release posts,
-     * moves the ZIP to a permanent storage location, links entities and returns IDs.
+     * Finalizes a previously validated upload: publishes it to the chosen target
+     * (publish_to_target()) and records the attempt's progress and response in the upload's
+     * finalize status (record_finalize_status()), which the dialog reads back through
+     * finalize_status() — a gateway in front of the site may end this request long before a
+     * large wordpress.org deploy is done. A finalize that succeeded answers every later
+     * request with its response, and one still running refuses a second (finalize_running):
+     * a retry after a lost answer publishes nothing twice — on wordpress.org the deploy lock
+     * would stop it, self-hosted nothing else would, and two publishes of one workspace end
+     * in two release posts of one version.
      *
      * Expects 'upload_id' referencing cache.json and ZIP in pblsh/tmp/<upload_id>/.
      *
@@ -60,46 +78,130 @@ class UploadWorkflow {
      * @return array { status, plugin_id, release_id } or error structure.
      */
     public function finalize(\WP_REST_Request $request): array {
-        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? '')); 
-        if ($upload_id === '') {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
         }
         $this->init_tmp_root($upload_id);
+        $recorded = finalize_status_view(read_finalize_status($this->tmp_root), time());
+        if ($recorded['state'] === 'finished' && ($recorded['response']['status'] ?? null) === 'ok') {
+            return $recorded['response'];
+        }
+        if ($recorded['state'] === 'running') {
+            return $this->upload_error('finalize_running', __('This upload is being published right now. Wait for it to finish.', 'peak-publisher'));
+        }
         $cache_file = $this->tmp_root . 'cache.json';
         if (!file_exists($cache_file)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'upload_not_found', 'message' => 'Upload not found.' ] ] ];
         }
         $cache = json_decode(file_get_contents($cache_file), true);
-        $zip_path = (string) ($cache['zip_path'] ?? '');
         $data = (array) ($cache['data'] ?? []);
-        if (!file_exists($zip_path)) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'zip_missing', 'message' => 'ZIP file is missing.' ] ] ];
-        }
 
+        // The publish goes on to its end when the client's connection ends first; the status
+        // tells the dialog how far it got. Written on every phase change and at most once a
+        // second within a phase.
+        ignore_user_abort(true);
+        $status = [ 'started_at' => time(), 'alive_at' => time(), 'phase' => 'prepare', 'done' => 0, 'total' => 0, 'response' => null ];
+        record_finalize_status($this->tmp_root, $status);
+        $report = function(string $phase, int $done = 0, int $total = 0) use (&$status): void {
+            $now = time();
+            if ($phase === $status['phase'] && $now === $status['alive_at']) {
+                return;
+            }
+            $status = [ ...$status, 'alive_at' => $now, 'phase' => $phase, 'done' => $done, 'total' => $total ];
+            record_finalize_status($this->tmp_root, $status);
+        };
+
+        $response = $this->publish_to_target($request, $data, $report);
+
+        record_finalize_status($this->tmp_root, [ ...$status, 'alive_at' => time(), 'response' => $response ]);
+        if (($response['status'] ?? null) === 'ok') {
+            $this->delete_workspace();
+        }
+        return $response;
+    }
+
+    /**
+     * The status of this upload's finalize for the dialog (finalize_status_view()): how far a
+     * running publish got, or how it ended — also when the finalize request lost its answer on
+     * the way.
+     */
+    public function finalize_status(\WP_REST_Request $request): array {
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
+        }
+        // Read only: an upload without a working directory has no status, and gets no directory.
+        return finalize_status_view(read_finalize_status(peak_publisher_upload_dir()['path'] . $this->tmp_subdir($upload_id) . '/'), time());
+    }
+
+    /**
+     * Publishes the upload to the target the request chose: self-hosted the release ZIP and
+     * the plugin and release posts, wordpress.org a deploy (finalize_wporg_upload()).
+     *
+     * @param callable $report fn(string $phase, int $done = 0, int $total = 0): void — the
+     *        progress (see PBLSH_FINALIZE_STATUS_FILE for the phases).
+     */
+    private function publish_to_target(\WP_REST_Request $request, array $data, callable $report): array {
         // Check if the plugin and version are valid
         if (!$data['plugin_ok'] || !$data['version_ok']) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'plugin_or_version_invalid', 'message' => 'Plugin or version is invalid.' ] ] ];
         }
 
+        $active_target = $this->resolve_finalize_target($request, $data);
+        if (isset($active_target['status'])) {
+            return $active_target;
+        }
+        $target = $active_target['target'];
+
+        // The current-release decision (both channels): the analysis facts say whether the
+        // user had a choice, the request carries the answer. A missing choice or a
+        // contradiction to a forced default is a client bug.
+        $current_release_facts = is_array($target['current_release'] ?? null) ? $target['current_release'] : null;
+        if ($current_release_facts === null) {
+            return $this->upload_error('plugin_or_version_invalid', __('Plugin or version is invalid.', 'peak-publisher'));
+        }
+        $make_current = $this->resolve_make_current_decision($request, $current_release_facts);
+        if ($make_current === null) {
+            return $this->upload_error('invalid_current_release_decision', __('The current-release decision of this upload is missing or invalid.', 'peak-publisher'));
+        }
+
+        // The carry (carry_tested_up_to()): when a Tested up to line of the upload says something
+        // else than the other line or the predecessor in the version line, every existing line
+        // gets the highest value, trimmed to the first two numbers — in the files of the
+        // workspace, before the ZIP is built or the tag deployed, whatever the current-release
+        // switch says. The target's facts in the upload state record it, with the stable branch
+        // the dialog judged against (tested_up_to_upload_facts()).
+        $carry = $target['tested_up_to']['carry'] ?? null;
+        if (is_array($carry)) {
+            $this->apply_tested_up_to_to_workspace($data, (string) $carry['value']);
+        }
+
+        if ($active_target['hosting_type'] === 'wporg') {
+            return $this->finalize_wporg_upload($data, $target, $make_current, $report);
+        }
+        $data['hosting_type_resolved'] = 'self_hosted';
+        $data = $this->apply_target_release_context($data, $target);
+
         // Check if the plugin slug is valid
-        $plugin_slug = $data['plugin_info']['plugin_slug'];
-        $plugin_slug_sanitized = sanitize_title($plugin_slug);
-        if ($plugin_slug !== $plugin_slug_sanitized) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'plugin_slug_mismatch', 'message' => 'Plugin slug mismatch.' ] ] ];
+        // (deliberate last gate: the identity is read back from the upload cache before the release is created)
+        $plugin_slug = normalize_plugin_slug($target['slug'] ?? null, 'slug');
+        if (is_wp_error($plugin_slug)) {
+            return [ 'status' => 'error', 'errors' => [ [ 'code' => $plugin_slug->get_error_code(), 'message' => $plugin_slug->get_error_message() ] ] ];
         }
 
         // Check if the plugin slug is unique if it's a new plugin
         if (empty($data['existing_plugin'])) {
-            $plugin_slug_unique = wp_unique_post_slug($plugin_slug_sanitized, 0, 'publish', 'pblsh_plugin', 0);
-            if ($plugin_slug_sanitized !== $plugin_slug_unique) {
+            $plugin_slug_unique = wp_unique_post_slug($plugin_slug, 0, 'publish', 'pblsh_plugin', 0);
+            if ($plugin_slug !== $plugin_slug_unique) {
                 return [ 'status' => 'error', 'errors' => [ [ 'code' => 'plugin_slug_mismatch', 'message' => 'Plugin slug mismatch.' ] ] ];
             }
         }
 
         // Check if the release slug is valid
-        $release_slug = $data['plugin_info']['release_slug'];
+        $release_slug = (string) ($target['release_slug'] ?? '');
         $release_slug_sanitized = sanitize_title($release_slug);
-        if ($release_slug !== $release_slug_sanitized) {
+        if ($release_slug === '' || $release_slug !== $release_slug_sanitized) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'release_slug_mismatch', 'message' => 'Release slug mismatch.' ] ] ];
         }
 
@@ -111,6 +213,31 @@ class UploadWorkflow {
             }
         }
 
+        // The pointer the dialog showed must still be the pointer — another admin's flip is
+        // never overwritten silently. The same contract as the wporg deploy, without a lock:
+        // seconds pass between this read and the write, on this one instance.
+        $plugin_post_id = (int) ($data['existing_plugin'] ?? 0);
+        $pointer_before = $plugin_post_id > 0 ? (string) get_post_meta($plugin_post_id, '_pblsh_current_release', true) : '';
+        if ($pointer_before !== (string) $current_release_facts['pointer']) {
+            return $this->upload_error('current_release_changed', __('The current release of this plugin changed while this upload was open. Reload the upload facts and check the decision again.', 'peak-publisher'));
+        }
+
+        // Build the final release ZIP — the only place the slug materializes in the
+        // filesystem: {slug}/ as the ZIP's logical root folder, named {slug}.{version}.zip
+        // like the wordpress.org builder. The version is the plugin header verbatim — the same
+        // string a wporg deploy uses as its SVN tag (analyze guarantees the publishable format).
+        $version = (string) $data['plugin_data']['Version'];
+        $content_root = $this->detect_root_dir($this->tmp_root . 'data/');
+        if (!is_dir($content_root)) {
+            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'upload_workdir_invalid', 'message' => 'Upload work directory is missing.' ] ] ];
+        }
+        $report('build');
+        $built_zip = $this->build_release_zip($content_root, $plugin_slug, $version);
+        if ($built_zip === false) {
+            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'build_zip_failed', 'message' => 'Failed to build the release ZIP.' ] ] ];
+        }
+        $release_zip = $built_zip['path'];
+
         // Delete the existing release file if it exists
         $existing_release_id = $data['related_releases']['existing']['id'] ?? 0;
         if ($existing_release_id) {
@@ -121,42 +248,72 @@ class UploadWorkflow {
             }
         }
 
-        // Move the ZIP to the target directory
-        $target_dir = trailingslashit(peak_publisher_upload_basedir()) . 'plugins/' . $plugin_slug . '/' . sanitize_title($data['plugin_info']['normalized_version']) . '/';
+        // Move the ZIP into the plugin's releases dir — flat like the wordpress.org download
+        // host, the filename {slug}.{version}.zip carries the full identity. releases/ is the
+        // UploadWorkflow-owned sibling of the LocalAssetStore-owned assets/ dir.
+        $target_dir = trailingslashit(peak_publisher_upload_basedir()) . 'plugins/' . $plugin_slug . '/releases/';
         wp_mkdir_p($target_dir);
-        $target_zip = $target_dir . basename($zip_path);
-        if (!get_wp_filesystem()->move($zip_path, $target_zip)) {
+        $target_zip = $target_dir . basename($release_zip);
+        if (!get_wp_filesystem()->move($release_zip, $target_zip)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'move_zip_failed', 'message' => 'Failed to move ZIP to target directory.' ] ] ];
         }
 
-        // Create pblsh_plugin post
-        $plugin_post_id = $data['existing_plugin'] ?? 0;
-        $plugin_post_data = [
-            'post_type' => 'pblsh_plugin',
-            'post_status' => 'publish',
-            'post_title' => $data['plugin_data']['Name'] ?? '',
-            'post_name' => $plugin_slug,
+        // Persist the settled identity into the stored release schema (the shape
+        // plugin_file_snapshot() mirrors for wporg-synced releases and the APIs read back).
+        $data['plugin_info']['plugin_slug'] = $plugin_slug;
+        $data['plugin_info']['plugin_basename'] = (string) ($target['plugin_basename'] ?? '');
+        $data['plugin_info']['release_slug'] = $release_slug;
+        // Traceability snapshot of the built artifact, symmetric to original_zip: reference
+        // values recorded at build time, so a later check can detect whether the stored file
+        // is still the one finalize produced. mime_type is deliberately absent — our own
+        // output is always application/zip.
+        $data['release_zip'] = [
+            'name' => basename($target_zip),
+            'size' => (int) filesize($target_zip),
+            'sha256' => (string) hash_file('sha256', $target_zip),
+            'generated_with' => $built_zip['generated_with'],
         ];
-        if ($plugin_post_id > 0) {
-            if (empty($data['related_releases']['latest']) || version_compare($data['related_releases']['latest']['version'], $data['plugin_data']['Version'], '<=')) {
-                $plugin_post_data['ID'] = $plugin_post_id;
-                $plugin_post_id = wp_update_post($plugin_post_data);
-            }
-        } else {
-            $plugin_post_id = wp_insert_post($plugin_post_data);
-        }
-        if (is_wp_error($plugin_post_id)) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => $plugin_post_id->get_error_message() ] ] ];
-        }
-        if (!$plugin_post_id) {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => 'Failed to create plugin post.' ] ] ];
-        }
-    
 
-        // Create pblsh_release post (child of plugin)
+        // The decision and its effect, recorded before the release post is written (its
+        // content is this state); the pointer itself is written after the post exists.
+        $data['self_hosted_deploy'] = [
+            'current_release' => [
+                'make_current' => $make_current,
+                'pointer_before' => $pointer_before,
+                'pointer_written' => $make_current ? $version : null,
+            ],
+        ];
+
+        // Create the pblsh_plugin post. An existing plugin is left as it is: its status is the
+        // operator's distribution switch, its title follows the reference release below.
+        if ($plugin_post_id <= 0) {
+            $plugin_post_id = wp_insert_post([
+                'post_type' => 'pblsh_plugin',
+                'post_status' => 'publish',
+                'post_title' => $data['plugin_data']['Name'] ?? '',
+                'post_name' => $plugin_slug,
+                // The pointer exists from the start; it is set below when this release becomes current.
+                'meta_input' => [ '_pblsh_current_release' => '' ],
+            ]);
+            if (is_wp_error($plugin_post_id)) {
+                return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => $plugin_post_id->get_error_message() ] ] ];
+            }
+            if (!$plugin_post_id) {
+                return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_plugin_failed', 'message' => 'Failed to create plugin post.' ] ] ];
+            }
+        }
+
+        // Create pblsh_release post (child of plugin). Its content is the snapshot — what the
+        // APIs and the editor read, regenerable from the ZIP as a wporg tag's is from SVN
+        // (docs/data-schema.md) — taken from the upload state that built the ZIP, so no ZIP is
+        // read here and a host without the zip extension keeps building releases; the upload
+        // state itself, the forensic record of this upload, lives in post meta like a wporg
+        // deploy's.
+        $snapshot = release_snapshot_from_upload_state($data);
         $release_meta = [
             '_pblsh_zip_path' => $this->rel_path($target_zip, peak_publisher_upload_basedir()),
             '_pblsh_directory_content_hash' => $data['plugin_info']['content_hash'] ?? '',
+            '_pblsh_upload_state' => wp_slash(json_encode($data)),
         ];
         $release_post_data = [
             'ID' => $existing_release_id,
@@ -165,15 +322,10 @@ class UploadWorkflow {
             'post_title' => $data['plugin_data']['Version'] ?? '',
             'post_name' => $release_slug,
             'post_parent' => (int) $plugin_post_id,
-            'post_content' => wp_slash(json_encode($data)),
+            'post_content' => wp_slash(json_encode($snapshot)),
             'meta_input' => $release_meta,
         ];
-        if ($existing_release_id > 0) {
-            $release_post_data['ID'] = $existing_release_id;
-            $release_post_id = wp_update_post($release_post_data);
-        } else {
-            $release_post_id = wp_insert_post($release_post_data);
-        }
+        $release_post_id = write_data_post($release_post_data);
         if (is_wp_error($release_post_id)) {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_release_failed', 'message' => $release_post_id->get_error_message() ] ] ];
         }
@@ -181,12 +333,12 @@ class UploadWorkflow {
             return [ 'status' => 'error', 'errors' => [ [ 'code' => 'create_release_failed', 'message' => 'Failed to create release post.' ] ] ];
         }
 
-        /* if (empty($data['existing_plugin'])) {
-            update_post_meta($plugin_post_id, '_pblsh_latest_release_id', (int) $release_post_id);
-        } */
-
-        // Optional: cleanup temp folder later
-        $this->delete_directory_recursively_with_race_protection($this->tmp_root);
+        // The pointer (one of its two write sites, the other is the flip), then the title,
+        // which follows the reference release — current, else latest.
+        if ($make_current) {
+            update_post_meta((int) $plugin_post_id, '_pblsh_current_release', $version);
+        }
+        refresh_plugin_title_from_reference((int) $plugin_post_id);
 
         return [
             'status' => 'ok',
@@ -199,13 +351,59 @@ class UploadWorkflow {
                 'file_exists' => isset($zip_to_replace_full_path) ? file_exists($zip_to_replace_full_path) : null,
                 'plugin_post_id' => $plugin_post_id ?? null,
             ],
-            'plugin' => [
-                'post_type' => 'pblsh_plugin',
-                'post_status' => 'publish',
-                'post_title' => $data['plugin_data']['Name'] ?? '',
-                'post_name' => $plugin_slug,
-            ],
         ];
+    }
+
+    /**
+     * Writes the carried Tested up to into the workspace where the value lives — the existing
+     * lines only (tested_up_to_line_changes(): the carry never creates a line), readable or not
+     * (a line the facts could not read, `7.2-RC1`, gets the value too, unnamed by the checklist
+     * — see carry_tested_up_to()) — and brings the upload state's facts of both files and the
+     * content hash up to date, so the ZIP and the deploy ship what the state says.
+     */
+    private function apply_tested_up_to_to_workspace(array &$data, string $value): void {
+        $root = $this->detect_root_dir($this->tmp_root . 'data/');
+        $paths = [
+            'readme' => (string) ($data['plugin_readme_txt']['file_name'] ?? ''),
+            'main' => (string) ($data['plugin_info']['main_file'] ?? ''),
+        ];
+        $read = static fn(string $rel): ?string => $rel !== '' && is_file($root . $rel) ? (string) file_get_contents($root . $rel) : null;
+        $changes = tested_up_to_line_changes($read($paths['readme']), $read($paths['main']), $value, false);
+        foreach ($changes as $file => $content) {
+            // A write that fails in the plugin's own workspace is an invariant violation, not a
+            // user error: the upload state must never claim a value the files do not carry.
+            if (file_put_contents($root . $paths[$file], $content) === false) {
+                throw new \RuntimeException('tested_up_to_workspace_write_failed');
+            }
+        }
+        if (isset($changes['readme'])) {
+            $parsed = parse_readme_txt($changes['readme']);
+            $data['plugin_readme_txt']['content'] = json_encode($parsed) !== false ? $parsed : [];
+        }
+        if (isset($changes['main'])) {
+            $data['plugin_data'] = read_plugin_headers($root . $paths['main']);
+        }
+        $data['plugin_info']['content_hash'] = content_hash_from_entries(directory_entries($root));
+    }
+
+    /**
+     * The user's current-release decision of a finalize request, validated against the
+     * target's facts: with a choice the request must carry a boolean make_current; without
+     * one the default applies, and a contradicting parameter is a client bug. Null = invalid.
+     */
+    private function resolve_make_current_decision(\WP_REST_Request $request, array $facts): ?bool {
+        $params = $request->get_json_params();
+        $has_param = is_array($params) && array_key_exists('make_current', $params);
+        $param = $has_param ? $params['make_current'] : null;
+
+        if (!empty($facts['choice'])) {
+            return is_bool($param) ? $param : null;
+        }
+        $default = (bool) $facts['default_make_current'];
+        if ($has_param && $param !== $default) {
+            return null;
+        }
+        return $default;
     }
 
     /**
@@ -265,10 +463,17 @@ class UploadWorkflow {
                 'zip_path' => $zip_path,
                 'data' => [
                     'phases' => [],
+                    // The upload session starts here — snapshot of the code, runtime and actor that will
+                    // produce the release, so the stored state tells afterwards what it was made with.
+                    'environment' => $this->capture_environment(),
+                    // name/size/mime_type are the client-declared boundary facts; sha256 is
+                    // measured from the received file — its only fingerprint that survives
+                    // the tmp cleanup.
                     'original_zip' => [
                         'name' => $files['file']['name'],
                         'size' => (int) $files['file']['size'],
                         'mime_type' => (string) $files['file']['type'],
+                        'sha256' => (string) hash_file('sha256', $zip_path),
                         'built_in_browser' => $built_in_browser,
                     ],
                 ],
@@ -278,9 +483,9 @@ class UploadWorkflow {
             return [ 'status' => 'ok', 'next' => 'unpack', 'upload_id' => $upload_id ];
         }
 
-        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? ''));
-        if ($upload_id === '') {
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'missing_upload_id', 'message' => 'Missing upload_id.' ] ] ];
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
         }
         $this->init_tmp_root($upload_id);
         $cache_file = $this->tmp_root . 'cache.json';
@@ -307,6 +512,9 @@ class UploadWorkflow {
         }
 
         if ($phase === 'analyze') {
+            // Use the latest request intent for this analysis run
+            $request_context = $this->upload_request_context_from_request($request);
+
             $working_dir = $this->tmp_root . 'data/';
 
             // Detect root directory and main plugin file
@@ -315,16 +523,51 @@ class UploadWorkflow {
 
             // Measure size before cleanup
             $size_before_cleanup = $this->get_path_size($root);
-            $entry_count_before_cleanup = $this->get_path_entry_count($root);
+            $entry_count_before_cleanup = $this->count_directory_entries($root);
 
-            // Add top-level folder if needed
-            $has_top_level_folder = $this->has_top_level_folder($working_dir);
-            $fixed_top_level_folder = !$has_top_level_folder && $main_file ? $this->add_top_level_folder($working_dir, $main_file) : false;
-            if ($fixed_top_level_folder) {
-                // The top-level folder was added, so we need to re-detect the root and main file
-                $root = $this->detect_root_dir($working_dir);
-                $main_file = $this->find_main_plugin_file($root);
+            // The plugin headers — WordPress's and Tested up to (read_plugin_headers()).
+            $plugin_data = $main_file ? read_plugin_headers($main_file) : [];
+
+            // Slug candidates from user-chosen names — the plugin name first (wordpress.org parity:
+            // submissions mint the slug from the plugin name, so pre-import wporg uploads fit
+            // directly), then the top-level folder, the user's own ZIP filename (a browser-built
+            // ZIP name is a pipeline artifact), and the main plugin file name. Minted like
+            // wordpress.org — transform, don't reject — and deduplicated by resulting slug with
+            // merged sources.
+            $built_in_browser = (string) ($cache['data']['original_zip']['built_in_browser'] ?? '');
+            $uploaded_folder_name = $this->has_top_level_folder($working_dir) ? basename($root) : '';
+            $slug_candidate_bases = [
+                [ 'source' => 'plugin_name', 'base' => (string) ($plugin_data['Name'] ?? '') ],
+                [ 'source' => 'top_level_folder', 'base' => $uploaded_folder_name ],
+                [ 'source' => 'zip_filename', 'base' => $built_in_browser ? '' : preg_replace('/\.zip$/i', '', (string) ($cache['data']['original_zip']['name'] ?? '')) ],
+                [ 'source' => 'main_file_basename', 'base' => $main_file ? preg_replace('/\.php$/i', '', basename($main_file)) : '' ],
+            ];
+            $candidates_by_slug = [];
+            foreach ($slug_candidate_bases as $candidate_base) {
+                if ($candidate_base['base'] === '') {
+                    continue;
+                }
+                $candidate_slug = generate_plugin_slug($candidate_base['base']);
+                if ($candidate_slug === '') {
+                    continue;
+                }
+                if (!isset($candidates_by_slug[$candidate_slug])) {
+                    $candidates_by_slug[$candidate_slug] = [ 'slug' => $candidate_slug, 'sources' => [] ];
+                }
+                $candidates_by_slug[$candidate_slug]['sources'][] = $candidate_base['source'];
             }
+            // Annotate every candidate with the channels where it already identifies a plugin —
+            // shown as "existing" badges in the UI and read by the per-channel slug resolution.
+            foreach (array_keys($candidates_by_slug) as $annotate_slug) {
+                $existing = [];
+                foreach ([ 'wporg' => 'pblsh_wporg_plugin', 'self_hosted' => 'pblsh_plugin' ] as $hosting_type => $post_type) {
+                    if (get_plugin_post_by_slug($post_type, $annotate_slug) instanceof \WP_Post) {
+                        $existing[] = $hosting_type;
+                    }
+                }
+                $candidates_by_slug[$annotate_slug]['existing'] = $existing;
+            }
+            $slug_candidates = array_values($candidates_by_slug);
 
             // Find workspace artifacts
             $found_workspace_artifacts = $this->find_workspace_artifacts($root);
@@ -335,99 +578,66 @@ class UploadWorkflow {
 
             // Measure size after cleanup
             $size_after_cleanup = $this->get_path_size($root);
-            $entry_count_after_cleanup = $this->get_path_entry_count($root);
-
-            // If Peak Publisher created the zip file in the browser itself, rename the zip file to the main file name of the plugin so that it has a meaningful name.
-            $built_in_browser = (string) ($cache['data']['original_zip']['built_in_browser'] ?? '');
-            if ($built_in_browser && $main_file && !$has_top_level_folder) {
-                $new_zip_path = dirname($zip_path) . '/' . preg_replace('/\.php$/i', '', basename($main_file)) . '.zip';
-                if ($new_zip_path !== $zip_path) {
-                    get_wp_filesystem()->move($zip_path, $new_zip_path);
-                    $zip_path = $new_zip_path;
-                }
-            }
-
-            // Determine plugin folder name and basename
-            $plugin_folder_name = $has_top_level_folder || $fixed_top_level_folder ? basename($root) : basename($zip_path, '.zip');
-            $plugin_basename = $plugin_folder_name . '/' . basename($main_file);
-            $plugin_slug = sanitize_title($plugin_folder_name);
-
-            // Process readme.txt (root-level, case-sensitive), normalize encoding/BOM if configured, and parse
-            $readme_modified = false;
-            $readme_info = ['found' => false, 'file_name' => '', 'content' => []];
-            $readme_abs = $this->find_readme_txt($root);
-            if ($readme_abs) {
-                [$readme_content, $was_modified, $readme_cleanup_info] = $this->ensure_readme_utf8_without_bom($readme_abs);
-                $readme_modified = $was_modified ? true : false;
-                $readme_info['found'] = true;
-                $readme_info['file_name'] = basename($readme_abs);
-
-                // Parse readme.txt and check if it is able to be encoded to JSON, if not, set the content to an empty array to avoid JSON encoding errors later.
-                $readme_content_parsed = $this->parse_readme_txt($readme_content);
-                $readme_cleanup_info['can_be_encoded_to_json'] = json_encode($readme_content_parsed) !== false;
-                $readme_info['content'] = $readme_cleanup_info['can_be_encoded_to_json'] ? $readme_content_parsed : null;
-            }
-
-            // Get plugin data
-            require_once ABSPATH . 'wp-admin/includes/plugin.php'; // For WordPress before version 6.8 we need to include this file to ensure the function get_plugin_data() is available.
-            $plugin_data = $main_file ? get_plugin_data($main_file, false, false) : [];
+            $entry_count_after_cleanup = $this->count_directory_entries($root);
 
             // Determine if the plugin is valid
             $plugin_ok = $main_file && !empty($plugin_data['Name']);
-            $version_ok = $plugin_ok && !empty($plugin_data['Version']);
+            $version_ok = $plugin_ok && is_publishable_version((string) ($plugin_data['Version'] ?? ''));
 
-            /* if (!$update_uri) {
-                // Check if there is a plugin with same slug on wordpress.org
-                wp_remote_get('https://api.wordpress.org/plugins/info/1.0/' . $plugin_slug . '.json');
-                if ($response['response']['code'] === 200) {
-                    $response_data = json_decode($response['body'], true);
-                    if ($response_data['update_uri']) {
-                        $update_uri = $response_data['update_uri'];
+            // Process readme.txt (root-level, wordpress.org precedence), normalize encoding/BOM,
+            // apply R1 and parse. R1: the release's readme names its own version as Stable tag —
+            // both channels (wordpress.org reads the pointer from trunk, never from a tag's
+            // readme; the file just must not contradict its release). Only on valid UTF-8:
+            // found = the parser's value before (null = not processable), written = the value
+            // set (null = skipped or already equal).
+            $readme_info = default_plugin_readme_txt_data();
+            $readme_abs = $this->find_readme_txt($root);
+            $readme_stable_tag = [ 'found' => null, 'written' => null ];
+            if ($readme_abs) {
+                [$readme_content, $readme_cleanup_info] = $this->ensure_readme_utf8_without_bom($readme_abs);
+                $readme_info['found'] = true;
+                $readme_info['file_name'] = basename($readme_abs);
+
+                $readme_content_parsed = parse_readme_txt($readme_content);
+                if (is_utf8($readme_content)) {
+                    $readme_stable_tag['found'] = (string) ($readme_content_parsed['stable_tag'] ?? '');
+                    $version = (string) ($plugin_data['Version'] ?? '');
+                    if ($version_ok && $readme_stable_tag['found'] !== $version) {
+                        $readme_content = set_readme_stable_tag($readme_content, $version);
+                        @file_put_contents($readme_abs, $readme_content);
+                        $readme_stable_tag['written'] = $version;
+                        $readme_content_parsed = parse_readme_txt($readme_content);
                     }
                 }
-            } */
+                // Parse readme.txt and check if it is able to be encoded to JSON, if not, set the content to an empty array to avoid JSON encoding errors later.
+                $readme_cleanup_info['can_be_encoded_to_json'] = json_encode($readme_content_parsed) !== false;
+                $readme_info['content'] = $readme_cleanup_info['can_be_encoded_to_json'] ? $readme_content_parsed : [];
+            }
 
             // Search for bootstrap code
             $bootstrap = $this->search_bootstrap_code($root);
 
-            // Check if the plugin already exists
-            $existing_plugin = get_posts([
-                'post_type' => 'pblsh_plugin',
-                'post_status' => 'any',
-                'posts_per_page' => 1,
-                'name' => $plugin_slug,
-            ])[0] ?? null;
-
-            // Find related releases
-            $related_releases = !empty($existing_plugin->ID) && !empty($plugin_data['Version']) ? $this->find_related_releases($existing_plugin->ID, $plugin_data['Version']) : false;
-
-            // Prepare data for the result
+            // Prepare data for the result. The identity (slug, channel) is not part of the
+            // analysis facts — it is resolved per channel in build_hosting_type_analysis_state
+            // and materializes in the filesystem only when finalize builds the release ZIP.
             $data = [
                 ...$cache['data'],
-                'existing_plugin' => $existing_plugin->ID ?? false,
-                'result_zip' => [
-                    'name' => basename($zip_path),
-                    'size' => filesize($zip_path),
-                    'mime_type' => mime_content_type($zip_path),
-                    'rebuilt_on_server' => false,
-                ],
+                // The upload request's intent, recorded once at this boundary — every hosting
+                // re-analysis (set_slug) reads these facts from the state.
+                'hosting_type_intended' => $request_context['hosting_type_intended'] ?? null,
+                'wporg_username_intended' => $request_context['wporg_username_intended'] ?? null,
                 'plugin_ok' => $plugin_ok,
                 'version_ok' => $version_ok,
-                'related_releases' => $related_releases,
                 'plugin_info' => [
                     'normalized_version' => normalize_version_number($plugin_data['Version'] ?? ''),
-                    'release_slug' => get_release_slug($plugin_slug, $plugin_data['Version'] ?? ''),
                     'main_file' => $main_file ? $this->rel_path($main_file, $root) : false,
                     'bootstrap_file' => $bootstrap['file'] ? $this->rel_path($bootstrap['file'], $root) : false,
                     'bootstrap_version' => $bootstrap['version'] ?? '',
                     'bootstrap_is_latest' => $bootstrap['is_latest'] ?? false,
-                    'plugin_basename' => $plugin_basename,
-                    'plugin_slug' => $plugin_slug,
-                    'content_hash' => $this->get_directory_content_hash($root),
+                    'slug_candidates' => $slug_candidates,
+                    'content_hash' => content_hash_from_entries(directory_entries($root)),
                 ],
                 'cleanup_info' => [
-                    'has_top_level_folder' => $has_top_level_folder,
-                    'fixed_top_level_folder' => $fixed_top_level_folder,
                     'found_workspace_artifacts' => $found_workspace_artifacts,
                     'size_before_cleanup' => (int) $size_before_cleanup,
                     'size_after_cleanup' => (int) $size_after_cleanup,
@@ -440,65 +650,841 @@ class UploadWorkflow {
                         'detected_encoding' => (string) ($readme_cleanup_info['detected_encoding'] ?? ''),
                         'converted_to_utf8' => (bool) ($readme_cleanup_info['converted_to_utf8'] ?? false),
                         'removed_utf8_bom' => (bool) ($readme_cleanup_info['removed_utf8_bom'] ?? false),
+                        'stable_tag' => $readme_stable_tag,
                     ],
                     'settings_on_upload' => array_intersect_key($settings, array_flip([
-                        'auto_add_top_level_folder',
                         'auto_remove_workspace_artifacts',
-                        'wordspace_artifacts_to_remove',
-                        'readme_txt_convert_to_utf8_without_bom',
+                        'workspace_artifacts_to_remove',
                     ])),
                 ],
                 'plugin_data' => $plugin_data,
                 'plugin_readme_txt' => $readme_info,
             ];
 
-            // Determine if the ZIP needs to be rebuilt
-            $any_deleted = false;
-            foreach ($found_workspace_artifacts as $entry) { if (!empty($entry['deleted'])) { $any_deleted = true; break; } }
-            $rebuild_zip_needed = (bool) ($fixed_top_level_folder || $any_deleted || $readme_modified);
+            $data = $this->build_hosting_type_analysis_state($data);
 
             // Update cache
-            $cache['zip_path'] = $zip_path;
             $cache['data'] = $data;
             $cache['data']['phases'][$phase] = $this->get_time_log();
             @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
 
-            // Return result
-            return [
-                'status' => 'ok',
-                'next' => $plugin_ok && $rebuild_zip_needed ? 'rebuild_zip' : 'result',
-                'upload_id' => $upload_id,
-            ];
-        }
-
-        if ($phase === 'rebuild_zip') {
-            $working_dir = $this->tmp_root . 'data/';
-            $rebuilt = $this->build_zip($working_dir, $zip_path);
-            $this->delete_directory_recursively_with_race_protection($working_dir);
-
-            if ($rebuilt) {
-                $cache['data']['result_zip'] = [
-                    'name' => basename($zip_path),
-                    'size' => filesize($zip_path),
-                    'mime_type' => mime_content_type($zip_path),
-                    'rebuilt_on_server' => $rebuilt,
-                ];
-                $cache['data']['phases'][$phase] = $this->get_time_log();
-                @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
-                return [ 'status' => 'ok', 'next' => 'result', 'upload_id' => $upload_id ];
-            }
-            return [ 'status' => 'error', 'errors' => [ [ 'code' => 'rebuild_failed', 'message' => 'Failed to rebuild ZIP.' ] ], 'next' => 'result', 'upload_id' => $upload_id ];
+            return [ 'status' => 'ok', 'next' => 'result', 'upload_id' => $upload_id ];
         }
 
         if ($phase === 'result') {
+            $data = is_array($cache['data'] ?? null) ? $cache['data'] : [];
+            if (empty($data['phases']['analyze'])) {
+                return $this->upload_error(
+                    'upload_analyze_incomplete',
+                    __('Upload analysis has not completed.', 'peak-publisher'),
+                    $upload_id,
+                    $data
+                );
+            }
             return [
                 'status' => 'ok',
                 'upload_id' => $upload_id,
-                'data' => $cache['data'] ?? [],
+                'data' => $data,
             ];
         }
 
+        if ($phase === 'refresh_target_context') {
+            $data = (array) ($cache['data'] ?? []);
+            if (empty($data['phases']['analyze'])) {
+                return $this->upload_error('upload_analyze_incomplete', __('Upload analysis has not completed.', 'peak-publisher'), $upload_id, $data);
+            }
+
+            // The world outside this upload advanced (account saved, wporg state imported,
+            // the current release changed by another admin) — re-run the one authoritative
+            // target resolution, same as set_slug.
+            $cache['data'] = $this->build_hosting_type_analysis_state($data);
+            $cache['data']['phases'][$phase] = $this->get_time_log();
+            @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
+
+            return [
+                'status' => 'ok',
+                'upload_id' => $upload_id,
+                'data' => $cache['data'],
+            ];
+        }
+
+        if ($phase === 'set_slug') {
+            $data = (array) ($cache['data'] ?? []);
+            if (empty($data['phases']['analyze'])) {
+                return $this->upload_error('upload_analyze_incomplete', __('Upload analysis has not completed.', 'peak-publisher'), $upload_id, $data);
+            }
+            if (empty($data['plugin_ok'])) {
+                return $this->upload_error('plugin_or_version_invalid', __('Plugin or version is invalid.', 'peak-publisher'), $upload_id, $data);
+            }
+
+            // The slug decision is pure metadata until finalize materializes it: an explicit
+            // slug is a strict, global override (validate, never transform; it survives channel
+            // switches); an empty slug clears the override and returns every channel to its
+            // automatic resolution.
+            $override = (string) ($request->get_param('slug') ?? '');
+            if ($override !== '') {
+                $override = normalize_plugin_slug($override, 'slug');
+                if (is_wp_error($override)) {
+                    return $this->upload_error($override->get_error_code(), $override->get_error_message(), $upload_id);
+                }
+            }
+            if ($override === (string) ($data['slug_override'] ?? '')) {
+                // Unchanged decision: skip the hosting re-analysis (it repeats the wporg access check).
+                return [ 'status' => 'ok', 'next' => 'result', 'upload_id' => $upload_id ];
+            }
+            $data['slug_override'] = $override;
+
+            // Re-run the hosting analysis — the original upload intent is part of the state:
+            // lookups, targets, and choice follow the new slug — hitting an existing plugin
+            // IS the intended association.
+            $cache['data'] = $this->build_hosting_type_analysis_state($data);
+            $cache['data']['phases'][$phase] = $this->get_time_log();
+            @file_put_contents($this->tmp_root . 'cache.json', json_encode($cache, JSON_PRETTY_PRINT));
+
+            return [ 'status' => 'ok', 'next' => 'result', 'upload_id' => $upload_id ];
+        }
+
         return [ 'status' => 'error', 'errors' => [ [ 'code' => 'invalid_phase', 'message' => 'Invalid phase.' ] ] ];
+    }
+
+    private function upload_request_context_from_request(\WP_REST_Request $request): array {
+        // Extract the overlay upload intent from request parameters
+        $hosting_type_intended = sanitize_key((string) ($request->get_param('hosting_type_intended') ?? ''));
+        if (!in_array($hosting_type_intended, ['self_hosted', 'wporg'], true)) {
+            return [];
+        }
+
+        $context = [
+            'hosting_type_intended' => $hosting_type_intended,
+        ];
+        $username = wporg_string_from_value($request->get_param('wporg_username_intended') ?? '');
+        if ($hosting_type_intended === 'wporg' && $username !== '') {
+            $context['wporg_username_intended'] = $username;
+        }
+        return $context;
+    }
+
+    /**
+     * Resolves one channel's slug from the analyzed candidates. A user-defined override is a
+     * strict, global decision and wins in every channel. Otherwise exactly one candidate
+     * identifying an existing plugin in the channel is adopted as settled evidence; several
+     * are a dangerous ambiguity — a release must never silently land on the wrong plugin —
+     * so no slug is resolved (the empty slug pins the destination screen and blocks
+     * finalize); none falls back to the first usable candidate (wordpress.org parity: the
+     * plugin name mints first).
+     */
+    private function resolve_channel_slug(array $slug_candidates, string $override, string $channel): array {
+        if ($override !== '') {
+            // An override matching a candidate keeps that candidate's source label; only truly free input shows as user-defined.
+            $source = 'user_defined';
+            foreach ($slug_candidates as $candidate) {
+                if (($candidate['slug'] ?? null) === $override && !empty($candidate['sources'])) {
+                    $source = (string) $candidate['sources'][0];
+                    break;
+                }
+            }
+            return [ 'slug' => $override, 'source' => $source, 'existing_matches' => 0 ];
+        }
+        $matching = array_values(array_filter($slug_candidates, static function (array $candidate) use ($channel) {
+            return in_array($channel, (array) ($candidate['existing'] ?? []), true);
+        }));
+        if (count($matching) === 1) {
+            return [ 'slug' => (string) $matching[0]['slug'], 'source' => (string) $matching[0]['sources'][0], 'existing_matches' => 1 ];
+        }
+        if (count($matching) > 1) {
+            return [ 'slug' => '', 'source' => '', 'existing_matches' => count($matching) ];
+        }
+        if (!empty($slug_candidates)) {
+            return [ 'slug' => (string) $slug_candidates[0]['slug'], 'source' => (string) $slug_candidates[0]['sources'][0], 'existing_matches' => 0 ];
+        }
+        return [ 'slug' => '', 'source' => '', 'existing_matches' => 0 ];
+    }
+
+    /**
+     * Stamps a channel's resolved identity onto its target: the slug and its slug-derived
+     * facts live with the channel decision, never in parallel top-level fields. slug_locked
+     * marks a settled fact — exactly one existing match, no override, no declared "add new
+     * plugin" intent — where the UI shows the slug as static text instead of a control.
+     */
+    private function apply_target_identity(array $target, array $identity, string $main_file_name, string $intent): array {
+        $target['slug'] = (string) $identity['slug'];
+        $target['slug_source'] = (string) $identity['source'];
+        $target['slug_locked'] = $identity['existing_matches'] === 1 && $intent === '';
+        $target['plugin_basename'] = $target['slug'] !== '' && $main_file_name !== '' ? $target['slug'] . '/' . $main_file_name : '';
+        return $target;
+    }
+
+    /**
+     * The channel-inclusion rule, kept as one function because it runs twice: for the upload's
+     * resolved identities (the actual targets) and per slug candidate (candidate_channels).
+     * An intent restricts the opposite channel to existing evidence; without intent, a
+     * self-hosted signal or existing evidence decides; no evidence at all leaves both
+     * channels as an open choice.
+     */
+    private function included_channels(string $intent, bool $has_self_hosted_signal, bool $wporg_evidence, bool $self_evidence): array {
+        if ($intent === 'self_hosted') {
+            return $wporg_evidence ? [ 'wporg', 'self_hosted' ] : [ 'self_hosted' ];
+        }
+        if ($intent === 'wporg') {
+            return $self_evidence || $has_self_hosted_signal ? [ 'wporg', 'self_hosted' ] : [ 'wporg' ];
+        }
+        if ($has_self_hosted_signal) {
+            return $wporg_evidence ? [ 'wporg', 'self_hosted' ] : [ 'self_hosted' ];
+        }
+        if ($wporg_evidence) {
+            return $self_evidence ? [ 'wporg', 'self_hosted' ] : [ 'wporg' ];
+        }
+        if ($self_evidence) {
+            return [ 'self_hosted' ];
+        }
+        return [ 'wporg', 'self_hosted' ];
+    }
+
+    private function build_hosting_type_analysis_state(array $data): array {
+        $intent = (string) ($data['hosting_type_intended'] ?? '');
+        $request_username = (string) ($data['wporg_username_intended'] ?? '');
+
+        $slug_candidates = (array) ($data['plugin_info']['slug_candidates'] ?? []);
+        $override = (string) ($data['slug_override'] ?? '');
+        $main_file_name = basename((string) ($data['plugin_info']['main_file'] ?? ''));
+
+        // Per-channel identity: every channel resolves its own slug, so both targets below
+        // carry a ready identity and switching channels in the overlay is a pure client-side
+        // switch — no roundtrip, no intermediate state.
+        $identities = [];
+        $posts = [];
+        foreach ([ 'wporg' => 'pblsh_wporg_plugin', 'self_hosted' => 'pblsh_plugin' ] as $channel => $post_type) {
+            $identities[$channel] = $this->resolve_channel_slug($slug_candidates, $override, $channel);
+            $posts[$channel] = get_plugin_post_by_slug($post_type, $identities[$channel]['slug']);
+        }
+        $self_post = $posts['self_hosted'];
+        $wporg_marker = $posts['wporg'];
+        $has_self_hosted_signal = !empty($data['plugin_data']['UpdateURI']) || !empty($data['plugin_info']['bootstrap_file']);
+        // Existing-plugin evidence per channel: a resolved existing match or an unresolved ambiguity.
+        $self_evidence = $self_post instanceof \WP_Post || $identities['self_hosted']['existing_matches'] > 1;
+        $wporg_evidence = $wporg_marker instanceof \WP_Post || $identities['wporg']['existing_matches'] > 1;
+
+        $included = $this->included_channels($intent, $has_self_hosted_signal, $wporg_evidence, $self_evidence);
+        $include_wporg = in_array('wporg', $included, true);
+        $include_self_hosted = in_array('self_hosted', $included, true);
+
+        $wporg_target = null;
+        if ($include_wporg) {
+            if ($wporg_marker instanceof \WP_Post) {
+                $preferred_username = wporg_string_from_value(get_post_meta((int) $wporg_marker->ID, '_pblsh_wporg_account_username', true));
+                if ($preferred_username === '' && $request_username !== '') {
+                    $preferred_username = $request_username;
+                }
+                $wporg_target = $this->build_wporg_target_for_marker($data, $wporg_marker, $preferred_username);
+            } else {
+                $wporg_target = $this->build_wporg_pre_deploy_target($data, $identities['wporg']['slug']);
+            }
+        }
+
+        // wporg before self_hosted: the insertion order is both the display order and,
+        // via the array_key_first() fallbacks below, the priority order.
+        $targets = [];
+        if ($wporg_target !== null) {
+            $targets['wporg'] = $this->apply_target_identity($wporg_target, $identities['wporg'], $main_file_name, $intent);
+        }
+        if ($include_self_hosted) {
+            $self_target = $this->build_self_hosted_target($data, $identities['self_hosted']['slug'], $self_post);
+            $targets['self_hosted'] = $this->apply_target_identity($self_target, $identities['self_hosted'], $main_file_name, $intent);
+        }
+
+        // Which channels would survive choosing each candidate as the slug — same rule as the
+        // actual inclusion above (one function, no drift). The client offers a candidate for a
+        // channel only when choosing it keeps that channel, so a selection can never silently
+        // drop the channel it was offered under.
+        $candidate_channels = [];
+        foreach ($slug_candidates as $candidate) {
+            $candidate_existing = (array) ($candidate['existing'] ?? []);
+            $candidate_channels[(string) $candidate['slug']] = $this->included_channels(
+                $intent,
+                $has_self_hosted_signal,
+                in_array('wporg', $candidate_existing, true),
+                in_array('self_hosted', $candidate_existing, true)
+            );
+        }
+        $data['candidate_channels'] = $candidate_channels;
+
+        // The channel decision, in three steps: local evidence (intent, self-hosted
+        // signal, existing plugins), then remote evidence resolving an otherwise open
+        // choice, then normalization to a target that actually exists.
+        $choice = $include_wporg && $include_self_hosted;
+        if ($intent === 'self_hosted') {
+            $default = 'self_hosted';
+        } elseif ($intent === 'wporg') {
+            $default = 'wporg';
+        } elseif ($has_self_hosted_signal) {
+            $default = 'self_hosted';
+        } elseif ($wporg_evidence) {
+            $default = 'wporg';
+        } elseif ($self_evidence) {
+            $default = 'self_hosted';
+        } else {
+            $default = null;
+        }
+
+        // Remote ownership evidence resolves an otherwise open channel choice: when the
+        // wordpress.org directory attributes the slug to the user's account — owner of a
+        // fresh or published plugin, or proven committer — wporg is as settled as local
+        // evidence would make it (a mere contributor listing is deliberately too weak).
+        // Applies only where the choice screen would appear: an intent, a self-hosted
+        // signal or local evidence always wins, so a migration ZIP that still carries
+        // Update URI/bootstrap stays on its self-hosted lineage. Costs nothing extra —
+        // the directory hint was already computed for the wporg target.
+        if ($choice && $intent === '' && !$has_self_hosted_signal && !$self_evidence) {
+            $hint = $targets['wporg']['wporg_directory_hint'] ?? null;
+            $relation = is_array($hint) ? (string) ($hint['relation'] ?? '') : '';
+            if (in_array($relation, ['owner', 'committer'], true)) {
+                $choice = false;
+                $default = 'wporg';
+            }
+        }
+
+        if ($default !== null && !isset($targets[$default])) {
+            $default = array_key_first($targets);
+        }
+        if (empty($data['plugin_ok'])) {
+            // No target decision needed for something that can't be uploaded anyway.
+            $choice = false;
+        }
+        $resolved = $choice ? null : ($default ?: array_key_first($targets));
+        $active_target = $resolved !== null && isset($targets[$resolved]) ? $targets[$resolved] : null;
+
+        $data['hosting_type_default'] = $default;
+        $data['hosting_type_resolved'] = $resolved;
+        $data['hosting_type_choice'] = $choice;
+        $data['hosting_type_targets'] = $targets;
+
+        if (is_array($active_target)) {
+            $data = $this->apply_target_release_context($data, $active_target);
+        }
+
+        return $data;
+    }
+
+    private function apply_target_release_context(array $data, array $target): array {
+        $data['existing_plugin'] = (int) ($target['existing_plugin_id'] ?? 0) ?: false;
+        $data['related_releases'] = $target['related_releases'] ?? false;
+        return $data;
+    }
+
+    private function build_self_hosted_target(array $data, string $slug, ?\WP_Post $plugin_post): array {
+        $version = (string) ($data['plugin_data']['Version'] ?? '');
+        $related_releases = $plugin_post instanceof \WP_Post && $version !== ''
+            ? $this->find_related_releases((int) $plugin_post->ID, $version)
+            : false;
+
+        return [
+            'existing_plugin_id' => $plugin_post instanceof \WP_Post ? (int) $plugin_post->ID : null,
+            'available' => true,
+            'blocking_reason' => null,
+            'release_slug' => $slug !== '' && $version !== '' ? get_release_slug('self_hosted', $slug, $version) : '',
+            'related_releases' => $related_releases,
+            'current_release' => $version !== '' ? $this->build_current_release_facts($plugin_post, $related_releases, $version, false) : null,
+            'tested_up_to' => $this->tested_up_to_facts($data, $related_releases, $plugin_post),
+        ];
+    }
+
+    /**
+     * The Tested up to facts of the upload against a target (tested_up_to_upload_facts()):
+     * what the upload says, what the predecessor in the version line and the current release
+     * say, and the carry-over finalize applies. The client's checklist row reads them.
+     *
+     * @param array|false $related_releases find_related_releases() of the target plugin, false without one.
+     */
+    private function tested_up_to_facts(array $data, $related_releases, ?\WP_Post $plugin): array {
+        return tested_up_to_upload_facts(
+            is_array($data['plugin_data'] ?? null) ? $data['plugin_data'] : [],
+            is_array($data['plugin_readme_txt']['content'] ?? null) ? $data['plugin_readme_txt']['content'] : null,
+            $related_releases,
+            $plugin instanceof \WP_Post ? get_current_release($plugin) : null
+        );
+    }
+
+    /**
+     * The current-release facts of a target (see decide_current_release()): the plugin's
+     * pointer state, the version it names, and the uploaded version's relation to it with
+     * the default decision. The client keys its wording on them and never computes; finalize
+     * validates the decision against them.
+     *
+     * @param array|false $related_releases find_related_releases() of the plugin, false without one.
+     */
+    private function build_current_release_facts(?\WP_Post $plugin, $related_releases, string $version, bool $is_wporg, ?string $deploy_mode = null): array {
+        $current = $plugin instanceof \WP_Post
+            ? resolve_current_release($plugin)
+            : [ 'state' => 'none', 'pointer' => '', 'release' => null, 'latest' => null, 'reference' => null ];
+        $has_releases = is_array($related_releases) && $related_releases['latest'] !== false;
+
+        return [
+            'state' => $current['state'],
+            'pointer' => $current['pointer'],
+            'version' => $current['release'] instanceof \WP_Post ? (string) $current['release']->post_title : null,
+            ...decide_current_release($current, $has_releases, $version, $is_wporg, $deploy_mode),
+        ];
+    }
+
+    private function build_wporg_pre_deploy_target(array $data, string $slug): array {
+        // The target reports its account even without a slug (no probe possible then),
+        // so the account is selected up front; the probe below resolves to the same one.
+        $intended_username = (string) ($data['wporg_username_intended'] ?? '');
+        $username = (string) (select_wporg_account_username($intended_username !== '' ? $intended_username : null) ?? '');
+
+        $requires_plugins = $this->wporg_requires_plugins_facts($data);
+        $blockers = $this->wporg_marker_independent_blockers($data, $requires_plugins);
+        // Without a resolved slug there is nothing to import — the destination screen collects the decision first.
+        $slug_available = $slug !== '';
+
+        // Probe wordpress.org before the import, so the gate can say upfront whether the
+        // slug exists on SVN and whether the credentials work (mirrors the marker path's
+        // check). A failed probe must not block the target — the import station shows
+        // the outcome and the import itself surfaces real errors.
+        $access_status = 'not_checked';
+        $access_message = null;
+        if ($slug_available && $username !== '') {
+            require_once __DIR__ . '/WporgOperations.php';
+            $access = WporgOperations::resolve_wporg_account_access($slug, $username);
+            $access_status = (string) ($access['status'] ?? 'error');
+            $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
+        }
+
+        return [
+            'existing_plugin_id' => null,
+            'available' => $this->wporg_target_available($access_status, $username),
+            'blocking_reason' => $username !== '' ? null : 'wporg_no_credentials',
+            'pre_deploy_import' => [
+                'required' => $slug_available,
+                'status' => $slug_available ? 'required' : 'unavailable',
+                'action' => 'import_and_continue',
+                'username' => $username !== '' ? $username : null,
+            ],
+            'wporg_access_status' => $access_status,
+            'wporg_access_message' => $access_message,
+            'wporg_directory_hint' => $this->wporg_directory_hint($access_status, $slug, $username),
+            'account_username' => $username !== '' ? $username : null,
+            'target_validation' => [
+                'finalizable' => false,
+                'blocking_errors' => $blockers,
+            ],
+            'related_releases' => false,
+            'tested_up_to' => $this->tested_up_to_facts($data, false, null),
+            'requires_plugins' => $requires_plugins,
+        ];
+    }
+
+    /**
+     * Whether a wporg target can be acted on with its account as far as the probe
+     * knows: an account is resolved and no hard fact speaks against it. 'error'
+     * and 'not_checked' keep the target available — probe failures are warn-only
+     * (a checklist warning), the publish itself surfaces real errors, the MERGE
+     * is the hard gate. not_found and credentials_rejected are hard facts.
+     */
+    private function wporg_target_available(string $access_status, string $username): bool {
+        return $username !== '' && in_array($access_status, [ 'ok', 'error', 'not_checked' ], true);
+    }
+
+    /**
+     * Directory/ownership hint for the target (wordpress.org stopped enforcing write
+     * access on probe requests, 2026-08 — this is the remaining upfront signal).
+     * Heuristic, so it feeds warnings only — never a blocker.
+     *
+     * @return array|null Null when there is nothing to check; shape and semantics in
+     *         WporgOperations::directory_hint() (state/relation plus the directory
+     *         listing's identity: name, icon, description).
+     */
+    private function wporg_directory_hint(string $access_status, string $slug, string $username): ?array {
+        if ($access_status !== 'ok' || $slug === '' || $username === '') {
+            return null;
+        }
+        require_once __DIR__ . '/WporgOperations.php';
+        return WporgOperations::directory_hint($slug, $username);
+    }
+
+    private function build_wporg_target_for_marker(array $data, \WP_Post $marker, ?string $preferred_username = null): array {
+        // Refresh the local wporg cache before validating the deploy target.
+        // A failed refresh must not block the target — stale data is guarded by
+        // the deploy's own concurrent-change detection; the failure travels as
+        // its own warn-only fact (wporg_refresh_error), separate from the
+        // credentials probe's verdict.
+        $refresh_error = null;
+        try {
+            get_wporg_plugin_data($marker);
+        } catch (\Throwable $e) {
+            // get_wporg_plugin_data() throws RuntimeExceptions with user-facing messages (wporg_cache.php).
+            $refresh_error = $e instanceof \RuntimeException && $e->getMessage() !== ''
+                ? $e->getMessage()
+                : __('Could not refresh wordpress.org SVN cache.', 'peak-publisher');
+        }
+        // The refresh rewrote the marker's cache — the pointer is read from the fresh post.
+        $marker = get_post((int) $marker->ID) ?? $marker;
+
+        require_once __DIR__ . '/WporgOperations.php';
+        $access = WporgOperations::resolve_wporg_account_access($marker->post_name, $preferred_username);
+        $access_status = (string) ($access['status'] ?? 'error');
+        $access_message = isset($access['message']) && is_string($access['message']) ? $access['message'] : null;
+        // The resolved account travels with every status except no_credentials.
+        $username = (string) ($access['username'] ?? '');
+        $available = $this->wporg_target_available($access_status, $username);
+        $blocking_reason = match ($access_status) {
+            'no_credentials' => 'wporg_no_credentials',
+            'not_found' => 'wporg_not_found',
+            default => null,
+        };
+
+        // Derive deploy mode from the uploaded version and cached releases
+        $version = (string) ($data['plugin_data']['Version'] ?? '');
+        $related_releases = $version !== '' ? $this->find_related_releases((int) $marker->ID, $version) : false;
+        $requires_plugins = $this->wporg_requires_plugins_facts($data);
+        $blockers = $this->wporg_marker_independent_blockers($data, $requires_plugins);
+        $deploy_mode = null;
+        if ($related_releases !== false) {
+            $latest = $related_releases['latest'] ?? false;
+            $uploaded_normalized = normalize_version_number($version);
+            // find_related_releases() only lists releases with a non-empty normalized_version.
+            $latest_normalized = $latest ? (string) $latest['normalized_version'] : '';
+            if ($latest_normalized === '' || version_compare($uploaded_normalized, $latest_normalized, '>=')) {
+                $deploy_mode = 'trunk_and_tag';
+            } else {
+                $deploy_mode = 'tag_only';
+            }
+        }
+        $finalizable = $available && empty($blockers) && in_array($deploy_mode, ['trunk_and_tag', 'tag_only'], true);
+
+        // Return the target shape consumed by the overlay and finalize
+        return [
+            'existing_plugin_id' => (int) $marker->ID,
+            'available' => $available,
+            'blocking_reason' => $blocking_reason,
+            'pre_deploy_import' => [ 'required' => false, 'status' => 'complete' ],
+            'wporg_access_status' => $access_status,
+            'wporg_access_message' => $access_message,
+            'wporg_refresh_error' => $refresh_error,
+            'wporg_directory_hint' => $this->wporg_directory_hint($access_status, $marker->post_name, $username),
+            'account_username' => $available ? $username : null,
+            'deploy_mode' => $deploy_mode,
+            'target_validation' => [
+                'finalizable' => $finalizable,
+                'blocking_errors' => $blockers,
+            ],
+            'related_releases' => $related_releases,
+            'current_release' => $version !== '' ? $this->build_current_release_facts($marker, $related_releases, $version, true, $deploy_mode) : null,
+            'tested_up_to' => $this->tested_up_to_facts($data, $related_releases, $marker),
+            'requires_plugins' => $requires_plugins,
+            // The upload's Requires Plugins the Live Preview on wordpress.org does not install —
+            // added in the deploy's commit when the release becomes current (deploy_directory()).
+            'live_preview_missing' => live_preview_missing(get_wporg_assets_state((int) $marker->ID), (string) $marker->post_name, $this->upload_requires_plugins($data)),
+        ];
+    }
+
+    /** The uploaded release's Requires Plugins as wordpress.org's slugs. */
+    private function upload_requires_plugins(array $data): array {
+        return requires_plugins_slugs((string) ($data['plugin_data']['RequiresPlugins'] ?? ''));
+    }
+
+    /**
+     * Builds the wporg deploy blockers that apply regardless of marker/import state.
+     * Every code returned here needs a dedicated checklist item (upload-checks.js) —
+     * the client has no generic fallback renderer for unknown blocker codes.
+     *
+     * @param array $requires_plugins wporg_requires_plugins_facts()
+     */
+    private function wporg_marker_independent_blockers(array $data, array $requires_plugins): array {
+        $blockers = [];
+        if (!empty($data['plugin_data']['UpdateURI'])) {
+            $blockers[] = [
+                'code' => 'wporg_update_uri_not_allowed',
+                'message' => __('wordpress.org plugins must not contain an Update URI header.', 'peak-publisher'),
+            ];
+        }
+        if (!empty($data['plugin_info']['bootstrap_file'])) {
+            $blockers[] = [
+                'code' => 'wporg_bootstrap_not_allowed',
+                'message' => __('Peak Publisher bootstrap code must be removed before publishing on wordpress.org.', 'peak-publisher'),
+            ];
+        }
+        // The readme carries the pointer wordpress.org distributes (its Stable tag): without
+        // one there is nothing to manage; one that is not UTF-8 and could not be converted
+        // was not processed, so its Stable tag cannot be set either.
+        $readme_actions = is_array($data['cleanup_info']['readme_txt'] ?? null) ? $data['cleanup_info']['readme_txt'] : [];
+        if (empty($data['plugin_readme_txt']['found'])) {
+            $blockers[] = [
+                'code' => 'wporg_readme_required',
+                'message' => __('wordpress.org plugins require a readme.txt file.', 'peak-publisher'),
+            ];
+        } elseif (empty($readme_actions['already_utf8']) && empty($readme_actions['converted_to_utf8'])) {
+            $blockers[] = [
+                'code' => 'wporg_readme_not_utf8',
+                'message' => __('The readme.txt could not be converted to UTF-8, so its Stable tag cannot be managed. Convert the file to UTF-8 without a BOM and upload again.', 'peak-publisher'),
+            ];
+        }
+        // wordpress.org's import resolves every entry of the Requires Plugins header to a
+        // published plugin by exactly its slug and rejects the commit otherwise
+        // (wporg_requires_plugins_resolution()); an entry the API could not be asked about is
+        // no verdict — the import's own check stays.
+        $unresolved = array_column(array_filter($requires_plugins['entries'], static fn(array $entry): bool => !in_array($entry['state'], [ 'ok', 'unchecked' ], true)), 'entry');
+        if ($unresolved !== []) {
+            $blockers[] = [
+                'code' => 'wporg_requires_plugins_unresolved',
+                'message' => sprintf(
+                    /* translators: %s: the entries of the Requires Plugins header, comma-separated */
+                    __('wordpress.org does not have these required plugins: %s.', 'peak-publisher'),
+                    implode(', ', $unresolved)
+                ),
+            ];
+        }
+        return $blockers;
+    }
+
+    /**
+     * The upload's Requires Plugins as wordpress.org's import resolves them
+     * (wporg_requires_plugins_resolution()): one info API request for the entries that are
+     * slugs, none when the header names no slug. The API's failure is a fact of its own (error)
+     * and decides nothing — the entries stay unchecked, and the import judges at the commit
+     * anyway.
+     *
+     * @return array{entries:array, error:?string}
+     */
+    private function wporg_requires_plugins_facts(array $data): array {
+        $header = (string) ($data['plugin_data']['RequiresPlugins'] ?? '');
+        $slugs = requires_plugins_slugs($header);
+        $states = [];
+        $error = null;
+        if ($slugs !== []) {
+            try {
+                $states = wporg_api_plugin_information($slugs, wporg_api_fields([]));
+            } catch (WporgSvnException $e) {
+                $error = $e->getMessage();
+            }
+        }
+        return [ 'entries' => wporg_requires_plugins_resolution(requires_plugins_entries($header), $states), 'error' => $error ];
+    }
+
+    private function resolve_finalize_target(\WP_REST_Request $request, array $data): array {
+        $targets = is_array($data['hosting_type_targets'] ?? null) ? $data['hosting_type_targets'] : [];
+        if (empty($targets)) {
+            return $this->upload_error('invalid_hosting_type', __('Invalid upload target.', 'peak-publisher'));
+        }
+
+        $params = $request->get_json_params();
+        if (!is_array($params)) {
+            $params = [];
+        }
+
+        // The channel decision follows the same rule as the current-release decision
+        // (resolve_make_current_decision()): with a choice the request must carry it, without
+        // one the resolved channel applies and a contradicting parameter is a client bug —
+        // client and server disagree about the facts, which must surface.
+        $has_choice = !empty($data['hosting_type_choice']);
+        $requested_hosting_type = sanitize_key((string) ($params['hosting_type'] ?? ''));
+        if ($has_choice) {
+            if ($requested_hosting_type === '') {
+                return $this->upload_error('hosting_type_missing', __('Choose where this upload should be published.', 'peak-publisher'));
+            }
+            if (!isset($targets[$requested_hosting_type])) {
+                return $this->upload_error('invalid_hosting_type', __('Invalid upload target.', 'peak-publisher'));
+            }
+            $hosting_type = $requested_hosting_type;
+        } else {
+            $hosting_type = (string) ($data['hosting_type_resolved'] ?? '');
+            if ($hosting_type === '' || !isset($targets[$hosting_type]) || ($requested_hosting_type !== '' && $requested_hosting_type !== $hosting_type)) {
+                return $this->upload_error('invalid_hosting_type', __('Invalid upload target.', 'peak-publisher'));
+            }
+        }
+
+        $target = is_array($targets[$hosting_type] ?? null) ? $targets[$hosting_type] : [];
+        if (empty($target['available'])) {
+            return $this->upload_error(
+                (string) ($target['blocking_reason'] ?? 'target_unavailable'),
+                __('The selected upload target is not available.', 'peak-publisher')
+            );
+        }
+
+        if (!empty($target['pre_deploy_import']['required'])) {
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before publishing this ZIP.', 'peak-publisher'));
+        }
+
+        $validation = is_array($target['target_validation'] ?? null) ? $target['target_validation'] : [];
+        $blocking_errors = is_array($validation['blocking_errors'] ?? null) ? $validation['blocking_errors'] : [];
+        if (!empty($blocking_errors)) {
+            return [
+                'status' => 'error',
+                'code' => 'target_validation_failed',
+                'message' => __('The selected upload target failed validation.', 'peak-publisher'),
+                'errors' => $blocking_errors,
+            ];
+        }
+
+        return [
+            'hosting_type' => $hosting_type,
+            'target' => $target,
+        ];
+    }
+
+    private function finalize_wporg_upload(array $data, array $target, bool $make_current, callable $report): array {
+        // Last gate before the irreversible SVN deploy: deliberately re-validates the target state
+        // that resolve_finalize_target() already checked in this request.
+        if (empty($target['available'])) {
+            return $this->upload_error((string) ($target['blocking_reason'] ?? 'target_unavailable'), __('The wordpress.org publish destination is not available.', 'peak-publisher'));
+        }
+
+        if (!empty($target['pre_deploy_import']['required'])) {
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before publishing this ZIP.', 'peak-publisher'));
+        }
+
+        $validation = is_array($target['target_validation'] ?? null) ? $target['target_validation'] : [];
+        $blocking_errors = is_array($validation['blocking_errors'] ?? null) ? $validation['blocking_errors'] : [];
+        if (!empty($blocking_errors)) {
+            return [
+                'status' => 'error',
+                'code' => 'target_validation_failed',
+                'message' => __('wordpress.org publish validation failed.', 'peak-publisher'),
+                'errors' => $blocking_errors,
+            ];
+        }
+
+        if (!in_array((string) ($target['deploy_mode'] ?? ''), ['trunk_and_tag', 'tag_only'], true)) {
+            return $this->upload_error('wporg_deploy_state_invalid', __('Invalid wordpress.org publish mode.', 'peak-publisher'));
+        }
+
+        // Validate the target slug, account, and version
+        $slug = normalize_plugin_slug($target['slug'] ?? null, 'slug');
+        if (is_wp_error($slug)) {
+            return $this->upload_error($slug->get_error_code(), $slug->get_error_message());
+        }
+
+        $username = normalize_wporg_username($target['account_username'] ?? null, 'username');
+        // 'error' is deliberately permitted: probe failures are warn-only — the
+        // deploy below is the authoritative access test (the MERGE decides).
+        if (is_wp_error($username) || !in_array((string) ($target['wporg_access_status'] ?? ''), [ 'ok', 'error' ], true)) {
+            return $this->upload_error('wporg_access_check_failed', __('Could not verify wordpress.org SVN access.', 'peak-publisher'));
+        }
+
+        $version = (string) ($data['plugin_data']['Version'] ?? '');
+        if ($version === '') {
+            return $this->upload_error('plugin_or_version_invalid', __('Plugin or version is invalid.', 'peak-publisher'));
+        }
+
+        // Require the same imported marker that analyze approved
+        $marker_id = (int) ($target['existing_plugin_id'] ?? 0);
+        $marker = $marker_id > 0 ? get_post($marker_id) : null;
+        if (!$marker instanceof \WP_Post || !is_wporg_plugin($marker) || $marker->post_name !== $slug) {
+            return $this->upload_error('wporg_pre_deploy_import_required', __('Import the current wordpress.org state before publishing this ZIP.', 'peak-publisher'));
+        }
+
+        // Deploy the prepared upload directory that analyze already validated
+        $working_dir = $this->tmp_root . 'data/';
+        if (!is_dir($working_dir)) {
+            return $this->upload_error('wporg_deploy_workdir_missing', __('Upload work directory is missing.', 'peak-publisher'));
+        }
+        $deploy_root = $this->detect_root_dir($working_dir);
+        if (!is_dir($deploy_root)) {
+            return $this->upload_error('wporg_deploy_workdir_missing', __('Upload work directory is missing.', 'peak-publisher'));
+        }
+
+        // Store the account used for this deploy on the marker
+        update_post_meta((int) $marker->ID, '_pblsh_wporg_account_username', $username);
+
+        // The deploy's local write-through: its outcome into the upload state, the written trunk
+        // readme into the cache, the mirror post of the tag with the upload state on it. It runs
+        // under the deploy's own lock, right after the commit landed (deploy_directory()) — a
+        // refresh of the marker in between would read the new tag from SVN and create the same
+        // release post beside this one.
+        $release_id = null;
+        $write_through = static function(array $deploy) use (&$data, &$release_id, $marker, $version, $username, $target, $make_current): void {
+            // Deploy outcome, recorded where it becomes known — the mirror post below is regenerated
+            // from SVN and cannot tell how the tag got there, nor what the decision did to trunk.
+            $data['hosting_type_resolved'] = 'wporg';
+            $data['wporg_deploy'] = [
+                'username' => $username,
+                'deploy_mode' => (string) $target['deploy_mode'],
+                'revision' => $deploy['revision'],
+                'touched_trunk' => !empty($deploy['touched_trunk']),
+                'current_release' => [
+                    'make_current' => $make_current,
+                    'stable_tag_before' => $deploy['stable_tag_before'],
+                    'stable_tag_written' => $deploy['stable_tag_written'],
+                    'pointer_changed' => $deploy['pointer_changed'],
+                ],
+                'live_preview_added' => $deploy['live_preview_added'],
+            ];
+
+            // The cache learns the written trunk readme first (write-through), then the mirror post
+            // is upserted and the title follows the reference — otherwise the title would follow
+            // the old pointer. The revision keys are dropped either way; the next read refreshes.
+            mark_wporg_plugin_cache_stale((int) $marker->ID, $deploy['trunk_readme'] !== null ? [ 'trunk_readme' => $deploy['trunk_readme'] ] : []);
+            $release_id = sync_wporg_deployed_release_post($marker, $version);
+            if (!is_wp_error($release_id)) {
+                // The upload state is the forensic record of this deploy. It lives in post meta because the
+                // mirror post's content is regenerated from SVN by the tag sync and must stay that way.
+                update_post_meta((int) $release_id, '_pblsh_upload_state', wp_slash(json_encode($data)));
+            }
+        };
+
+        // Deploy the prepared directory to wordpress.org SVN, executing the current-release
+        // decision against the live pointer (the analysis fact is the dialog's expectation).
+        require_once __DIR__ . '/WporgOperations.php';
+        try {
+            $touch_trunk = (string) ($target['deploy_mode'] ?? '') !== 'tag_only';
+            $deploy_result = WporgOperations::deploy_directory($marker, $deploy_root, $version, $username, $touch_trunk, [
+                'make_current' => $make_current,
+                'relation' => (string) $target['current_release']['relation'],
+                'expected' => $target['current_release']['pointer'],
+                'readme_file_name' => (string) ($data['plugin_readme_txt']['file_name'] ?? ''),
+            ], $this->upload_requires_plugins($data), $write_through, $report);
+        } catch (WporgSvnException $e) {
+            return $this->upload_error($e->get_error_code(), $e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->upload_error('wporg_deploy_failed', __('Publishing to wordpress.org SVN failed.', 'peak-publisher'));
+        }
+
+        // Nothing to commit — the tag held this content already: there was no commit to follow
+        // under its lock, the write-through is still due.
+        if (!$deploy_result['committed']) {
+            $write_through($deploy_result);
+        }
+        if (is_wp_error($release_id)) {
+            return [
+                'status' => 'error',
+                'code' => 'wporg_local_sync_failed_after_commit',
+                'message' => $release_id->get_error_message(),
+                'committed' => true,
+                'revision' => $deploy_result['revision'],
+                'slug' => $slug,
+                'plugin_id' => (int) $marker->ID,
+            ];
+        }
+
+        return [
+            'status' => 'ok',
+            'plugin_id' => (int) $marker->ID,
+            'release_id' => (int) $release_id,
+            'revision' => $deploy_result['revision'],
+            'committed' => true,
+            'touched_trunk' => !empty($deploy_result['touched_trunk']),
+        ];
+    }
+
+    private function upload_error(string $code, string $message, ?string $upload_id = null, array $data = []): array {
+        $out = [
+            'status' => 'error',
+            'code' => $code,
+            'message' => $message,
+            'errors' => [
+                [
+                    'code' => $code,
+                    'message' => $message,
+                ],
+            ],
+        ];
+        if ($upload_id !== null) {
+            $out['upload_id'] = $upload_id;
+        }
+        if (!empty($data)) {
+            $out['data'] = $data;
+        }
+        return $out;
     }
 
     /**
@@ -512,9 +1498,7 @@ class UploadWorkflow {
         if ($upload_id === null) {
             $upload_id = gmdate('Ymd-His_') . wp_generate_password(8, false);
         }
-        $user_id = get_current_user_id();
-
-        $subdir = '/tmp/' . $upload_id . '_user-' . $user_id;
+        $subdir = $this->tmp_subdir($upload_id);
         $peak_publisher_upload_dir = peak_publisher_upload_dir();
         $this->tmp_upload_dir = [
             'path' => $peak_publisher_upload_dir['path'] . $subdir,
@@ -529,6 +1513,43 @@ class UploadWorkflow {
             wp_mkdir_p($this->tmp_root);
         }
         return $upload_id;
+    }
+
+    /**
+     * The request's upload ID. It names the upload's working directory, so it is accepted in
+     * the format the upload creates only (is_upload_id()); null for anything else.
+     */
+    private function requested_upload_id(\WP_REST_Request $request): ?string {
+        $upload_id = $request->get_param('upload_id');
+        return is_string($upload_id) && is_upload_id($upload_id) ? $upload_id : null;
+    }
+
+    private function unknown_upload_error(): array {
+        return $this->upload_error('invalid_upload_id', __('This upload is unknown.', 'peak-publisher'));
+    }
+
+    /** An upload's working directory below the plugin's upload dir — one per user. */
+    private function tmp_subdir(string $upload_id): string {
+        return '/tmp/' . $upload_id . '_user-' . get_current_user_id();
+    }
+
+    /**
+     * Deletes the working files of a finalized upload. The finalize status stays: the dialog
+     * reads the result there when the request lost its answer, until the tmp cleanup takes
+     * the directory (maybe_cleanup_tmp_uploads()).
+     */
+    private function delete_workspace(): void {
+        foreach (scandir($this->tmp_root) ?: [] as $name) {
+            if ($name === '.' || $name === '..' || $name === PBLSH_FINALIZE_STATUS_FILE) {
+                continue;
+            }
+            $path = $this->tmp_root . $name;
+            if (is_dir($path)) {
+                delete_directory_with_race_protection($path);
+            } else {
+                wp_delete_file($path);
+            }
+        }
     }
 
     /**
@@ -557,48 +1578,42 @@ class UploadWorkflow {
         $next_release = false;
         $latest_release = false;
         foreach ($plugin_releases as $plugin_release) {
-            $plugin_release_content = json_decode($plugin_release->post_content, true);
-            $plugin_release_version = $plugin_release_content['plugin_data']['Version'] ?? '';
+            $plugin_release_content = json_decode((string) $plugin_release->post_content, true);
+            if (!is_array($plugin_release_content)) {
+                $plugin_release_content = [];
+            }
+
+            $plugin_release_version = (string) (($plugin_release->post_title ?? '') !== '' ? $plugin_release->post_title : ($plugin_release_content['plugin_data']['Version'] ?? ''));
             $plugin_release_normalized_version = normalize_version_number($plugin_release_version);
+            if ($plugin_release_normalized_version === '') {
+                continue;
+            }
+
+            $release_info = [
+                'id' => $plugin_release->ID,
+                'version' => $plugin_release_version,
+                'normalized_version' => $plugin_release_normalized_version,
+                'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
+            ];
 
             // Find the existing release
             if ($plugin_release_normalized_version === $version) {
-                $existing_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $existing_release = $release_info;
             }
             
             // Find the previous release
             if (version_compare($plugin_release_normalized_version, $version, '<') && ($previous_release === false || version_compare($previous_release['normalized_version'], $plugin_release_normalized_version, '<'))) {
-                $previous_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $previous_release = $release_info;
             }
 
             // Find the next release
             if (version_compare($plugin_release_normalized_version, $version, '>') && ($next_release === false || version_compare($next_release['normalized_version'], $plugin_release_normalized_version, '>'))) {
-                $next_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $next_release = $release_info;
             }
             
             // Find the latest release
             if ($latest_release === false || version_compare($latest_release['normalized_version'], $plugin_release_normalized_version, '<')) {
-                $latest_release = [
-                    'id' => $plugin_release->ID,
-                    'version' => $plugin_release_version,
-                    'normalized_version' => $plugin_release_normalized_version,
-                    'plugin_basename' => $plugin_release_content['plugin_info']['plugin_basename'] ?? '',
-                ];
+                $latest_release = $release_info;
             }
         }
         return [
@@ -619,7 +1634,7 @@ class UploadWorkflow {
      */
     private function find_workspace_artifacts(string $root): array {
         $settings = get_peak_publisher_settings();
-        $patterns = array_values(array_filter(array_map('strval', (array) ($settings['wordspace_artifacts_to_remove'] ?? []))));
+        $patterns = array_values(array_filter(array_map('strval', (array) ($settings['workspace_artifacts_to_remove'] ?? []))));
         if (empty($patterns)) {
             return [];
         }
@@ -670,7 +1685,7 @@ class UploadWorkflow {
                 'path' => $this->rel_path($dirAbs, $root),
                 'type' => 'dir',
                 'bytes' => $this->get_path_size($dirAbs),
-                'count' => $this->get_path_entry_count($dirAbs),
+                'count' => 1 + $this->count_directory_entries($dirAbs), // the artifact directory itself is deleted as well
                 'deleted' => false,
             ];
         }
@@ -771,49 +1786,18 @@ class UploadWorkflow {
     }
 
     /**
-     * Calculates the number of entries represented by a path.
-     * Files count as 1. Directories count as 1 (the directory itself) plus all contained files and directories.
+     * Counts the files and directories contained in a directory (recursively, without the directory itself).
      *
-     * @param string $path Absolute path to the file or directory.
-     * @return int Count of entries.
+     * @param string $dir Absolute path to the directory.
+     * @return int Count of contained entries.
      */
-    private function get_path_entry_count(string $path): int {
-        if (is_file($path)) {
-            return 1;
-        }
-        if (!is_dir($path)) {
+    private function count_directory_entries(string $dir): int {
+        if (!is_dir($dir)) {
             return 0;
         }
-        $count = 1; // the directory itself
-        $dirIt = new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS);
+        $dirIt = new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS);
         $it = new \RecursiveIteratorIterator($dirIt, \RecursiveIteratorIterator::SELF_FIRST);
-        foreach ($it as $entry) {
-            $count += 1; // count both files and directories
-        }
-        return $count;
-    }
-
-    /**
-     * Calculates the content hash of a path.
-     *
-     * @param string $path Absolute path to the file or directory.
-     * @return string Content hash of the path.
-     */
-    private function get_directory_content_hash(string $path): string {
-        // iterate over all files and directories and calculate the hash of each relative path and for files calculate also the content hash (md5_file()). At the end, calculate the hash of all hashes and sort them.
-        $hashes = [];
-        $dirIt = new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS);
-        $it = new \RecursiveIteratorIterator($dirIt, \RecursiveIteratorIterator::SELF_FIRST);
-        foreach ($it as $entry) {
-            $entry_path = $entry->getPathname();
-            $relative_path = $this->rel_path($entry_path, $path);
-            $hashes[] = md5($relative_path);
-            if (is_file($entry_path)) {
-                $hashes[] = md5_file($entry_path);
-            }
-        }
-        sort($hashes);
-        return md5(implode('', $hashes));
+        return iterator_count($it);
     }
 
     /**
@@ -827,32 +1811,6 @@ class UploadWorkflow {
         $dirs = array_values(array_filter($entries, 'is_dir'));
         $files = array_values(array_filter($entries, 'is_file'));
         return count($dirs) === 1 && count($files) === 0;
-    }
-
-    /**
-     * Fixes the top-level folder by renaming the working directory to a temporary location and creating a new one with the main file name.
-     *
-     * @param string $working_dir Absolute path to the working directory.
-     * @param string $main_file Absolute path to the main plugin file.
-     * @return bool True if the top-level folder was fixed, false otherwise.
-     */
-    private function add_top_level_folder(string $working_dir, string $main_file): bool {
-        $settings = get_peak_publisher_settings();
-        if (empty($settings['auto_add_top_level_folder'])) {
-            return false;
-        }
-        if (!$main_file) {
-            return false;
-        }
-        if ($this->has_top_level_folder($working_dir)) {
-            return false;
-        }
-        $tmp_root = $this->tmp_root . 'data_old/';
-        get_wp_filesystem()->move($working_dir, $tmp_root);
-        wp_mkdir_p($working_dir);
-        $new_root = trailingslashit($working_dir . preg_replace('/\.php$/i', '', basename($main_file)));
-        get_wp_filesystem()->move($tmp_root, $new_root);
-        return true;
     }
 
     /**
@@ -881,7 +1839,7 @@ class UploadWorkflow {
     private function find_main_plugin_file(string $root): ?string {
         $candidates = $this->list_php_files($root, 0);
         foreach ($candidates as $file) {
-            $data = get_plugin_data($file, false, false);
+            $data = read_plugin_headers($file);
             if (!empty($data['Name'])) {
                 return $file;
             }
@@ -950,46 +1908,30 @@ class UploadWorkflow {
     }
 
     /**
-     * Finds a root-level, case-sensitive 'readme.txt'. Returns absolute path or null.
-     * 
-     * @param string $root Plugin root directory.
-     * @return string|null Absolute path to the readme.txt file or null if not found.
+     * Finds the root-level readme file using wordpress.org's readme precedence.
      */
     private function find_readme_txt(string $root): ?string {
         $root = rtrim($root, '/\\') . '/';
-        try {
-            $files = scandir($root);
+        $files = scandir($root);
+        if (!is_array($files)) {
+            return null;
+        }
 
-            // START - Copy of WordPress.org code ( https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/cli/i18n/class-readme-import.php )
-            $readme_files = preg_grep( '!^readme.(txt|md)$!i', $files );
-            if ( ! $readme_files ) {
-                throw new Exception( 'Plugin has no readme file.' );
-            }
-    
-            $readme_file = reset( $readme_files );
-            foreach ( $readme_files as $f ) {
-                if ( '.txt' == strtolower( substr( $f, - 4 ) ) ) {
-                    $readme_file = $f;
-                    break;
-                }
-            }
-            // END - Copy of WordPress.org code
-
-            return $root . $readme_file;
-        } catch (\Throwable $e) {}
-        return null;
+        $readme_file = find_wporg_readme_file_name($files);
+        return $readme_file !== null ? $root . $readme_file : null;
     }
 
     /**
-     * Ensures readme.txt is UTF-8 (no BOM if configured). Returns [content_utf8, modified_flag].
-     * If modifications were applied, the file on disk is overwritten.
+     * Ensures the readme is UTF-8 without a BOM — always: Peak Publisher writes the file
+     * anyway, wordpress.org requires UTF-8, and a readme that is not UTF-8 cannot be stored
+     * as release data. A modified file is written back. The actions record what was found
+     * and what was done; a file the conversion could not make UTF-8 keeps
+     * `converted_to_utf8` false — the checklist stops the upload then.
      *
-     * @param string $abs Absolute path to the readme.txt file.
-     * @return array Array with the content, modified flag, and cleanup actions.
+     * @param string $abs Absolute path to the readme file.
+     * @return array{0:string, 1:array} The content and the actions.
      */
     private function ensure_readme_utf8_without_bom(string $abs): array {
-        $settings = get_peak_publisher_settings();
-        $convert_to_utf8_without_bom = !empty($settings['readme_txt_convert_to_utf8_without_bom']);
         $actions = [
             'already_utf8' => false,
             'already_without_bom' => false,
@@ -1000,7 +1942,7 @@ class UploadWorkflow {
 
         $raw = @file_get_contents($abs);
         if (!is_string($raw)) {
-            return ['', false, $actions];
+            return ['', $actions];
         }
 
         $modified = false;
@@ -1011,11 +1953,9 @@ class UploadWorkflow {
 
         $is_utf8 = is_utf8($content);
         $actions['already_utf8'] = $is_utf8;
-
-        // Convert to UTF-8 if needed
-        if ($convert_to_utf8_without_bom && !$is_utf8) {
+        if (!$is_utf8) {
             $converted = convert_to_utf8($content, $detected_encoding);
-            if ($converted !== $content) {
+            if ($converted !== $content && is_utf8($converted)) {
                 $content = $converted;
                 $modified = true;
                 $actions['converted_to_utf8'] = true;
@@ -1024,40 +1964,16 @@ class UploadWorkflow {
 
         $has_utf8_bom = has_utf8_bom($content);
         $actions['already_without_bom'] = !$has_utf8_bom;
-
-        // Strip UTF-8 BOM if present
-        if ($convert_to_utf8_without_bom && $has_utf8_bom) {
-            $converted = strip_utf8_bom($content);
-            if ($converted !== $content) {
-                $content = $converted;
-                $modified = true;
-                $actions['removed_utf8_bom'] = true;
-            }
+        if ($has_utf8_bom) {
+            $content = strip_utf8_bom($content);
+            $modified = true;
+            $actions['removed_utf8_bom'] = true;
         }
 
         if ($modified) {
-            // Overwrite file with normalized UTF-8 (without BOM)
             @file_put_contents($abs, $content);
         }
-        return [$content, $modified, $actions];
-    }
-
-    /**
-     * Parses a WordPress.org-style readme.txt into headers/sections and includes raw content.
-     * Returns associative array suitable for storage under data.plugin_readme_txt.
-     *
-     * @param string $content Content of the readme.txt file.
-     * @return array Parsed readme.txt content.
-     */
-    private function parse_readme_txt(string $content): array {
-        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/readme/class-parser.php';
-        require_once PBLSH_PLUGIN_DIR . 'libs/plugin-directory/class-markdown.php';
-
-        // Use the official parser of wordpress.org
-        $parser = new \Pblsh\Vendor\WordPressdotorg\Plugin_Directory\Readme\Parser($content);
-        // Return the full parser data structure
-        $data = get_object_vars($parser);
-        return is_array($data) ? $data : [];
+        return [$content, $actions];
     }
 
     /**
@@ -1067,42 +1983,52 @@ class UploadWorkflow {
      * @return array { status: 'ok'|'error', message? }
      */
     public function discard_upload(\WP_REST_Request $request): array {
-        $upload_id = sanitize_text_field((string) ($request->get_param('upload_id') ?? ''));
-        if ($upload_id === '') {
-            return [ 'status' => 'error', 'message' => 'Missing upload_id.' ];
+        $upload_id = $this->requested_upload_id($request);
+        if ($upload_id === null) {
+            return $this->unknown_upload_error();
         }
         $this->init_tmp_root($upload_id);
         if (!is_dir($this->tmp_root)) {
             return [ 'status' => 'ok' ];
         }
-        $this->delete_directory_recursively_with_race_protection($this->tmp_root);
+        delete_directory_with_race_protection($this->tmp_root);
         return [ 'status' => 'ok' ];
     }
 
     /**
-     * Creates a new zip file with the plugin root directory.
+     * Builds the final release ZIP from the workspace content root with {slug}/ as the ZIP's
+     * only logical root folder — no directory ever gets renamed and folderless uploads are
+     * wrapped implicitly. Like the wordpress.org builder this keeps the plugin_basename
+     * stable across releases; the filename is {slug}.{version}.zip (wordpress.org parity).
      *
-     * @param string $root Plugin root directory.
-     * @param string $zip_path Original zip file path.
-     * @return string Absolute path to the new zip file.
+     * @param string $content_root Absolute path to the workspace content root.
+     * @param string $slug Plugin slug used as the ZIP root folder and filename base.
+     * @param string $version Plugin header version, used in the filename verbatim (wordpress.org parity).
+     * @return array|false Array with 'path' (absolute path to the built ZIP) and
+     *                     'generated_with' ('ziparchive'|'pclzip'), or false on failure.
      */
-    private function build_zip(string $root, string $zip_path): string|false {
-        // Prepare destination directory and target path
-        $zip_new_dir = $this->tmp_root . 'file_new/';
-        wp_mkdir_p($zip_new_dir);
-        $zip_new_path = $zip_new_dir . basename($zip_path);
+    private function build_release_zip(string $content_root, string $slug, string $version): array|false {
+        $content_root = trailingslashit($content_root);
+        $zip_dir = $this->tmp_root . 'file_new/';
+        wp_mkdir_p($zip_dir);
+        $zip_path = $zip_dir . $slug . '.' . $version . '.zip';
 
-        // Build file list once (used by ZipArchive and PclZip paths)
+        // The file and directory lists, built once for both ZIP paths. Every directory gets an
+        // entry of its own, empty ones included — like wordpress.org's builder; WordPress's
+        // unzip creates them, and an empty folder a plugin ships arrives as one.
         $files = [];
-        $rii = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS));
+        $dirs = [];
+        $rii = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($content_root, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST);
         foreach ($rii as $entry) {
             if ($entry->isFile()) {
                 $files[] = $entry->getPathname();
+            } elseif ($entry->isDir()) {
+                $dirs[] = $entry->getPathname();
             }
         }
+        $relative = static fn(string $abs): string => $slug . '/' . substr($abs, strlen($content_root));
 
         get_wp_filesystem(); // Ensure the WordPress file functions are initialized
-        wp_zip_file_is_valid($zip_new_path); // Ensure the respective WordPress zip class is initialized
 
         $created = false;
         $generated_with = '';
@@ -1110,49 +2036,77 @@ class UploadWorkflow {
         // Primary: use ZipArchive if available
         if (class_exists('\\ZipArchive')) {
             $zip = new \ZipArchive();
-            $openResult = $zip->open($zip_new_path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
-            if ($openResult === true) {
+            if ($zip->open($zip_path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true) {
+                $zip->addEmptyDir($slug);
+                foreach ($dirs as $abs) {
+                    $zip->addEmptyDir($relative($abs));
+                }
                 foreach ($files as $abs) {
-                    $local = substr($abs, strlen($root));
-                    $zip->addFile($abs, $local);
+                    $zip->addFile($abs, $relative($abs));
                 }
                 $zip->close();
-                $created = file_exists($zip_new_path);
+                $created = file_exists($zip_path);
                 $generated_with = 'ziparchive';
             }
         }
 
-        // Fallback: use WordPress bundled PclZip if ZipArchive is unavailable or failed
-        if (!$created && class_exists('\\PclZip')) {
-            $pcl = new \PclZip($zip_new_path);
-            $res = $pcl->create($files, PCLZIP_OPT_REMOVE_PATH, $root);
+        // Fallback: WordPress's bundled PclZip when ZipArchive is unavailable or failed. The class
+        // ships with every WordPress but is loaded on demand.
+        if (!$created) {
+            require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
+            // PclZip adds a listed directory with everything below it, so only the empty ones
+            // are listed — the others come with their files.
+            $empty_dirs = array_values(array_filter($dirs, static fn(string $dir): bool => count((array) scandir($dir)) === 2));
+            $pcl = new \PclZip($zip_path);
+            $res = $pcl->create(array_merge($empty_dirs, $files), PCLZIP_OPT_REMOVE_PATH, $content_root, PCLZIP_OPT_ADD_PATH, $slug);
             $created = ($res !== 0);
             $generated_with = 'pclzip';
         }
 
         // Abort gracefully if archive creation failed in both strategies
         if (!$created) {
-            $this->delete_directory_recursively_with_race_protection($zip_new_dir);
+            delete_directory_with_race_protection($zip_dir);
             return false;
         }
 
-        // Replace original archive directory with the newly created one
-        $this->delete_directory_recursively_with_race_protection(dirname($zip_path));
-        return get_wp_filesystem()->move($zip_new_dir, dirname($zip_path)) ? $generated_with : false;
+        return [ 'path' => $zip_path, 'generated_with' => $generated_with ];
     }
 
     /**
-     * Deletes a directory recursively with race protection.
+     * Captures the environment an upload runs in: versions of Peak Publisher, WordPress and PHP,
+     * the PHP extensions that decide between ZipArchive/PclZip and the readme conversion paths,
+     * the WordPress filesystem method, debug mode, the publisher instance, the browser that built
+     * the original ZIP and the uploading user.
      *
-     * @param string $path Absolute path to the directory to delete.
-     * @return void
+     * @return array The environment snapshot.
      */
-    private function delete_directory_recursively_with_race_protection(string $path): void {
-        // Rename before deletion to prevent race conditions
-        $new_path = trailingslashit(dirname($path)) . basename($path) . '_deleted-' . time() . '-' . wp_generate_password(10, false) . '/';
-        if (get_wp_filesystem()->move($path, $new_path)) {
-            get_wp_filesystem()->delete($new_path, true);
+    private function capture_environment(): array {
+        if (!function_exists('get_filesystem_method')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
         }
+        $user = wp_get_current_user();
+        return [
+            'peak_publisher_version' => get_peak_publisher_version(),
+            // wp_get_wp_version() (WordPress 6.7+) returns the real version even if a plugin hides it.
+            'wordpress_version' => function_exists('wp_get_wp_version') ? wp_get_wp_version() : get_bloginfo('version'),
+            'php_version' => PHP_VERSION,
+            'php_os_family' => PHP_OS_FAMILY,
+            // version string, or false when the extension is missing
+            'php_extensions' => [
+                'zip' => phpversion('zip'),
+                'mbstring' => phpversion('mbstring'),
+                'iconv' => phpversion('iconv'),
+            ],
+            'libzip_version' => defined('ZipArchive::LIBZIP_VERSION') ? \ZipArchive::LIBZIP_VERSION : false,
+            'wp_filesystem_method' => get_filesystem_method(),
+            'wp_debug' => defined('WP_DEBUG') && WP_DEBUG,
+            'home_url' => home_url('/'),
+            'client_user_agent' => isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '',
+            'user' => [
+                'id' => (int) $user->ID,
+                'login' => (string) $user->user_login,
+            ],
+        ];
     }
 
     /**

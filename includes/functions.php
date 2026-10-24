@@ -2,20 +2,9 @@
 
 namespace Pblsh;
 
+use Exception;
+
 defined('ABSPATH') || exit;
-
-
-
-/**
- * Checks if the operating mode is standalone.
- */
-function is_standalone(): bool {
-    static $is_standalone = null;
-    if ($is_standalone === null) {
-        $is_standalone = get_peak_publisher_settings()['standalone_mode'] ?? false;
-    }
-    return $is_standalone;
-}
 
 
 /**
@@ -23,6 +12,88 @@ function is_standalone(): bool {
  */
 function get_update_uri(): string {
     return trailingslashit(home_url('wp-json/pblsh/v1/'));
+}
+
+
+/**
+ * The one authoritative source for channel display texts, keyed by hosting type.
+ * Exposed to the client as PblshData.channelTexts — upload state and targets carry
+ * facts only, never UI text.
+ */
+function get_channel_texts(): array {
+    return [
+        'wporg' => [
+            'label' => __('wordpress.org', 'peak-publisher'),
+            'description' => __('Manages plugins in the official directory.', 'peak-publisher'),
+        ],
+        'self_hosted' => [
+            'label' => __('Self-hosted', 'peak-publisher'),
+            'description' => __('Manages plugins hosted on this site.', 'peak-publisher'),
+        ],
+    ];
+}
+
+
+/**
+ * Gets deep links to the plugin's FAQ entries on wordpress.org, keyed by topic.
+ * The questions must match the readme.txt FAQ questions verbatim — wordpress.org builds its anchors from them.
+ */
+function get_peak_publisher_faq_urls(): array {
+    $questions = [
+        'bothChannels' => 'Can I use both distribution channels for one plugin?',
+        'switchLater' => 'Can I switch the distribution channel later?',
+        'credentialStorage' => 'How are my wordpress.org credentials stored?',
+        'whyImport' => 'Why is an import needed to manage a wordpress.org plugin?',
+        'versionFormat' => 'Which version numbers can I publish?',
+    ];
+    return array_map(
+        fn($question) => 'https://wordpress.org/plugins/peak-publisher/#' . rawurlencode(strtolower(trim($question))),
+        $questions
+    );
+}
+
+
+/**
+ * The footer's promotion of the day: two notes on what wppeak is up to, taking turns by UTC
+ * day — the even days presscharts.com, the odd days the question what Peak Publisher Pro
+ * should do —, so every reader sees the same one on a given day and both over a week. The
+ * footer renders the day's at load (AdminUI::render_peak_publisher()); footer-promo.js turns
+ * the page at midnight UTC for a tab that stays open.
+ *
+ * @return array<int, array{url:string, text:string}> indexed by footer_promo_index()
+ */
+function footer_promos(): array {
+    return [
+        [ 'url' => 'https://www.presscharts.com/', 'text' => __('Coming soon: presscharts.com', 'peak-publisher') ],
+        [ 'url' => 'https://www.wppeak.com/plugins/peak-publisher/', 'text' => __('Peak Publisher Pro is coming — what should it do?', 'peak-publisher') ],
+    ];
+}
+
+/** The promotion a moment falls on: its UTC day's number since the epoch, even or odd — the rule footer-promo.js shares. */
+function footer_promo_index(int $timestamp): int {
+    return intdiv($timestamp, DAY_IN_SECONDS) % 2;
+}
+
+
+/**
+ * Returns the installed Peak Publisher version. The plugin header is the only place it is declared.
+ */
+function get_peak_publisher_version(): string {
+    return (string) (get_file_data(PBLSH_PLUGIN_FILE, [ 'Version' => 'Version' ])['Version'] ?? '');
+}
+
+
+/**
+ * The one User-Agent for every request Peak Publisher sends to wordpress.org
+ * (info API, download check, SVN client). Only the plugin identifies itself —
+ * never the site.
+ */
+function wporg_user_agent(): string {
+    static $user_agent = null;
+    if ($user_agent === null) {
+        $user_agent = 'PeakPublisher/' . get_peak_publisher_version() . ' (+https://www.wppeak.com/)';
+    }
+    return $user_agent;
 }
 
 
@@ -50,90 +121,6 @@ function get_bootstrap_codes(): array {
 
 
 /**
- * Gets plugin settings (defaults + sanitized option).
- */
-function get_peak_publisher_settings(): array {
-    $defaults = [
-        'standalone_mode' => false,
-        'auto_add_top_level_folder' => true,
-        'auto_remove_workspace_artifacts' => true,
-        'readme_txt_convert_to_utf8_without_bom' => true,
-        'count_plugin_installations' => true,
-        'wordspace_artifacts_to_remove' => [
-            '.git',
-            '.gitignore',
-            '.gitattributes',
-            '.github',
-            '.svn',
-            '.idea',
-            '.vscode',
-            'node_modules',
-            'npm-debug.log',
-            'yarn.lock',
-            'package-lock.json',
-            'composer.lock',
-            'composer.json',
-            'Thumbs.db',
-            'desktop.ini',
-            '__MACOSX',
-            '.env',
-            '.env.*',
-            '*.log',
-            '*.tmp',
-            '*.bak',
-            '*.orig',
-            '.DS_Store*',
-            '._*',
-        ],
-        'ip_whitelist' => [],
-        'standalone_redirect_url' => '',
-    ];
-    $raw = get_option('pblsh_settings');
-    $data = is_array($raw) ? $raw : [];
-    $merged = sanitize_peak_publisher_settings(array_merge($defaults, $data));
-    return $merged;
-}
-
-/**
- * Updates the plugin settings.
- */
-function update_peak_publisher_settings(array $settings): void {
-    update_option('pblsh_settings', sanitize_peak_publisher_settings($settings), false);
-}
-
-/**
- * Sanitizes the plugin settings.
- */
-function sanitize_peak_publisher_settings(array $settings): array {
-    $out = [];
-    $out['standalone_mode'] = (bool) ($settings['standalone_mode'] ?? false);
-    $out['auto_add_top_level_folder'] = (bool) ($settings['auto_add_top_level_folder'] ?? true);
-    $out['auto_remove_workspace_artifacts'] = (bool) ($settings['auto_remove_workspace_artifacts'] ?? true);
-    $out['readme_txt_convert_to_utf8_without_bom'] = (bool) ($settings['readme_txt_convert_to_utf8_without_bom'] ?? true);
-    $out['count_plugin_installations'] = (bool) ($settings['count_plugin_installations'] ?? true);
-    $wordspace_artifacts_to_remove = $settings['wordspace_artifacts_to_remove'] ?? [];
-    if (!is_array($wordspace_artifacts_to_remove)) {
-        $wordspace_artifacts_to_remove = [];
-    }
-    $out['wordspace_artifacts_to_remove'] = array_values(array_filter(array_map(function($v){
-        $v = trim((string) $v);
-        $v = wp_basename($v);
-        return $v !== '' ? $v : null;
-    }, $wordspace_artifacts_to_remove)));
-    $ips = $settings['ip_whitelist'] ?? [];
-    if (!is_array($ips)) {
-        $ips = [];
-    }
-    $out['ip_whitelist'] = array_values(array_filter(array_map(function($ip){
-        return trim((string) $ip);
-    }, $ips)));
-    $redirect_url = trim((string) ($settings['standalone_redirect_url'] ?? ''));
-    $out['standalone_redirect_url'] = $redirect_url !== '' ? esc_url_raw($redirect_url) : '';
-    return $out;
-}
-
- 
-/**
  * Returns a stable salt.
  */
 function get_secret_salt(): string {
@@ -156,16 +143,26 @@ function record_plugin_installation(int $plugin_post_id, string $user_agent, str
     if (empty($settings['count_plugin_installations'])) {
         return;
     }
-    $expected_user_agent_pattern = '#^PeakPublisherBootstrapCode/[^;]+; WordPress/[^;]+; https?://[^;]+(;.*)?$#';
-    if (empty($user_agent) || !preg_match($expected_user_agent_pattern, $user_agent)) {
+    // Only pings from the bootstrap code count; the home URL in the user agent identifies the site.
+    $expected_user_agent_pattern = '#^PeakPublisherBootstrapCode/[^;]+; WordPress/[^;]+; https?://([^;]+)(;.*)?$#';
+    if (empty($user_agent) || !preg_match($expected_user_agent_pattern, $user_agent, $matches)) {
         return;
     }
 
-    // Generate a short key based on the user agent and the secret salt.
-    $key = substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|' . $user_agent, true))), 0, 14);
+    // The key hashes only the home URL (without scheme, lowercased) so that it survives WordPress and
+    // bootstrap updates and the switch to https. The secret salt keeps the stored keys non-reversible.
+    $site_identity = strtolower($matches[1]);
+    $key = substr(preg_replace('/[^a-z0-9]/i', '', base64_encode(hash('sha256', get_secret_salt() . '|' . $site_identity, true))), 0, 14);
 
     // Update the installations list.
     $list = get_plugin_installations_list($plugin_post_id);
+    // Transitional, goes with the migration from 1.3.1: the row 1.3.1 kept under the whole user
+    // agent moves to the site's key, its history with it (legacy_installation_key()).
+    $legacy_key = legacy_installation_key($user_agent);
+    if ($legacy_key !== $key && isset($list[$legacy_key])) {
+        $list[$key] = $list[$key] ?? $list[$legacy_key];
+        unset($list[$legacy_key]);
+    }
     $now = time();
     $installed_version_normalized = $installed_version !== '' ? normalize_version_number($installed_version) : '';
     if (!isset($list[$key]) || !is_array($list[$key])) {
@@ -193,6 +190,19 @@ function record_plugin_installation(int $plugin_post_id, string $user_agent, str
 function get_plugin_installations_count(int $plugin_post_id): int {
     $list = get_plugin_installations_list($plugin_post_id);
     return count($list);
+}
+
+/**
+ * The REST view of a self-hosted plugin's installations: the exact count of unique
+ * sites of the last 24 hours, or 'disabled' when the setting switches the counting off
+ * — the client reads the state, never the setting. The wordpress.org counterpart is
+ * serialize_wporg_directory() (includes/wporg_directory.php).
+ */
+function serialize_self_hosted_installations(int $plugin_post_id): array {
+    if (empty(get_peak_publisher_settings()['count_plugin_installations'])) {
+        return [ 'state' => 'disabled', 'count' => null ];
+    }
+    return [ 'state' => 'ok', 'count' => get_plugin_installations_count($plugin_post_id) ];
 }
 
 /**
@@ -243,171 +253,176 @@ function get_plugin_installations_list(int $plugin_post_id): array {
 function set_plugin_installations_list(int $plugin_post_id, array $list): void {
     update_post_meta($plugin_post_id, '_pblsh_installations', $list);
 }
- 
+
+/** The download history of a plugin: UTC day (Y-m-d) → delivered release ZIPs (docs/data-schema.md). */
+const PBLSH_DOWNLOADS_META = '_pblsh_downloads';
+
 /**
- * Ensures the upload directory is ready and secured.
+ * Records one delivered release ZIP of a plugin on the current UTC day — the history is
+ * kept day by day and unbounded, its total the sum of its days. UTC, not the site's
+ * calendar day: a timezone change would shift past days, and wordpress.org counts its days
+ * in UTC too. Counted always, unlike the installations: a day's number holds no identity.
  */
-function ensure_upload_dir_is_ready_and_secured(): void {
-    $basedir = peak_publisher_upload_basedir();
-    $htaccess = $basedir . '/.htaccess';
-    $indexphp = $basedir . '/index.php';
-    if (file_exists($htaccess) && file_exists($indexphp)) {
+function record_plugin_download(int $plugin_post_id): void {
+    if ($plugin_post_id <= 0) {
         return;
     }
-    wp_mkdir_p($basedir);
-    file_put_contents($htaccess, 
-        '<IfModule mod_authz_core.c>' . "\n" .
-        '  Require all denied' . "\n" .
-        '</IfModule>' . "\n" .
-        '<IfModule !mod_authz_core.c>' . "\n" .
-        '  Order Allow,Deny' . "\n" .
-        '  Deny from all' . "\n" .
-        '</IfModule>' . "\n"
-    );
-    file_put_contents($indexphp, '<?php exit;');
+    $days = get_plugin_downloads($plugin_post_id);
+    $day = gmdate('Y-m-d');
+    $days[$day] = ($days[$day] ?? 0) + 1;
+    update_post_meta($plugin_post_id, PBLSH_DOWNLOADS_META, $days);
 }
 
-
 /**
- * Gets the upload directory basedir.
+ * The download history of a plugin, in day order; empty without one. Read back from
+ * persistence, so the shape is re-validated here: only Y-m-d keys with a positive count.
+ *
+ * @return array<string, int>
  */
-function peak_publisher_upload_basedir(): string {
-    return peak_publisher_upload_dir()['basedir'];
-}
-
-
-/**
- * Gets the assets directory for a specific plugin slug.
- */
-function get_plugin_assets_basedir(string $plugin_slug): string {
-    return trailingslashit(peak_publisher_upload_basedir()) . 'plugins/' . sanitize_file_name($plugin_slug) . '/assets';
-}
-
-
-/**
- * Ensures the assets directory for a plugin slug exists and is publicly accessible.
- * Assets are served as direct static files (not via REST API).
- * Writes .htaccess to override the parent "Deny all" for Apache; Nginx serves files directly.
- */
-function ensure_plugin_assets_dir(string $plugin_slug): void {
-    $basedir  = get_plugin_assets_basedir($plugin_slug);
-    wp_mkdir_p($basedir);
-    if (!file_exists($basedir . '/index.php')) {
-        file_put_contents($basedir . '/index.php', '<?php exit;');
-    }
-    if (!file_exists($basedir . '/.htaccess')) {
-        file_put_contents($basedir . '/.htaccess',
-            '# Allow direct access to image assets only' . "\n" .
-            '<FilesMatch "\.(png|jpe?g|gif|svg)$">' . "\n" .
-            '  <IfModule mod_authz_core.c>' . "\n" .
-            '    Require all granted' . "\n" .
-            '  </IfModule>' . "\n" .
-            '  <IfModule !mod_authz_core.c>' . "\n" .
-            '    Order Allow,Deny' . "\n" .
-            '    Allow from all' . "\n" .
-            '  </IfModule>' . "\n" .
-            '</FilesMatch>' . "\n"
-        );
-    }
-}
-
-
-/**
- * Gets the upload directory.
- */
-function peak_publisher_upload_dir(): array {
-    $wp_upload_dir = wp_upload_dir();
-    $path = $wp_upload_dir['basedir'] . '/pblsh-peak-publisher';
-    $url = $wp_upload_dir['baseurl'] . '/pblsh-peak-publisher';
-    return [
-        'path' => $path,
-        'url' => $url,
-        'subdir' => '',
-        'basedir' => $path,
-        'baseurl' => $url,
-        'error' => $wp_upload_dir['error'],
-    ];
-}
-
-
-/**
- * Remove all empty folders from a directory recursively.
- */
-function remove_empty_folders(string $dir): void {
-    $it = new \RecursiveIteratorIterator(
-        new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-        \RecursiveIteratorIterator::CHILD_FIRST
-    );
-
-    foreach ($it as $path) {
-        if ($path->isDir() && !(new \FilesystemIterator($path))->valid()) {
-            get_wp_filesystem()->delete($path->getPathname());
+function get_plugin_downloads(int $plugin_post_id): array {
+    $stored = get_post_meta($plugin_post_id, PBLSH_DOWNLOADS_META, true);
+    $days = [];
+    foreach (is_array($stored) ? $stored : [] as $day => $count) {
+        if (is_string($day) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) === 1 && is_numeric($count) && (int) $count > 0) {
+            $days[$day] = (int) $count;
         }
     }
+    ksort($days, SORT_STRING);
+    return $days;
 }
 
-
 /**
- * Opportunistically cleans the temporary upload directory.
+ * The figures of a download history: the all-time total, the running day's count, and the
+ * last 7 and 30 complete days — up to yesterday, today not among them, so the windows stand
+ * still through the day and mean the same on both channels (the stats API of wordpress.org
+ * serves complete days only). `$today` as a UTC Y-m-d; the current day by default.
  *
- * Scope:
- * - Only directories that match our temp naming scheme:
- *   YYYYMMDD-HHMMSS_[A-Za-z0-9]{8}_user-{ID}[_deleted-{UNIX}-[A-Za-z0-9]+]
- *
- * Removes:
- * - Matching directories that were marked as deleted (suffix "_deleted-...").
- * - Matching directories older than 24 hours (derived from the timestamp prefix).
- *
- * Safe to call during user-triggered requests; ignores unexpected files/folders.
+ * @param array<string, int> $days
+ * @return array{total: int, today: int, last_7_days: int, last_30_days: int}
  */
-function maybe_cleanup_tmp_uploads(): void {
-    $base = peak_publisher_upload_basedir() . '/tmp';
-    if (!is_dir($base) || !is_readable($base)) {
-        return;
-    }
-
-    $now = time();
-    $ttl = 24 * 60 * 60;
-    $fs = get_wp_filesystem();
-
-    try {
-        $dir = new \DirectoryIterator($base);
-    } catch (\Throwable $e) {
-        return;
-    }
-
-    foreach ($dir as $entry) {
-        if ($entry->isDot()) {
-            continue;
-        }
-        if ($entry->isDir()) {
-            $name = $entry->getFilename();
-            $path = $entry->getPathname();
-            // Strictly match our temp folder pattern:
-            //   {YYYYMMDD-HHMMSS}_{RANDOM8}_user-{USERID}[_deleted-{UNIX}-{RANDOM}]
-            $match = [];
-            $matched = (bool) preg_match(
-                '/^(?P<stamp>\d{8}-\d{6})_(?P<rand>[A-Za-z0-9]{8})_user-\d+(?P<deleted>_deleted-\d+-[A-Za-z0-9]+)?$/',
-                $name,
-                $match
-            );
-            if ($matched) {
-                $created_ts = null;
-                $dt = \DateTimeImmutable::createFromFormat('Ymd-His', $match['stamp'], new \DateTimeZone('UTC'));
-                if ($dt instanceof \DateTimeImmutable) {
-                    $created_ts = $dt->getTimestamp();
-                }
-                $is_marked_deleted = !empty($match['deleted']);
-                $is_older_than_ttl = ($created_ts !== null) ? (($now - $created_ts) > $ttl) : false;
-                if ($is_marked_deleted || $is_older_than_ttl) {
-                    // recursive delete; ignore failures
-                    $fs->delete(trailingslashit($path), true);
-                }
+function summarize_plugin_downloads(array $days, ?string $today = null): array {
+    $end = new \DateTimeImmutable($today ?? gmdate('Y-m-d'), new \DateTimeZone('UTC'));
+    $today = $end->format('Y-m-d');
+    $since_7 = $end->modify('-7 days')->format('Y-m-d');
+    $since_30 = $end->modify('-30 days')->format('Y-m-d');
+    $out = [ 'total' => 0, 'today' => $days[$today] ?? 0, 'last_7_days' => 0, 'last_30_days' => 0 ];
+    foreach ($days as $day => $count) {
+        $out['total'] += $count;
+        if ($day >= $since_30 && $day < $today) {
+            $out['last_30_days'] += $count;
+            if ($day >= $since_7) {
+                $out['last_7_days'] += $count;
             }
-            continue;
         }
-        continue;
     }
+    return $out;
+}
+/**
+ * Raises the PHP execution time limit for request cycles that perform many sequential
+ * wordpress.org SVN requests (deploys, tag syncs, imports). The limit counts from the call:
+ * a commit renews it with every progress report (WporgOperations::commit_files()), so there
+ * it holds per operation, not per cycle.
+ */
+function raise_wporg_time_limit(): void {
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(300); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- a wordpress.org commit outlasts the default limit, see above
+    }
+}
+
+
+/**
+ * Whether a plugin version can be published: digits and dots, optionally followed by
+ * -rc, -beta or -alpha with an optional number (1.2.0, 1.2.0-beta1, 2.0-RC.2).
+ *
+ * This is the format the wordpress.org import warns about when violated, and the vocabulary
+ * PHP's version_compare() — which WordPress uses to decide whether to offer an update — orders
+ * the way authors expect. Any other letter segment sorts below the numeric release (only
+ * segments starting with a lowercase "p" sort above it), so "1.0.1a" is never offered to sites
+ * on 1.0.1. Within this format the string is usable verbatim as the release ZIP's version part
+ * and as the wordpress.org SVN tag.
+ */
+const PBLSH_PUBLISHABLE_VERSION_PATTERN = '/^\d+(?:\.\d+)*(?<pre_release>-(?:rc|beta|alpha)(?:\.?\d+)?)?$/i';
+
+function is_publishable_version(string $version): bool {
+    return preg_match(PBLSH_PUBLISHABLE_VERSION_PATTERN, $version) === 1;
+}
+
+
+/**
+ * Whether a publishable version carries the pre-release suffix (-rc, -beta, -alpha): a
+ * release for testers, which never becomes the current release by default.
+ */
+function is_pre_release_version(string $version): bool {
+    return preg_match(PBLSH_PUBLISHABLE_VERSION_PATTERN, $version, $found) === 1 && !empty($found['pre_release']);
+}
+
+
+/**
+ * The upload's default answer to "does this release become the current release?" — one
+ * decision tree for both channels: exactly one relation per upload, evaluated in this
+ * order. Where the channels differ, the reason is always the same: on wordpress.org the
+ * decision is forced exactly where trunk receives this code (first, and no_current with
+ * trunk_and_tag) — wordpress.org would serve it either way, so a tag pointer is the better
+ * state; self-hosted serves nothing without a pointer, and a pre-release must not become
+ * current by default even then.
+ *
+ * @param array   $current      resolve_current_release() of the plugin (or its wporg marker).
+ * @param bool    $has_releases The plugin has releases (wporg: the mirror has).
+ * @param string  $version      The uploaded version V.
+ * @param bool    $is_wporg
+ * @param ?string $deploy_mode  wporg only: trunk_and_tag | tag_only (whether trunk gets code).
+ * @return array{relation:string, pre_release:bool, default_make_current:bool, choice:bool}
+ *         relation: first | unknown | repairs_pointer | no_current | equal | higher | lower;
+ *         choice: whether the user may deviate from the default.
+ */
+function decide_current_release(array $current, bool $has_releases, string $version, bool $is_wporg, ?string $deploy_mode = null): array {
+    $pre_release = is_pre_release_version($version);
+    $decide = static fn(string $relation, bool $default, bool $choice): array => [
+        'relation' => $relation,
+        'pre_release' => $pre_release,
+        'default_make_current' => $default,
+        'choice' => $choice,
+    ];
+    $state = (string) $current['state'];
+    $normalized_version = normalize_version_number($version);
+
+    if ($state === 'tag_missing' && normalize_version_number((string) $current['pointer']) === $normalized_version) {
+        // The pointer already names this version — the release makes it valid; opting out
+        // would be a no-op. Before "first" on purpose: a pointer naming V while the plugin
+        // has no release at all (a readme bumped ahead of its tag, a deleted release) makes
+        // V current whatever the switch says.
+        return $decide('repairs_pointer', true, false);
+    }
+    if (!$has_releases) {
+        // wporg: forced in every pointer state, trunk carries this very code. self-hosted:
+        // opting out leaves the plugin without a current release (nothing is offered).
+        return $is_wporg ? $decide('first', true, false) : $decide('first', !$pre_release, true);
+    }
+    if ($state === 'unknown') {
+        // finalize re-evaluates with the live value and stops if the relation would differ.
+        return $decide('unknown', !$pre_release, true);
+    }
+    if (in_array($state, [ 'trunk', 'tag_missing', 'none' ], true)) {
+        // wporg: with trunk getting the code a tag pointer is always better — forced; with
+        // tag_only trunk stays as it is, and so may the pointer that serves it (trunk, an
+        // invalid tag, none at all: wordpress.org serves trunk for each). self-hosted:
+        // opting out keeps the pointer empty or invalid.
+        if ($is_wporg && $deploy_mode === 'trunk_and_tag') {
+            return $decide('no_current', true, false);
+        }
+        return $decide('no_current', !$pre_release, true);
+    }
+
+    $comparison = version_compare($normalized_version, normalize_version_number((string) $current['release']->post_title));
+    if ($comparison === 0) {
+        // Replace: the pointer stays, nothing is written.
+        return $decide('equal', true, false);
+    }
+    if ($comparison > 0) {
+        return $decide('higher', !$pre_release, true);
+    }
+    // A hotfix on an older line; opting in is a rollback with fix.
+    return $decide('lower', false, true);
 }
 
 
@@ -426,10 +441,251 @@ function normalize_version_number(string $version): string {
 
 
 /**
- * Generates a slug for a release.
+ * The one selection behind "current release" on both channels: the entry whose version
+ * the plugin's pointer names. Pure — null for an empty pointer, for 'trunk' (wordpress.org
+ * distributes trunk then) and for a pointer no entry matches. Entries are keyed by their
+ * version string (release post_title, tag name, import bundle version), so the import can
+ * select before any post exists.
+ *
+ * @template T
+ * @param array<string, T> $releases_by_version
+ * @return T|null
  */
-function get_release_slug(string $plugin_slug, string $version): string {
-    return sanitize_title($plugin_slug . '_' . normalize_version_number($version));
+function select_current_release(array $releases_by_version, ?string $pointer) {
+    if ($pointer === null || $pointer === '' || $pointer === 'trunk') {
+        return null;
+    }
+    return $releases_by_version[$pointer] ?? null;
+}
+
+
+/**
+ * Resolves a plugin's current release — the release sites receive — from the plugin's
+ * pointer. The channels differ only in the pointer's source: wporg the Stable tag of
+ * trunk/readme.txt (marker cache `trunk_readme`, SVN is authoritative), self-hosted the
+ * plugin meta `_pblsh_current_release`. "current" is derived here and never stored per
+ * release.
+ *
+ * @param \WP_Post[]|null $release_posts The plugin's release posts when the caller already
+ *        loaded them (list views load every parent in one query); loaded here otherwise.
+ * @return array{state:string, pointer:string|null, release:?\WP_Post, latest:?\WP_Post, reference:?\WP_Post}
+ *         state: current | none (empty pointer) | tag_missing (the pointer names a version
+ *         without release) | trunk (wporg: the pointer is trunk) | unknown (wporg: the trunk
+ *         readme was not readable at the last refresh; pointer null). latest = the highest
+ *         version of all releases; reference = release ?? latest — the one fallback for the
+ *         plugin name and readme-derived data.
+ */
+function resolve_current_release(\WP_Post $plugin, ?array $release_posts = null): array {
+    if ($release_posts === null) {
+        $release_posts = get_posts([
+            'post_type' => 'pblsh_release',
+            'post_status' => 'any',
+            'post_parent' => (int) $plugin->ID,
+            'posts_per_page' => -1,
+        ]);
+    }
+
+    $by_version = [];
+    $latest = null;
+    $latest_normalized = '';
+    foreach ($release_posts as $release) {
+        if (!$release instanceof \WP_Post) {
+            continue;
+        }
+        $version = (string) $release->post_title;
+        $normalized = normalize_version_number($version);
+        if ($normalized === '') {
+            continue;
+        }
+        $by_version[$version] = $release;
+        if ($latest === null || version_compare($normalized, $latest_normalized, '>')) {
+            $latest = $release;
+            $latest_normalized = $normalized;
+        }
+    }
+
+    $is_wporg = is_wporg_plugin($plugin);
+    if ($is_wporg) {
+        $cache = wporg_decode_json_object((string) $plugin->post_content);
+        // A cache without the key predates the trunk readme in the cache (re-validation
+        // when reading back from persistence): the next revision-driven refresh fills
+        // it — until then the pointer is unknown.
+        $trunk_readme = $cache['trunk_readme'] ?? null;
+        $pointer = is_array($trunk_readme) ? (string) ($trunk_readme['stable_tag'] ?? '') : null;
+    } else {
+        // A plugin without the meta (created before the pointer existed, migration not run
+        // yet) reads as '' — no current release.
+        $pointer = (string) get_post_meta((int) $plugin->ID, '_pblsh_current_release', true);
+    }
+
+    $release = select_current_release($by_version, $pointer);
+    if ($pointer === null) {
+        $state = 'unknown';
+    } elseif ($release instanceof \WP_Post) {
+        $state = 'current';
+    } elseif ($pointer === '') {
+        $state = 'none';
+    } elseif ($is_wporg && $pointer === 'trunk') {
+        $state = 'trunk';
+    } else {
+        $state = 'tag_missing';
+    }
+
+    return [
+        'state' => $state,
+        'pointer' => $pointer,
+        'release' => $release,
+        'latest' => $latest,
+        'reference' => $release ?? $latest,
+    ];
+}
+
+
+/**
+ * The release sites receive, or null when the plugin has none (state none/tag_missing/unknown).
+ */
+function get_current_release(\WP_Post $plugin): ?\WP_Post {
+    return resolve_current_release($plugin)['release'];
+}
+
+
+/**
+ * Makes another release of a self-hosted plugin the current one — the second of the two
+ * write sites of `_pblsh_current_release` (the other is the upload's finalize). The
+ * caller's expectation is compared first, so a flip by another admin since the editor
+ * showed its pointer is never overwritten silently.
+ *
+ * @return array{from:string, to:string}|\WP_Error current_release_target_missing (404) when
+ *         no release carries the version, invalid_current_release_target (400) when it is
+ *         the current one already, current_release_changed (409) when the pointer differs
+ *         from the expected one.
+ */
+function flip_current_release_pointer(\WP_Post $plugin, string $version, string $expected_pointer) {
+    $current = resolve_current_release($plugin);
+    $target = get_posts([
+        'post_type' => 'pblsh_release',
+        'post_status' => 'any',
+        'post_parent' => (int) $plugin->ID,
+        'title' => $version,
+        'posts_per_page' => 1,
+    ]);
+    if (empty($target)) {
+        return new \WP_Error('current_release_target_missing', __('The release to make current no longer exists.', 'peak-publisher'), [ 'status' => 404 ]);
+    }
+    if ($current['release'] instanceof \WP_Post && (int) $current['release']->ID === (int) $target[0]->ID) {
+        return new \WP_Error('invalid_current_release_target', __('This release is the current release already.', 'peak-publisher'), [ 'status' => 400 ]);
+    }
+    if ((string) $current['pointer'] !== $expected_pointer) {
+        return new \WP_Error('current_release_changed', __('The current release changed in the meantime. Reload the plugin and check again.', 'peak-publisher'), [ 'status' => 409 ]);
+    }
+
+    update_post_meta((int) $plugin->ID, '_pblsh_current_release', $version);
+    refresh_plugin_title_from_reference((int) $plugin->ID);
+
+    return [ 'from' => (string) $current['pointer'], 'to' => $version ];
+}
+
+
+/**
+ * Inserts — or, with an ID, updates — a post whose content Peak Publisher stores as data: the
+ * JSON of a release snapshot or of a marker's cache. WordPress runs a post's content through
+ * its save filters on every write, an update that names only another field included: kses for
+ * a user without unfiltered_html (on a multisite all but super admins, with
+ * DISALLOW_UNFILTERED_HTML everyone), the entity conversion, whatever plugins hook there — each
+ * would rewrite the JSON. Here the content leaves the filters as it entered them; the title
+ * and the other fields pass as usual. Takes and returns what wp_insert_post() and
+ * wp_update_post() do.
+ *
+ * @return int|\WP_Error
+ */
+function write_data_post(array $postarr, bool $wp_error = false) {
+    $entered = null;
+    $enter = static function($content) use (&$entered) {
+        $entered = $content;
+        return $content;
+    };
+    $leave = static function() use (&$entered) {
+        return $entered;
+    };
+    add_filter('content_save_pre', $enter, PHP_INT_MIN);
+    add_filter('content_save_pre', $leave, PHP_INT_MAX);
+    try {
+        return !empty($postarr['ID']) ? wp_update_post($postarr, $wp_error) : wp_insert_post($postarr, $wp_error);
+    } finally {
+        remove_filter('content_save_pre', $enter, PHP_INT_MIN);
+        remove_filter('content_save_pre', $leave, PHP_INT_MAX);
+    }
+}
+
+
+/**
+ * Sets the plugin's title from its reference release (current, else latest): the plugin
+ * name follows what sites receive. Both channels; called after every change of the
+ * pointer or of the release set.
+ */
+function refresh_plugin_title_from_reference(int $plugin_id): void {
+    $plugin = get_post($plugin_id);
+    if (!is_plugin_post($plugin)) {
+        return;
+    }
+    $reference = resolve_current_release($plugin)['reference'];
+    if (!$reference instanceof \WP_Post) {
+        return;
+    }
+    $content = wporg_decode_json_object((string) $reference->post_content);
+    $name = (string) ($content['plugin_data']['Name'] ?? '');
+    if ($name === '' || $plugin->post_title === $name) {
+        return;
+    }
+    // A marker's content is its cache: the title update saves it again.
+    write_data_post([
+        'ID' => $plugin_id,
+        'post_title' => $name,
+    ]);
+}
+
+
+/**
+ * Generates a slug for a release. Both channels share the pblsh_release post
+ * type (one slug namespace), and the same plugin slug × version may exist on
+ * wporg and self_hosted at once — so wporg releases carry their channel as
+ * prefix. Self-hosted is the unmarked home namespace, mirroring pblsh_plugin
+ * vs. pblsh_wporg_plugin; shipped self-hosted release slugs thus stay valid
+ * as they are — do not "symmetrize" the prefix. The underscore separator
+ * keeps the prefix unforgeable: plugin slugs never contain underscores.
+ */
+function get_release_slug(string $hosting_type, string $plugin_slug, string $version): string {
+    $prefix = $hosting_type === 'self_hosted' ? '' : $hosting_type . '_';
+    return sanitize_title($prefix . $plugin_slug . '_' . normalize_version_number($version));
+}
+
+
+/**
+ * Selects the readme file name using wordpress.org's readme import precedence.
+ *
+ * @param string[] $files File names from the plugin root.
+ */
+function find_wporg_readme_file_name(array $files): ?string {
+    try {
+        // START - Copy of WordPress.org code ( https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/cli/i18n/class-readme-import.php )
+        $readme_files = preg_grep( '!^readme.(txt|md)$!i', $files );
+        if ( ! $readme_files ) {
+            throw new Exception( 'Plugin has no readme file.' );
+        }
+
+        $readme_file = reset( $readme_files );
+        foreach ( $readme_files as $f ) {
+            if ( '.txt' == strtolower( substr( $f, - 4 ) ) ) {
+                $readme_file = $f;
+                break;
+            }
+        }
+        // END - Copy of WordPress.org code
+
+        return is_string($readme_file) ? $readme_file : null;
+    } catch (\Throwable $e) {
+        return null;
+    }
 }
 
 
@@ -604,73 +860,8 @@ function get_image_average_color( string $file_path ) {
 
 
 /**
- * Retrieve the Geopattern SVG URL for a given plugin.
- *
- * Based on WordPress.org Plugin Directory.
- * @see https://github.com/WordPress/wordpress.org — class-template.php
- *
- * @param \WP_Post|int|string $post   Post object, ID, or plugin slug.
- * @param string|null         $color  Optional hex color (6 chars, no #). If null, read from post meta.
- * @return string Geopattern icon URL.
+ * Base URL of the public geopattern-icon endpoint (route registered in PublicAPI).
  */
-function get_geopattern_icon_url( $post = null, ?string $color = null ): string {
-    if ( is_string( $post ) ) {
-        // Treat as slug — look up the post.
-        $plugin = get_page_by_path( $post, OBJECT, 'pblsh_plugin' );
-    } else {
-        $plugin = get_post( $post );
-    }
-
-    if ( ! $plugin ) {
-        return '';
-    }
-
-    if ( is_null( $color ) ) {
-        $color = get_post_meta( $plugin->ID, 'assets_banners_color', true );
-    }
-
-    if ( strlen( $color ) === 6 && strspn( $color, 'abcdef0123456789' ) === 6 ) {
-        $color = "_{$color}";
-    } else {
-        $color = '';
-    }
-
-    // The slug + color combine to form the cache buster, like on wordpress.org.
-    $url = rest_url( 'pblsh/v1/plugins/geopattern-icon/' . $plugin->post_name . $color . '.svg' );
-
-    return $url;
-}
-
-
-/**
- * Polyfills for PHP 8.0 functions.
- */
-if (!function_exists('str_starts_with')) {
-    function str_starts_with( $haystack, $needle ) {
-		if ( '' === $needle ) {
-			return true;
-		}
-
-		return 0 === strpos( $haystack, $needle );
-	}
-}
-if (!function_exists('str_contains')) {
-    function str_contains( $haystack, $needle ) {
-		if ( '' === $needle ) {
-			return true;
-		}
-
-		return false !== strpos( $haystack, $needle );
-	}
-}
-if (!function_exists('str_ends_with')) {
-    function str_ends_with( $haystack, $needle ) {
-		if ( '' === $haystack ) {
-			return '' === $needle;
-		}
-
-		$len = strlen( $needle );
-
-		return substr( $haystack, -$len, $len ) === $needle;
-	}
+function geopattern_icon_base_url(): string {
+    return rest_url( 'pblsh/v1/plugins/geopattern-icon/' );
 }

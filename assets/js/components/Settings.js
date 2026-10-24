@@ -1,41 +1,61 @@
 // Settings Component
-lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
+lodash.set(window, 'Pblsh.Components.Settings', ({ onClose, onOpenWporgImport } = {}) => {
     const { __ } = wp.i18n;
     const { useState, useEffect, createElement, createInterpolateElement } = wp.element;
     const { useSelect } = wp.data;
-    const { Button, Panel, PanelBody, ToggleControl, TextControl, TextareaControl, SelectControl, RadioControl } = wp.components;
-    const { showAlert } = Pblsh.Utils;
-    const settingsController = window.Pblsh.Controllers && window.Pblsh.Controllers.Settings ? window.Pblsh.Controllers.Settings : null;
+    const { Button, DropdownMenu, MenuItem, ToggleControl, TextControl, TextareaControl } = wp.components;
+    const { showAlert, getSvgIcon, getChannelLabel, getChannelIcon } = Pblsh.Utils;
+    const { WporgAccountForm, WporgAccountSpellingNotice, NoticeBox, ScrollFrame, RelativeTime } = Pblsh.Components;
+    const settingsController = window.Pblsh.Controllers.Settings;
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
     const loading = useSelect((select) => select('pblsh/settings').isLoading(), []);
     const saving = useSelect((select) => select('pblsh/settings').isSaving(), []);
+    const accounts = useSelect((select) => select('pblsh/wporg-accounts').getAccounts(), []);
+    const accountsLoaded = useSelect((select) => select('pblsh/wporg-accounts').isLoaded(), []);
+    const accountsBusy = useSelect((select) => select('pblsh/wporg-accounts').isSaving(), []);
+    const accountsLoadError = useSelect((select) => select('pblsh/wporg-accounts').getLoadError(), []);
+    const hasWporgPlugins = useSelect((select) => select('pblsh/plugins').getPlugins().some((plugin) => plugin.hosting_type === 'wporg'), []);
     const [settings, setSettings] = useState({
         standalone_mode: false,
-        auto_add_top_level_folder: false,
         auto_remove_workspace_artifacts: false,
-        wordspace_artifacts_to_remove: [],
-        readme_txt_convert_to_utf8_without_bom: false,
+        workspace_artifacts_to_remove: [],
         ip_whitelist: [],
         count_plugin_installations: false,
         standalone_redirect_url: '',
     });
-    const [currentSection, setCurrentSection] = useState('general');
+    const [currentPage, setCurrentPage] = useState('general');
+    const [wporgAccountEditing, setWporgAccountEditing] = useState(false);
+    // What the last save in this dialog found out about the username's spelling — on the
+    // card until the next account action here.
+    const [accountSpelling, setAccountSpelling] = useState(null);
+    // Avatar loading can fail (Gravatar blocked, offline admin) — an empty-avatar
+    // placeholder (person icon in the avatar's round footprint) steps in then.
+    const [wporgAvatarFailed, setWporgAvatarFailed] = useState(false);
 
+    const storedAccount = accounts[0] || null;
+    // A different avatar URL gets a fresh attempt.
     useEffect(() => {
-        try {
-            if (settingsController) settingsController.fetch();
-        } catch (e) {}
-    }, []);
+        setWporgAvatarFailed(false);
+    }, [storedAccount?.avatar_url || '']);
+
+    // The settings as the server holds them. Without them there is nothing to edit and
+    // nothing safe to save — a save sends the server's settings with this form's fields put
+    // in — so the dialog waits for them, and says in the form's place when they cannot be
+    // loaded.
+    const [loadError, setLoadError] = useState(null);
+    const load = () => {
+        setLoadError(null);
+        settingsController.fetch().catch(setLoadError);
+    };
+    useEffect(load, []);
 
     useEffect(() => {
         if (serverSettings) {
             setSettings({
                 standalone_mode: !!serverSettings.standalone_mode,
-                auto_add_top_level_folder: !!serverSettings.auto_add_top_level_folder,
                 auto_remove_workspace_artifacts: !!serverSettings.auto_remove_workspace_artifacts,
-                readme_txt_convert_to_utf8_without_bom: !!serverSettings.readme_txt_convert_to_utf8_without_bom,
-                wordspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.wordspace_artifacts_to_remove) ? serverSettings.wordspace_artifacts_to_remove : []),
+                workspace_artifacts_to_remove: getTextareaFromList(Array.isArray(serverSettings.workspace_artifacts_to_remove) ? serverSettings.workspace_artifacts_to_remove : []),
                 ip_whitelist: getTextareaFromList(Array.isArray(serverSettings.ip_whitelist) ? serverSettings.ip_whitelist : []),
                 count_plugin_installations: !!serverSettings.count_plugin_installations,
                 standalone_redirect_url: serverSettings.standalone_redirect_url || '',
@@ -58,209 +78,337 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         return (Array.isArray(list) ? list : []).join('\n');
     };
 
+    // The form renders only with the server's settings loaded.
+    const cloneServerSettings = () => JSON.parse(JSON.stringify(serverSettings));
+
+    const buildSavePayload = () => {
+        // The account card saves itself through the accounts store — this payload
+        // carries the plain settings alone.
+        const payload = cloneServerSettings();
+
+        payload.standalone_mode = !!settings.standalone_mode;
+        payload.auto_remove_workspace_artifacts = !!settings.auto_remove_workspace_artifacts;
+        payload.workspace_artifacts_to_remove = normalizeListFromTextarea(settings.workspace_artifacts_to_remove);
+        payload.ip_whitelist = normalizeListFromTextarea(settings.ip_whitelist);
+        payload.count_plugin_installations = !!settings.count_plugin_installations;
+        payload.standalone_redirect_url = settings.standalone_redirect_url || '';
+
+        return payload;
+    };
+
     const handleSave = async () => {
         try {
-            const payload = {
-                standalone_mode: !!settings.standalone_mode,
-                auto_add_top_level_folder: !!settings.auto_add_top_level_folder,
-                auto_remove_workspace_artifacts: !!settings.auto_remove_workspace_artifacts,
-                readme_txt_convert_to_utf8_without_bom: !!settings.readme_txt_convert_to_utf8_without_bom,
-                wordspace_artifacts_to_remove: normalizeListFromTextarea(settings.wordspace_artifacts_to_remove),
-                ip_whitelist: normalizeListFromTextarea(settings.ip_whitelist),
-                count_plugin_installations: !!settings.count_plugin_installations,
-                standalone_redirect_url: settings.standalone_redirect_url || '',
-            };
-            if (settingsController) {
-                await settingsController.save(payload);
-            } else {
-                await window.Pblsh.API.saveSettings(payload);
-            }
+            const payload = buildSavePayload();
+            await settingsController.save(payload);
             if (typeof onClose === 'function') onClose();
         } catch (e) {
             showAlert(e.message, 'error');
         }
     };
 
-    if (loading) {
+    const handleDisconnectWporgAccount = async () => {
+        let message = __('Disconnect the wordpress.org account? The stored SVN credentials will be deleted — publishing to wordpress.org will require connecting the account again.', 'peak-publisher');
+        // Disconnecting ends the publishing, not the contact with wordpress.org.
+        if (hasWporgPlugins) {
+            message += '\n\n' + __('Your wordpress.org plugins stay in Peak Publisher, which keeps fetching their data from wordpress.org until you remove them.', 'peak-publisher');
+        }
+        if (!confirm(message)) {
+            return;
+        }
+        setAccountSpelling(null);
+        try {
+            await window.Pblsh.Controllers.WporgAccounts.remove(storedAccount.id);
+        } catch (e) {
+            showAlert(e.message, 'error');
+        }
+    };
+
+    if (loading || (!serverSettings && !loadError)) {
         return createElement('div', { className: 'pblsh--loading' },
             createElement('div', { className: 'pblsh--loading__spinner' }),
         );
     }
-    const sections = [
-        { id: 'general', title: __('General', 'peak-publisher'), icon: 'cog' },
-        { id: 'analytics', title: __('Analytics', 'peak-publisher'), icon: 'chart_line' },
-        { id: 'uploads', title: __('Uploads', 'peak-publisher'), icon: 'cloud_upload' },
-        { id: 'security', title: __('Security', 'peak-publisher'), icon: 'security' },
-    ];
-
-    const renderSection = () => {
-        if (currentSection === 'general') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('General', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(ToggleControl, {
-                            label: __('Standalone mode', 'peak-publisher'),
-                            help: [
-                                __('Attention: This disables the frontend, several admin menus and other features not needed for Peak Publisher. However, you can simply deactivate standalone mode again at any time, and everything will be back.', 'peak-publisher'),
-                            ],
-                            checked: settings.standalone_mode,
-                            onChange: (val) => setField('standalone_mode', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                        settings.standalone_mode ? createElement('div', {
-                                style: {
-                                    marginInlineStart: '40px',
-                                },
-                            },
-                            createElement(TextControl, {
-                                type: 'url',
-                                label: __('Frontend redirect URL', 'peak-publisher'),
-                                help: __('Leave blank to show a white page.', 'peak-publisher'),
-                                value: settings.standalone_redirect_url,
-                                placeholder: 'https://',
-                                onChange: (val) => setField('standalone_redirect_url', val),
-                                __next40pxDefaultSize: true,
-                            })
-                        ) : null,
-                        createElement('p', null, createElement('strong', null, __('Peak Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Peak Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'peak-publisher'))),
-                    ),
+    if (!serverSettings) {
+        return createElement('div', { className: 'pblsh--settings' },
+            createElement('div', { className: 'pblsh--settings__unavailable' },
+                createElement(NoticeBox, { variant: 'error', className: 'pblsh--settings__unavailable-notice', title: __('The settings could not be loaded', 'peak-publisher'), error: loadError },
+                    createElement('p', null, createElement(Button, { isLink: true, onClick: load }, __('Try again', 'peak-publisher'))),
                 ),
-            );
+                createElement(Button, {
+                    isSecondary: true,
+                    onClick: () => { if (typeof onClose === 'function') onClose(); },
+                    __next40pxDefaultSize: true,
+                }, __('Close', 'peak-publisher')),
+            ),
+        );
+    }
+    // Tests the stored credentials against wordpress.org — the endpoint records the
+    // verdict on the account and refreshes its avatar. Success feedback is the badge
+    // jumping to a fresh "Verified" time; failures alert their message.
+    const handleTestStoredCredentials = async () => {
+        setAccountSpelling(null);
+        try {
+            await window.Pblsh.Controllers.WporgAccounts.test(storedAccount.id);
+        } catch (e) {
+            showAlert(e && e.message ? e.message : __('Connection test failed.', 'peak-publisher'), 'error');
         }
-        if (currentSection === 'analytics') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Analytics', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(ToggleControl, {
-                            label: __('Count installations', 'peak-publisher'),
-                            help: [
-                                __('Counts unique plugin installations based on update checks. For technical reasons, there is always a delay of up to 24 hours in the displayed number of installations.', 'peak-publisher'),
-                            ],
-                            checked: !!settings.count_plugin_installations,
-                            onChange: (val) => setField('count_plugin_installations', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                    ),
-                ),
-            );
-        }
-        if (currentSection === 'uploads') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Automatic cleanup of your uploads', 'peak-publisher')),
-                    //createElement('h3', null, __('Fix top-level folder', 'peak-publisher')),
-                    //createElement('p', null, __('If the top-level folder is missing in the ZIP file, it will be generated automatically. When the plugin is installed, WordPress adds this top-level folder unchanged to the /wp-content/plugins/ directory.', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(ToggleControl, {
-                            label: __('Add top-level folder if missing', 'peak-publisher'),
-                            help: [
-                                __('Highly recommended if you usually give the plugin folder and the main file the same name, which is recommended by WordPress anyway. If enabled and the top-level folder in the ZIP file is missing, it will be added automatically and named based on the plugin\'s main file.', 'peak-publisher'),
-                                createElement('br', null),
-                                createElement('br', null),
-                                __('If this option is disabled and the top-level folder is missing in a plugin ZIP file, WordPress will install the plugin in the /wp-content/plugins/[zip file name]/... folder, which is often not intended.', 'peak-publisher'),
-                            ],
-                            checked: settings.auto_add_top_level_folder,
-                            onChange: (val) => setField('auto_add_top_level_folder', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                        createElement('hr'),
-                        createElement(ToggleControl, {
-                            label: __('Remove workspace artifacts', 'peak-publisher'),
-                            help: [
-                                __('Keeps your installation files small and clean by removing files and folders of your operating system and development environment.', 'peak-publisher'),
-                            ],
-                            checked: settings.auto_remove_workspace_artifacts,
-                            onChange: (val) => setField('auto_remove_workspace_artifacts', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                        createElement('div', {
-                                style: {
-                                    marginInlineStart: '40px',
-                                },
-                            },
-                            createElement(TextareaControl, {
-                                label: __('Files and folders to remove', 'peak-publisher'),
-                                help: [
-                                    __('One file or folder name per line (no paths). Examples: .git, .svn', 'peak-publisher'),
-                                    createElement('br', null),
-                                    __('Use * to match any sequence of characters. Examples: *.bak, .env.*', 'peak-publisher'),
-                                    createElement('br', null),
-                                    createInterpolateElement(__('For more special patterns check out the <a>PHP fnmatch documentation</a>.', 'peak-publisher'),
-                                        {
-                                            a: createElement('a', { href: 'https://www.php.net/manual/en/function.fnmatch.php', target: '_blank' }),
-                                        }
-                                    ),
-                                ],
-                                value: settings.wordspace_artifacts_to_remove,
-                                onChange: (val) => setField('wordspace_artifacts_to_remove', val),
-                                rows: 6,
-                                __next40pxDefaultSize: true,
-                            })
-                        ),
-                        createElement('hr'),
-                        createElement(ToggleControl, {
-                            label: __('Convert readme.txt to UTF-8 without a BOM', 'peak-publisher'),
-                            help: [
-                                __('To ensure that the information in a plugin\'s readme.txt file is processed and displayed correctly, the file must be UTF-8 encoded. If this option is enabled, readme.txt files that are not encoded in this way will be automatically converted.', 'peak-publisher'),
-                            ],
-                            checked: settings.readme_txt_convert_to_utf8_without_bom,
-                            onChange: (val) => setField('readme_txt_convert_to_utf8_without_bom', val),
-                            __next40pxDefaultSize: true,
-                        }),
-                    ),
-                ),
-            );
-        }
-        if (currentSection === 'security') {
-            return createElement(wp.element.Fragment, null,
-                createElement('section', { className: 'pblsh--settings--main__section' },
-                    createElement('h2', null, __('Restrict access to the plugins', 'peak-publisher')),
-                    createElement('div', { className: 'pblsh--settings--main__section-content' },
-                        createElement(TextareaControl, {
-                            label: __('Whitelist of allowed IP addresses or domain names (one per line)', 'peak-publisher'),
-                            help: [
-                                createElement('strong', null, __('SECURITY NOTICE:', 'peak-publisher')),
-                                ' ',
-                                __('Domain names are resolved to the IP address, and only the IP address can be reliably verified. So, there is a risk that a website on the same server could pretend to be the legitimate website. Never store sensitive data directly in the plugin files.', 'peak-publisher'),
-                                //createElement('br', null),
-                                //createElement('br', null),
-                                //__('CIDR notation is also allowed (e.g. 192.168.1.0/24)', 'peak-publisher'),
-                            ],
-                            value: settings.ip_whitelist,
-                            placeholder: __('Leave blank to allow access from anywhere', 'peak-publisher'),
-                            onChange: (val) => setField('ip_whitelist', val),
-                            rows: 6,
-                            __next40pxDefaultSize: true,
-                        })
-                    ),
-                ),
-            );
-        }
-        return null;
     };
+
+    // The badge states what we actually know, most severe first: an unusable
+    // stored password (key material changed), a rejection by wordpress.org, the
+    // last verified moment — or, for accounts saved before verification existed,
+    // an honest "not verified yet". One anatomy for every state: container with
+    // state modifier, icon, and a body in which status word and optional time
+    // element can wrap.
+    const renderWporgAccountState = (storedAccount, passwordUsable) => {
+        const stateBadge = (modifier, icon, label, time = null) => createElement('span', {
+            className: 'pblsh--wporg-account-card__state ' + modifier,
+        },
+            createElement('span', { className: 'pblsh--wporg-account-card__state-icon', 'aria-hidden': 'true' },
+                getSvgIcon(icon, { size: 16 })),
+            createElement('span', { className: 'pblsh--wporg-account-card__state-body' },
+                createElement('span', { className: 'pblsh--wporg-account-card__state-status' }, label),
+                time,
+            ),
+        );
+
+        if (!passwordUsable || storedAccount.credentials_rejected) {
+            return stateBadge('is-blocked', 'close_circle', __('Password re-entry required', 'peak-publisher'));
+        }
+        if (storedAccount.verified_at) {
+            return stateBadge('is-verified', 'check_circle', __('Verified', 'peak-publisher'),
+                createElement(RelativeTime, { value: storedAccount.verified_at * 1000 }));
+        }
+        return stateBadge('is-unknown', 'help_circle_outline', __('Not verified yet', 'peak-publisher'));
+    };
+
+    const renderWporgAccountCard = () => {
+        // Until the list is there; a failed load falls through to the form, which tells it.
+        if (!accountsLoaded && !accountsLoadError) {
+            return createElement('div', { className: 'pblsh--loading' },
+                createElement('div', { className: 'pblsh--loading__spinner' }),
+            );
+        }
+        const hasStoredAccount = !!(storedAccount && storedAccount.username);
+        const passwordUsable = !!storedAccount?.password_usable;
+
+        if (wporgAccountEditing || !hasStoredAccount) {
+            // The form carries its own prominent frame — it replaces the card
+            // instead of nesting inside it (one frame at a time).
+            return createElement(WporgAccountForm, {
+                onSaved: (spelling) => { setAccountSpelling(spelling); setWporgAccountEditing(false); },
+                onCancel: hasStoredAccount ? () => setWporgAccountEditing(false) : null,
+            });
+        }
+
+        // Flat grid children — the card's CSS grid places them (identity left,
+        // management icons top right, import bottom right, notices across the
+        // full width).
+        return createElement('div', { className: 'pblsh--wporg-account-card' },
+            createElement('div', { className: 'pblsh--wporg-account-card__identity' },
+                createElement('span', { className: 'pblsh--wporg-account-card__avatar' },
+                    wporgAvatarFailed || !storedAccount.avatar_url
+                        ? createElement('span', { className: 'pblsh--wporg-account-card__avatar-fallback' },
+                            getSvgIcon('account', { size: 40 }))
+                        : createElement('img', {
+                            className: 'pblsh--wporg-account-card__avatar-image',
+                            // Resolved on the server when the account was saved or tested (128 px for retina).
+                            src: storedAccount.avatar_url,
+                            alt: '',
+                            onError: () => setWporgAvatarFailed(true),
+                        }),
+                ),
+                createElement('div', { className: 'pblsh--wporg-account-card__identity-text' },
+                    createElement('span', { className: 'pblsh--wporg-account-card__username' }, storedAccount.username),
+                    renderWporgAccountState(storedAccount, passwordUsable),
+                ),
+            ),
+            // Management actions — the same icon language as the plugin list:
+            // pencil to edit, destructive removal behind the menu (which is also
+            // the future home of multi-account actions).
+            createElement('div', { className: 'pblsh--wporg-account-card__manage' },
+                createElement(Button, {
+                    isTertiary: true,
+                    onClick: () => { setAccountSpelling(null); setWporgAccountEditing(true); },
+                    label: __('Edit account', 'peak-publisher'),
+                    icon: getSvgIcon('pencil', { size: 24 }),
+                }),
+                createElement(DropdownMenu, {
+                    icon: getSvgIcon('dots_horizontal', { size: 24 }),
+                    label: __('More options', 'peak-publisher'),
+                    // The settings live in a native <dialog> top layer — a
+                    // portaled popover would land behind it, so render inline.
+                    popoverProps: { inline: true },
+                    children: ({ onClose }) => [
+                        createElement(MenuItem, {
+                            key: 'test',
+                            disabled: !passwordUsable || accountsBusy,
+                            onClick: () => { handleTestStoredCredentials(); onClose(); },
+                        },
+                            getSvgIcon('check_circle', { size: 24 }),
+                            __('Test connection', 'peak-publisher'),
+                        ),
+                        createElement(MenuItem, {
+                            key: 'remove',
+                            isDestructive: true,
+                            disabled: accountsBusy,
+                            onClick: () => { handleDisconnectWporgAccount(); onClose(); },
+                        },
+                            getSvgIcon('delete_forever', { size: 24 }),
+                            __('Disconnect account', 'peak-publisher'),
+                        ),
+                    ],
+                }),
+            ),
+            !passwordUsable ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-card__reentry' },
+                __('The stored password can no longer be decrypted because the encryption key material changed. Edit the account and re-enter it.', 'peak-publisher'),
+            ) : (storedAccount.credentials_rejected ? createElement(NoticeBox, { variant: 'error', className: 'pblsh--wporg-account-card__reentry' },
+                __('wordpress.org rejected the stored password. Edit the account and re-enter it.', 'peak-publisher'),
+            ) : null),
+            createElement(WporgAccountSpellingNotice, { spelling: accountSpelling, className: 'pblsh--wporg-account-card__spelling' }),
+            createElement(Button, {
+                className: 'pblsh--wporg-account-card__import',
+                isSecondary: true,
+                onClick: () => { if (typeof onOpenWporgImport === 'function') onOpenWporgImport(); },
+                icon: getSvgIcon('download', { size: 24 }),
+                __next40pxDefaultSize: true,
+            }, __('Import plugins…', 'peak-publisher')),
+        );
+    };
+
+    const renderSettingsSection = (title, ...content) => createElement('section', { className: 'pblsh--settings--main__section' },
+        createElement('h2', null, title),
+        createElement('div', { className: 'pblsh--settings--main__section-content' }, ...content),
+    );
+
+    const renderSiteSection = () => renderSettingsSection(__('Standalone mode', 'peak-publisher'),
+        createElement('p', null, createElement('strong', null, __('Peak Publisher can be used within any WordPress website, but it\'s highly recommended to use a separate WordPress installation for Peak Publisher from the start so that the plugin update URL doesn\'t have to change later. Changing the URL later may require a lengthy transition period.', 'peak-publisher'))),
+        createElement(ToggleControl, {
+            label: __('Standalone mode', 'peak-publisher'),
+            help: [
+                __('Attention: This disables the frontend, several admin menus and other features not needed for Peak Publisher. However, you can simply deactivate standalone mode again at any time, and everything will be back.', 'peak-publisher'),
+            ],
+            checked: settings.standalone_mode,
+            onChange: (val) => setField('standalone_mode', val),
+        }),
+        settings.standalone_mode ? createElement('div', {
+                style: {
+                    marginInlineStart: '40px',
+                },
+            },
+            createElement(TextControl, {
+                type: 'url',
+                label: __('Frontend redirect URL', 'peak-publisher'),
+                help: __('Leave blank to show a white page.', 'peak-publisher'),
+                value: settings.standalone_redirect_url,
+                placeholder: 'https://',
+                onChange: (val) => setField('standalone_redirect_url', val),
+                __next40pxDefaultSize: true,
+            })
+        ) : null,
+    );
+
+    const renderUploadsSection = () => renderSettingsSection(__('Automatic cleanup of your uploads', 'peak-publisher'),
+        createElement(ToggleControl, {
+            label: __('Remove workspace artifacts', 'peak-publisher'),
+            help: [
+                __('Keeps your installation files small and clean by removing files and folders of your operating system and development environment.', 'peak-publisher'),
+            ],
+            checked: settings.auto_remove_workspace_artifacts,
+            onChange: (val) => setField('auto_remove_workspace_artifacts', val),
+        }),
+        createElement('div', {
+                style: {
+                    marginInlineStart: '40px',
+                },
+            },
+            createElement(TextareaControl, {
+                label: __('Files and folders to remove', 'peak-publisher'),
+                help: [
+                    __('One file or folder name per line (no paths). Examples: .git, .svn', 'peak-publisher'),
+                    createElement('br', null),
+                    __('Use * to match any sequence of characters. Examples: *.bak, .env.*', 'peak-publisher'),
+                    createElement('br', null),
+                    createInterpolateElement(__('For more special patterns check out the <a>PHP fnmatch documentation</a>.', 'peak-publisher'),
+                        {
+                            a: createElement('a', { href: 'https://www.php.net/manual/en/function.fnmatch.php', target: '_blank', rel: 'noreferrer' }),
+                        }
+                    ),
+                ],
+                value: settings.workspace_artifacts_to_remove,
+                onChange: (val) => setField('workspace_artifacts_to_remove', val),
+                rows: 6,
+            })
+        ),
+    );
+
+    const renderAccountSection = () => renderSettingsSection(__('Account', 'peak-publisher'),
+        renderWporgAccountCard(),
+    );
+
+    const renderAnalyticsSection = () => renderSettingsSection(__('Analytics', 'peak-publisher'),
+        createElement(ToggleControl, {
+            label: __('Count installations', 'peak-publisher'),
+            help: [
+                __('Counts unique installations by the update checks of the last 24 hours: a site counts as soon as it checks for updates and leaves the count 24 hours after its last check.', 'peak-publisher'),
+            ],
+            checked: !!settings.count_plugin_installations,
+            onChange: (val) => setField('count_plugin_installations', val),
+        }),
+    );
+
+    const renderAccessSection = () => renderSettingsSection(__('Restrict access to the plugins', 'peak-publisher'),
+        createElement(TextareaControl, {
+            label: __('Whitelist of allowed IP addresses or domain names (one per line)', 'peak-publisher'),
+            help: [
+                createElement('strong', null, __('SECURITY NOTICE:', 'peak-publisher')),
+                ' ',
+                __('Domain names are resolved to the IP address, and only the IP address can be reliably verified. So, there is a risk that a website on the same server could pretend to be the legitimate website. Never store sensitive data directly in the plugin files.', 'peak-publisher'),
+                createElement('br', null),
+                createElement('br', null),
+                __('Ranges in CIDR notation, e.g. 203.0.113.0/24 or 2001:db8::/32.', 'peak-publisher'),
+            ],
+            value: settings.ip_whitelist,
+            placeholder: __('Leave blank to allow access from anywhere', 'peak-publisher'),
+            onChange: (val) => setField('ip_whitelist', val),
+            rows: 6,
+        }),
+    );
+
+    // The settings pages: the sidebar lists them, the main area stacks the current
+    // page's sections. The settings of the whole installation come first, then one
+    // page per channel in the channels' display order, named and iconed from the
+    // channel vocabulary — a setting that concerns one channel alone sits on that
+    // channel's page, so the structure states its scope and no help text has to.
+    const pages = [
+        { id: 'general', title: __('General', 'peak-publisher'), icon: 'cog', sections: [renderSiteSection] },
+        { id: 'uploads', title: __('Uploads', 'peak-publisher'), icon: 'cloud_upload', sections: [renderUploadsSection] },
+        { id: 'wporg', title: getChannelLabel('wporg'), icon: getChannelIcon('wporg'), separatorBefore: true, sections: [renderAccountSection] },
+        { id: 'self_hosted', title: getChannelLabel('self_hosted'), icon: getChannelIcon('self_hosted'), sections: [renderAnalyticsSection, renderAccessSection] },
+    ];
 
     return createElement('div', { className: 'pblsh--settings' },
         createElement('div', { className: 'pblsh--settings__inner' },
             createElement('div', { className: 'pblsh--settings--sidebar' },
                 createElement('div', { className: 'pblsh--settings--sidebar__nav' },
-                    sections.map(section => 
-                        createElement('div', {
-                            key: section.id,
-                            className: `pblsh--settings--sidebar__nav-item ${currentSection === section.id ? 'pblsh--settings--sidebar__nav-item--active' : ''}`,
-                            onClick: () => setCurrentSection(section.id)
-                        },
-                            Pblsh.Utils.getSvgIcon(section.icon),
-                            createElement('span', { className: 'pblsh--settings--sidebar__nav-title' }, section.title)
+                    pages.map(page =>
+                        createElement(wp.element.Fragment, { key: page.id },
+                            page.separatorBefore ? createElement('div', { className: 'pblsh--settings--sidebar__nav-separator' }) : null,
+                            createElement('div', {
+                                className: `pblsh--settings--sidebar__nav-item ${currentPage === page.id ? 'pblsh--settings--sidebar__nav-item--active' : ''}`,
+                                onClick: () => setCurrentPage(page.id)
+                            },
+                                getSvgIcon(page.icon),
+                                createElement('span', { className: 'pblsh--settings--sidebar__nav-title' }, page.title)
+                            )
                         )
                     )
                 )
             ),
             createElement('div', { className: 'pblsh--settings--main' },
                 createElement('div', { className: 'pblsh--settings--main__inner' },
-                    createElement('div', { className: 'pblsh--settings--main__content' },
-                        renderSection()
+                    createElement(ScrollFrame, { className: 'pblsh--settings--main__frame', scrollerClassName: 'pblsh--settings--main__content' },
+                        ...pages.find((page) => page.id === currentPage).sections.map((renderSection) => renderSection()),
                     ),
                     createElement('section', { className: 'pblsh--settings--main__section pblsh--settings--main__section--buttons' },
                         createElement('div', { className: 'pblsh--settings--main__section-content pblsh--settings--main__section-content--buttons' },
@@ -283,5 +431,3 @@ lodash.set(window, 'Pblsh.Components.Settings', ({ onClose } = {}) => {
         )
     );
 });
-
-

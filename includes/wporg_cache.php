@@ -1,0 +1,820 @@
+<?php
+
+namespace Pblsh;
+
+defined('ABSPATH') || exit;
+
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages reach the REST response as JSON and the log; nothing here renders HTML.
+
+// The module's error type — a refresh that could not complete says so as a WporgSvnException.
+require_once PBLSH_PLUGIN_DIR . 'classes/WporgSvnException.php';
+
+
+const PBLSH_WPORG_IMPORT_CHUNK_SIZE = 5;
+
+
+/**
+ * The marker cache for a caller that works with stale data when SVN cannot be read (the
+ * upload's target analysis): refreshes it, and falls back to what is cached — only a marker
+ * without any cached revision has nothing to work with and fails.
+ */
+function get_wporg_plugin_data($plugin_post_or_id): array {
+    $plugin_post = $plugin_post_or_id instanceof \WP_Post ? $plugin_post_or_id : get_post((int) $plugin_post_or_id);
+    if (!$plugin_post instanceof \WP_Post || !is_wporg_plugin($plugin_post)) {
+        return [];
+    }
+
+    $refresh = refresh_wporg_plugin_cache($plugin_post);
+    if ($refresh['failure'] !== null && !wporg_has_cached_revision($refresh['cache'])) {
+        throw new \RuntimeException($refresh['failure']->getMessage(), 0, $refresh['failure']);
+    }
+    return $refresh['cache'];
+}
+
+
+/**
+ * Brings a marker in step with SVN — the cache (tags, trunk readme) when the plugin's
+ * revision moved or a key is missing, the trunk readme alone when its last read failed, the
+ * assets mirror when it is behind or lost a file — and says what that changed in what the
+ * editor shows (wporg_refresh_changes()). One revision listing when nothing moved.
+ *
+ * A refresh that could not complete says so as its `failure`, the pipeline's error with code
+ * and message, beside what it did change until then: the assets and the cache are two
+ * halves, and the half that arrived is told now — the next refresh finds it in step and
+ * would have nothing left to tell. Every failure is logged where it happens.
+ *
+ * Under the plugin's lock from the first read to the last write, like every commit and its
+ * local write-through: what is read from SVN here is still true when it is written, and no
+ * second refresh and no deploy creates the same release post beside this one. A commit that
+ * holds the lock, or a local holder that outlasts the wait, is this refresh's failure
+ * (deploy_in_progress, wporg_plugin_busy) — the next one catches up.
+ *
+ * @return array{cache: array, changes: array, failure: ?WporgSvnException} cache = the marker
+ *         cache as it stands now; failure null = the marker is in step completely
+ */
+function refresh_wporg_plugin_cache(\WP_Post $plugin_post): array {
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
+
+    try {
+        return WporgOperations::under_plugin_lock($plugin_post->post_name, 'refresh', (int) $plugin_post->ID, static function() use ($plugin_post): array {
+            // Read anew: whoever held the lock until now may have written the marker.
+            return refresh_wporg_plugin_cache_unlocked(get_post((int) $plugin_post->ID));
+        });
+    } catch (WporgSvnException $e) {
+        // The lock's own error — the refresh returns its failures: nothing was read or changed.
+        return [ 'cache' => wporg_decode_json_object((string) $plugin_post->post_content), 'changes' => [], 'failure' => $e ];
+    }
+}
+
+
+/** The refresh itself; the caller holds the plugin's lock (refresh_wporg_plugin_cache()). */
+function refresh_wporg_plugin_cache_unlocked(\WP_Post $plugin_post): array {
+    $cached = wporg_decode_json_object((string) $plugin_post->post_content);
+    try {
+        $revisions = WporgOperations::get_plugin_revisions($plugin_post->post_name);
+    } catch (\Throwable $e) {
+        wporg_log_cache_error($plugin_post, 'root_revision', $e);
+        return [ 'cache' => $cached, 'changes' => [], 'failure' => wporg_refresh_failure($e, __('Could not refresh wordpress.org SVN cache.', 'peak-publisher')) ];
+    }
+    if ($revisions === null) {
+        return [ 'cache' => $cached, 'changes' => [], 'failure' => new WporgSvnException('not_found', __('wordpress.org SVN plugin was not found.', 'peak-publisher'), 404) ];
+    }
+    $current_revision = $revisions['revision'];
+
+    // The assets mirror keeps its own anchor — the revision of assets/ it holds (0 = none) —
+    // so a pull that failed is caught up by the next refresh, fresh cache or not; so is a
+    // mirror file the disk lost. Its failure does not stop the cache: the releases are fresh
+    // either way.
+    $assets_changed = false;
+    $failure = null;
+    try {
+        require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
+        $assets = (new WporgAssetSync())->refresh_unlocked($plugin_post, (int) ($revisions['children']['assets'] ?? 0));
+        $assets_changed = $assets['changed'];
+        if (!$assets['complete']) {
+            $failure = new WporgSvnException('wporg_assets_pull_incomplete', __('The assets could not be read from wordpress.org completely. They are read again with the next check.', 'peak-publisher'), 502);
+        }
+    } catch (\Throwable $e) {
+        wporg_log_cache_error($plugin_post, 'assets', $e);
+        $failure = wporg_refresh_failure($e, __('The assets could not be read from wordpress.org.', 'peak-publisher'));
+    }
+
+    // A cache from before a key existed is refreshed like a stale one (release_count,
+    // trunk_readme) — the convention for every new cache key.
+    $cache = $cached;
+    $sync_summary = [];
+    if ((int) ($cached['revision'] ?? 0) !== (int) $current_revision
+        || !array_key_exists('release_count', $cached)
+        || !array_key_exists('trunk_readme', $cached)) {
+        $trunk_readme = wporg_read_trunk_readme_for_cache($plugin_post);
+
+        try {
+            $sync_summary = sync_wporg_release_posts($plugin_post, $current_revision);
+        } catch (\Throwable $e) {
+            wporg_log_cache_error($plugin_post, 'sync_releases', $e);
+            return [
+                'cache' => $cached,
+                'changes' => wporg_refresh_changes([], null, null, $assets_changed),
+                'failure' => wporg_refresh_failure($e, __('Could not refresh wordpress.org release cache.', 'peak-publisher')),
+            ];
+        }
+
+        $cache = [
+            'revision' => (int) $current_revision,
+            'release_count' => (int) ($sync_summary['release_count'] ?? 0),
+            'trunk_readme' => $trunk_readme,
+            'fetched_at' => time(),
+        ];
+        wporg_write_plugin_cache($plugin_post, $cache);
+    } elseif ($cached['trunk_readme'] === null) {
+        // The last read of trunk/readme.txt failed and nothing moved since: the file is read
+        // again on its own — the releases are in step — so one failed read does not keep the
+        // pointer 'unknown' until the next commit on wordpress.org.
+        $trunk_readme = wporg_read_trunk_readme_for_cache($plugin_post);
+        if ($trunk_readme !== null) {
+            $cache['trunk_readme'] = $trunk_readme;
+            wporg_write_plugin_cache($plugin_post, $cache);
+        }
+    }
+
+    return [
+        'cache' => $cache,
+        'changes' => wporg_refresh_changes($sync_summary, $cached['trunk_readme'] ?? null, $cache['trunk_readme'] ?? null, $assets_changed),
+        'failure' => $failure,
+    ];
+}
+
+
+/**
+ * trunk/readme.txt for the marker cache — the pointer (Stable tag) and the screenshot
+ * captions — or null when it cannot be read: warn-only and logged, the cache is written
+ * anyway and the current release reads as 'unknown' until a refresh reads the file.
+ */
+function wporg_read_trunk_readme_for_cache(\WP_Post $plugin_post): ?array {
+    try {
+        return WporgOperations::fetch_trunk_readme($plugin_post->post_name);
+    } catch (\Throwable $e) {
+        wporg_log_cache_error($plugin_post, 'trunk_readme', $e);
+        return null;
+    }
+}
+
+
+/** Writes the marker cache, then the title, which follows the pointer just written. */
+function wporg_write_plugin_cache(\WP_Post $plugin_post, array $cache): void {
+    write_data_post([
+        'ID' => (int) $plugin_post->ID,
+        'post_content' => wp_slash(wp_json_encode($cache)),
+    ]);
+    refresh_plugin_title_from_reference((int) $plugin_post->ID);
+}
+
+
+/** A failure of the refresh as it travels on: the pipeline's own error as it is, anything else under $message. */
+function wporg_refresh_failure(\Throwable $e, string $message): WporgSvnException {
+    return $e instanceof WporgSvnException ? $e : new WporgSvnException('wporg_cache_refresh_failed', $message, 502);
+}
+
+
+/**
+ * What a refresh changed in what the editor shows — the facts of its "changed on
+ * wordpress.org" notice: releases added, removed or tagged anew (the summary of
+ * sync_wporg_release_posts()), the Stable tag where both readings are known, the assets
+ * mirror. Only the facts that apply; empty when nothing the editor shows moved — a commit of
+ * Peak Publisher's own, whose result the cache and the release posts already held.
+ */
+function wporg_refresh_changes(array $sync_summary, ?array $readme_before, ?array $readme_after, bool $assets_changed): array {
+    $changes = [];
+    foreach ([ 'created' => 'releases_added', 'deleted' => 'releases_removed', 'updated' => 'releases_updated' ] as $counted => $fact) {
+        if ((int) ($sync_summary[$counted] ?? 0) > 0) {
+            $changes[$fact] = (int) $sync_summary[$counted];
+        }
+    }
+    if ($readme_before !== null && $readme_after !== null && $readme_before['stable_tag'] !== $readme_after['stable_tag']) {
+        $changes['current_release'] = true;
+    }
+    if ($assets_changed) {
+        $changes['assets'] = true;
+    }
+    return $changes;
+}
+
+
+/**
+ * The version of a marker's copy as a client holds it — its row, its releases, its assets
+ * view —, one opaque value in the row: the cached SVN revision, the revision of assets/ the
+ * mirror holds, and a hash over what else shapes the view — the directory stamp (the bands and
+ * the import forecast derive from it; an import of an own commit moves the stamp alone), the
+ * check of the public preview, and the working copy, which every user and every tab shares.
+ * A client compares the token of every row a refresh answers with the one it holds: a
+ * different token means the marker moved underneath it, whoever moved it — another tab,
+ * another user, a commit, wordpress.org's import — and its tabs are read anew.
+ */
+function wporg_sync_token(\WP_Post $marker): string {
+    $id = (int) $marker->ID;
+    $cached = wporg_decode_json_object((string) $marker->post_content);
+    $directory = get_wporg_directory($id);
+    $assets = get_wporg_assets_state($id);
+    return ($cached['revision'] ?? '-') . ':' . ($assets['revision'] ?? '-') . ':' . md5((string) json_encode([ $directory['stamp'], get_wporg_live_preview_check($id), $assets['pending'] ]));
+}
+
+
+function sync_wporg_release_posts($plugin_post_or_id, ?int $root_revision = null): array {
+    raise_wporg_time_limit();
+
+    $plugin_post = $plugin_post_or_id instanceof \WP_Post ? $plugin_post_or_id : get_post((int) $plugin_post_or_id);
+    if (!$plugin_post instanceof \WP_Post || !is_wporg_plugin($plugin_post)) {
+        return [
+            'created' => 0,
+            'updated' => 0,
+            'deleted' => 0,
+            'unchanged' => 0,
+        ];
+    }
+
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
+
+    $summary = [
+        'created' => 0,
+        'updated' => 0,
+        'deleted' => 0,
+        'unchanged' => 0,
+    ];
+    $tags = WporgOperations::list_tags($plugin_post->post_name);
+    $tags_by_version = [];
+    foreach ($tags as $tag) {
+        $version = (string) ($tag['version'] ?? '');
+        if ($version !== '') {
+            $tags_by_version[$version] = $tag;
+        }
+    }
+
+    $existing_posts = get_posts([
+        'post_type' => 'pblsh_release',
+        'post_status' => 'any',
+        'post_parent' => (int) $plugin_post->ID,
+        'posts_per_page' => -1,
+    ]);
+    $existing_by_version = [];
+    foreach ($existing_posts as $release_post) {
+        if (!$release_post instanceof \WP_Post) {
+            continue;
+        }
+        $version = (string) ($release_post->post_title ?? '');
+        if ($version !== '' && !isset($existing_by_version[$version])) {
+            $existing_by_version[$version] = $release_post;
+        }
+    }
+
+    // The tags' first creations — read once, and only when a release post is created.
+    $publication_times = null;
+    foreach ($tags_by_version as $version => $tag) {
+        $existing = $existing_by_version[$version] ?? null;
+        $current_tag_revision = (int) ($tag['revision'] ?? 0);
+        $existing_content = $existing instanceof \WP_Post ? wporg_decode_json_object((string) $existing->post_content) : [];
+        $existing_tag_revision = (int) ($existing_content['tag_revision'] ?? 0);
+
+        if ($existing instanceof \WP_Post && $current_tag_revision > 0 && $existing_tag_revision === $current_tag_revision) {
+            $summary['unchanged']++;
+            continue;
+        }
+
+        $snapshot = wporg_release_snapshot($tag, WporgOperations::fetch_tag_data($plugin_post->post_name, $version));
+        if ($existing instanceof \WP_Post) {
+            $result = wporg_update_release_post($existing, $snapshot);
+            $summary['updated']++;
+        } else {
+            $publication_times ??= wporg_tag_publication_times(WporgOperations::fetch_tags_log($plugin_post->post_name), $plugin_post->post_name);
+            $result = wporg_create_release_post($plugin_post, $version, $snapshot, wporg_tag_publication_time($publication_times, $tag));
+            $summary['created']++;
+        }
+        if (is_wp_error($result)) {
+            throw new \RuntimeException($result->get_error_message());
+        }
+    }
+
+    foreach ($existing_by_version as $version => $release_post) {
+        if (!isset($tags_by_version[$version])) {
+            wp_delete_post((int) $release_post->ID, true);
+            $summary['deleted']++;
+        }
+    }
+
+    return [
+        ...$summary,
+        'root_revision' => $root_revision,
+        'release_count' => count($tags_by_version),
+    ];
+}
+
+
+function fetch_wporg_import_cache_bundle(string $wporg_slug) {
+    raise_wporg_time_limit();
+
+    $wporg_slug = normalize_plugin_slug($wporg_slug);
+    if (is_wp_error($wporg_slug)) {
+        return $wporg_slug;
+    }
+
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
+
+    try {
+        $root_revision = WporgOperations::get_plugin_revision($wporg_slug);
+        if ($root_revision === null) {
+            return new \WP_Error(
+                'not_found',
+                __('Plugin not found on wordpress.org SVN.', 'peak-publisher'),
+                [ 'status' => 404 ]
+            );
+        }
+
+        $tags = WporgOperations::list_tags($wporg_slug);
+        $versions = [];
+        foreach ($tags as $tag) {
+            if (!is_array($tag)) {
+                continue;
+            }
+            $version = (string) ($tag['version'] ?? '');
+            if ($version !== '') {
+                $versions[] = $version;
+            }
+        }
+        $tag_data_by_version = WporgOperations::fetch_tags_data_batch($wporg_slug, $versions);
+        $publication_times = wporg_tag_publication_times(WporgOperations::fetch_tags_log($wporg_slug), $wporg_slug);
+    } catch (\Throwable $e) {
+        return new \WP_Error(
+            'access_check_failed',
+            __('Could not read wordpress.org SVN data for this plugin.', 'peak-publisher'),
+            [ 'status' => 502 ]
+        );
+    }
+
+    // The pointer for the marker cache — warn-only like in the refresh: null = not readable.
+    try {
+        $trunk_readme = WporgOperations::fetch_trunk_readme($wporg_slug);
+    } catch (\Throwable $e) {
+        $trunk_readme = null;
+    }
+
+    $releases = [];
+    foreach ($tags as $tag) {
+        if (!is_array($tag)) {
+            continue;
+        }
+
+        $version = (string) ($tag['version'] ?? '');
+        if ($version === '') {
+            continue;
+        }
+
+        $releases[] = [
+            'version' => $version,
+            'snapshot' => wporg_release_snapshot($tag, $tag_data_by_version[$version] ?? []),
+            'published_at' => wporg_tag_publication_time($publication_times, $tag),
+        ];
+    }
+
+    usort($releases, static function(array $a, array $b): int {
+        return version_compare((string) ($b['version'] ?? ''), (string) ($a['version'] ?? ''));
+    });
+
+    return [
+        'root_revision' => (int) $root_revision,
+        'release_count' => count($releases),
+        'trunk_readme' => $trunk_readme,
+        'releases' => $releases,
+    ];
+}
+
+
+function persist_wporg_import_cache_bundle(string $wporg_slug, string $username, array $bundle) {
+    $wporg_slug = normalize_plugin_slug($wporg_slug);
+    if (is_wp_error($wporg_slug)) {
+        return $wporg_slug;
+    }
+
+    $username = normalize_wporg_username($username, 'username');
+    if (is_wp_error($username)) {
+        return $username;
+    }
+
+    $existing = get_plugin_post_by_slug('pblsh_wporg_plugin', $wporg_slug);
+    if ($existing instanceof \WP_Post) {
+        return new \WP_Error(
+            'already_imported',
+            __('Plugin already imported.', 'peak-publisher'),
+            [
+                'status' => 409,
+                'existing_plugin_id' => (int) $existing->ID,
+            ]
+        );
+    }
+
+    $created_marker_id = 0;
+    $created_release_ids = [];
+
+    try {
+        $post_content = wp_json_encode([
+            'revision' => (int) ($bundle['root_revision'] ?? 0),
+            'release_count' => (int) ($bundle['release_count'] ?? 0),
+            'trunk_readme' => $bundle['trunk_readme'] ?? null,
+            'fetched_at' => time(),
+        ]);
+        if (!is_string($post_content)) {
+            throw new \RuntimeException('wporg_import_cache_encode_failed');
+        }
+
+        // The slug names the marker until its releases exist; the title then follows the
+        // reference release like on every later refresh.
+        $marker_id = write_data_post([
+            'post_type' => 'pblsh_wporg_plugin',
+            'post_status' => 'publish',
+            'post_name' => $wporg_slug,
+            'post_title' => $wporg_slug,
+            'post_content' => wp_slash($post_content),
+        ], true);
+        if (is_wp_error($marker_id)) {
+            throw new \RuntimeException($marker_id->get_error_message());
+        }
+        $created_marker_id = (int) $marker_id;
+
+        $marker = get_post($created_marker_id);
+        if (!$marker instanceof \WP_Post || $marker->post_name !== $wporg_slug) {
+            if ($created_marker_id > 0) {
+                wp_delete_post($created_marker_id, true);
+                $created_marker_id = 0;
+            }
+
+            $existing_after_race = get_plugin_post_by_slug('pblsh_wporg_plugin', $wporg_slug);
+            if ($existing_after_race instanceof \WP_Post) {
+                return new \WP_Error(
+                    'already_imported',
+                    __('Plugin already imported.', 'peak-publisher'),
+                    [
+                        'status' => 409,
+                        'existing_plugin_id' => (int) $existing_after_race->ID,
+                    ]
+                );
+            }
+
+            throw new \RuntimeException('wporg_import_slug_race');
+        }
+
+        update_post_meta($created_marker_id, '_pblsh_wporg_account_username', $username);
+
+        foreach (($bundle['releases'] ?? []) as $release) {
+            if (!is_array($release)) {
+                continue;
+            }
+
+            $version = (string) ($release['version'] ?? '');
+            if ($version === '') {
+                continue;
+            }
+
+            $release_id = wporg_create_release_post($marker, $version, $release['snapshot'], $release['published_at']);
+            if (is_wp_error($release_id)) {
+                throw new \RuntimeException($release_id->get_error_message());
+            }
+
+            $created_release_ids[] = (int) $release_id;
+        }
+
+        refresh_plugin_title_from_reference($created_marker_id);
+
+        // The list shows the plugin's icon right after the import: the first pull fills the
+        // assets mirror. Warn-only — an empty mirror is filled by the next pull.
+        try {
+            require_once PBLSH_PLUGIN_DIR . 'classes/WporgAssetSync.php';
+            (new WporgAssetSync())->pull($marker);
+        } catch (\Throwable $e) {
+            wporg_log_import_error($wporg_slug, $e);
+        }
+
+        return $created_marker_id;
+    } catch (\Throwable $e) {
+        foreach (array_reverse($created_release_ids) as $release_id) {
+            wp_delete_post((int) $release_id, true);
+        }
+        if ($created_marker_id > 0) {
+            wp_delete_post($created_marker_id, true);
+        }
+        wporg_log_import_error($wporg_slug, $e);
+
+        return new \WP_Error(
+            'access_check_failed',
+            __('Could not persist wordpress.org import data.', 'peak-publisher'),
+            [ 'status' => 500 ]
+        );
+    }
+}
+
+
+function sync_wporg_deployed_release_post(\WP_Post $plugin_post, string $version) {
+    if (!is_wporg_plugin($plugin_post)) {
+        return new \WP_Error(
+            'invalid_plugin',
+            __('Expected a wordpress.org plugin marker.', 'peak-publisher'),
+            [ 'status' => 400 ]
+        );
+    }
+
+    $version = trim($version);
+    if ($version === '') {
+        return new \WP_Error(
+            'invalid_version',
+            __('Missing plugin version.', 'peak-publisher'),
+            [ 'status' => 400 ]
+        );
+    }
+
+    require_once PBLSH_PLUGIN_DIR . 'classes/WporgOperations.php';
+
+    try {
+        // Read the committed tag from SVN
+        $tags = WporgOperations::list_tags($plugin_post->post_name);
+        $tag = null;
+        foreach ($tags as $candidate) {
+            if ((string) ($candidate['version'] ?? '') === $version) {
+                $tag = $candidate;
+                break;
+            }
+        }
+
+        if (!is_array($tag)) {
+            return new \WP_Error(
+                'wporg_deployed_tag_not_found',
+                __('The published wordpress.org tag could not be read after commit.', 'peak-publisher'),
+                [ 'status' => 502 ]
+            );
+        }
+
+        // Write the local release mirror for that tag: an overwritten tag keeps its date.
+        $snapshot = wporg_release_snapshot($tag, WporgOperations::fetch_tag_data($plugin_post->post_name, $version));
+        $existing = wporg_find_release_post_by_version((int) $plugin_post->ID, $version);
+        if ($existing instanceof \WP_Post) {
+            $release_id = wporg_update_release_post($existing, $snapshot);
+        } else {
+            $publication_times = wporg_tag_publication_times(WporgOperations::fetch_tags_log($plugin_post->post_name), $plugin_post->post_name);
+            $release_id = wporg_create_release_post($plugin_post, $version, $snapshot, wporg_tag_publication_time($publication_times, $tag));
+        }
+
+        if (is_wp_error($release_id)) {
+            return $release_id;
+        }
+
+        // The title follows the reference release (current per the cached pointer, else latest).
+        refresh_plugin_title_from_reference((int) $plugin_post->ID);
+
+        return (int) $release_id;
+    } catch (\Throwable $e) {
+        wporg_log_cache_error($plugin_post, 'sync_deployed_release', $e);
+        return new \WP_Error(
+            'wporg_local_sync_failed_after_commit',
+            __('The wordpress.org commit succeeded, but the local release cache could not be updated.', 'peak-publisher'),
+            [ 'status' => 500 ]
+        );
+    }
+}
+
+
+/**
+ * Drops the revision-driven keys of the marker cache (revision, release_count) so the next
+ * read refreshes from SVN, keeping every other fact. $known carries facts the caller has
+ * just established on SVN — a deploy's written trunk readme, a flip's new Stable tag — so
+ * they are served until that refresh instead of the stale ones.
+ */
+function mark_wporg_plugin_cache_stale(int $plugin_id, array $known = []): void {
+    $post = get_post($plugin_id);
+    if (!$post instanceof \WP_Post || !is_wporg_plugin($post)) {
+        return;
+    }
+
+    $cached = wporg_decode_json_object((string) $post->post_content);
+    unset($cached['revision'], $cached['release_count']);
+
+    write_data_post([
+        'ID' => $plugin_id,
+        'post_content' => wp_slash(wp_json_encode((object) array_merge($cached, $known))),
+    ]);
+}
+
+
+/**
+ * The cache after a commit of Peak Publisher's own that changed nothing the cache derives
+ * from SVN except $known (a flip: only trunk's readme, served as `trunk_readme`): a cache
+ * fresh at the commit's base revision stays fresh at the new one — the next read costs one
+ * revision check instead of a full refresh. The caller has verified that nothing else in the
+ * plugin changed since the base (WporgOperations::plugin_changed_only_in()); a cache at any
+ * other revision, or without one, is stale already and stays so with $known served meanwhile
+ * (mark_wporg_plugin_cache_stale()).
+ */
+function advance_wporg_plugin_cache(int $plugin_id, int $base_revision, int $revision, array $known): void {
+    $post = get_post($plugin_id);
+    if (!$post instanceof \WP_Post || !is_wporg_plugin($post)) {
+        return;
+    }
+
+    $cached = wporg_decode_json_object((string) $post->post_content);
+    if ((int) ($cached['revision'] ?? 0) !== $base_revision) {
+        mark_wporg_plugin_cache_stale($plugin_id, $known);
+        return;
+    }
+
+    write_data_post([
+        'ID' => $plugin_id,
+        'post_content' => wp_slash(wp_json_encode((object) array_merge($cached, $known, [ 'revision' => $revision ]))),
+    ]);
+}
+
+
+function wporg_find_release_post_by_version(int $plugin_id, string $version): ?\WP_Post {
+    $releases = get_posts([
+        'post_type' => 'pblsh_release',
+        'post_status' => 'any',
+        'post_parent' => $plugin_id,
+        'title' => $version,
+        'posts_per_page' => 1,
+    ]);
+
+    return !empty($releases) && $releases[0] instanceof \WP_Post ? $releases[0] : null;
+}
+
+
+/**
+ * When each tag was first created, by version (Unix time). A version is published once:
+ * overwriting its tag, replacing it, or deleting and creating it anew later corrects the same
+ * version and keeps its date. A tag is created where its own directory is added or replaced;
+ * the oldest such commit counts. $log_entries is the history of tags/
+ * (WporgOperations::fetch_tags_log()), its paths repository-absolute.
+ *
+ * @return array<string, int>
+ */
+function wporg_tag_publication_times(array $log_entries, string $wporg_slug): array {
+    $prefix = '/' . $wporg_slug . '/tags/';
+    $times = [];
+    foreach ($log_entries as $entry) {
+        foreach ($entry['paths'] as $path => $action) {
+            if (($action !== 'A' && $action !== 'R') || !str_starts_with($path, $prefix)) {
+                continue;
+            }
+            $version = substr($path, strlen($prefix));
+            if ($version === '' || str_contains($version, '/')) {
+                continue;
+            }
+            $times[$version] = min($times[$version] ?? PHP_INT_MAX, $entry['time']);
+        }
+    }
+    return $times;
+}
+
+
+/**
+ * The publication of a listed tag (WporgOperations::list_tags()): its first creation from
+ * wporg_tag_publication_times(). Deliberate exception: a tag whose own creation the history
+ * does not show, because it arrived inside a copied parent directory, is dated by its last
+ * change, the only date SVN names for it.
+ */
+function wporg_tag_publication_time(array $publication_times, array $tag): int {
+    return $publication_times[$tag['version']] ?? (int) strtotime($tag['last_modified']);
+}
+
+
+/** The release post's content: the tag snapshot, regenerable from SVN. */
+function wporg_release_snapshot(array $tag, array $tag_data): array {
+    return [
+        'tag_revision' => (int) ($tag['revision'] ?? 0),
+        'plugin_data' => $tag_data['plugin_data'] ?? null,
+        'plugin_info' => $tag_data['plugin_info'] ?? null,
+        'plugin_readme_txt' => $tag_data['plugin_readme_txt'] ?? default_plugin_readme_txt_data(),
+    ];
+}
+
+
+/**
+ * Creates the release post of a wordpress.org tag, dated by the release's publication
+ * (wporg_tag_publication_time()) — the one moment its date is written: an update keeps it.
+ *
+ * @return int|\WP_Error
+ */
+function wporg_create_release_post(\WP_Post $marker, string $version, array $snapshot, int $published_at) {
+    $post_date_gmt = gmdate('Y-m-d H:i:s', $published_at);
+    return wporg_persisted_release_id(write_data_post([
+        'post_type' => 'pblsh_release',
+        'post_status' => 'publish',
+        'post_parent' => (int) $marker->ID,
+        'post_title' => $version,
+        'post_name' => get_release_slug('wporg', $marker->post_name, $version),
+        'post_content' => wp_slash(wporg_encode_release_snapshot($snapshot)),
+        'post_date' => get_date_from_gmt($post_date_gmt),
+        'post_date_gmt' => $post_date_gmt,
+    ], true));
+}
+
+
+/**
+ * Writes a changed tag's snapshot into its release post. The date stays: the version was
+ * published when the post was created.
+ *
+ * @return int|\WP_Error
+ */
+function wporg_update_release_post(\WP_Post $release_post, array $snapshot) {
+    return wporg_persisted_release_id(write_data_post([
+        'ID' => (int) $release_post->ID,
+        'post_content' => wp_slash(wporg_encode_release_snapshot($snapshot)),
+    ], true));
+}
+
+
+function wporg_encode_release_snapshot(array $snapshot): string {
+    $content = wp_json_encode($snapshot);
+    if (!is_string($content)) {
+        throw new \RuntimeException('wporg_release_encode_failed');
+    }
+    return $content;
+}
+
+
+/** @return int|\WP_Error */
+function wporg_persisted_release_id($release_id) {
+    if (is_wp_error($release_id)) {
+        return $release_id;
+    }
+    if (!$release_id) {
+        return new \WP_Error(
+            'wporg_release_persist_failed',
+            __('Could not persist the wordpress.org release locally.', 'peak-publisher'),
+            [ 'status' => 500 ]
+        );
+    }
+    return (int) $release_id;
+}
+
+
+function wporg_log_import_error(string $wporg_slug, \Throwable $error): void {
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log(sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- under WP_DEBUG only
+            'Peak Publisher wporg import failed for %s: %s',
+            $wporg_slug,
+            $error->getMessage()
+        ));
+    }
+}
+
+
+/**
+ * Bulk-load release posts for multiple plugin parents in a single query.
+ *
+ * @param int[] $plugin_ids
+ * @return array<int, \WP_Post[]>
+ */
+function fetch_releases_grouped_by_parent(array $plugin_ids): array {
+    $plugin_ids = array_values(array_filter(array_map('intval', $plugin_ids)));
+    if (empty($plugin_ids)) {
+        return [];
+    }
+
+    $grouped = array_fill_keys($plugin_ids, []);
+    $releases = get_posts([
+        'post_type' => 'pblsh_release',
+        'post_status' => 'any',
+        'post_parent__in' => $plugin_ids,
+        'posts_per_page' => -1,
+        'orderby' => 'date',
+        'order' => 'DESC',
+    ]);
+
+    foreach ($releases as $release) {
+        $parent_id = (int) $release->post_parent;
+        if (!array_key_exists($parent_id, $grouped)) {
+            $grouped[$parent_id] = [];
+        }
+        $grouped[$parent_id][] = $release;
+    }
+
+    return $grouped;
+}
+
+
+function wporg_decode_json_object(string $json): array {
+    $data = json_decode($json, true);
+    return is_array($data) ? $data : [];
+}
+
+
+function wporg_has_cached_revision(array $cached): bool {
+    return (int) ($cached['revision'] ?? 0) > 0;
+}
+
+
+function wporg_log_cache_error(\WP_Post $plugin_post, string $stage, \Throwable $error): void {
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log(sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- under WP_DEBUG only
+            'Peak Publisher wporg cache refresh failed for %s (%d) during %s: %s',
+            $plugin_post->post_name,
+            (int) $plugin_post->ID,
+            $stage,
+            $error->getMessage()
+        ));
+    }
+}

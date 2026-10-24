@@ -13,14 +13,15 @@ if (is_standalone()) {
     // Disable themes.
     add_filter('wp_using_themes', '__return_false');
 
-    // Redirect frontend visitors to a configured URL.
-    $standalone_redirect_url = get_peak_publisher_settings()['standalone_redirect_url'] ?? '';
-    if ($standalone_redirect_url !== '') {
-        add_action('wp', function() use ($standalone_redirect_url) {
-            wp_redirect($standalone_redirect_url, 302);
+    // Redirect frontend visitors to the URL of the settings — an external one by design, which
+    // wp_safe_redirect() would refuse; the value passes esc_url_raw() when saved and when read.
+    add_action('wp', static function(): void {
+        $redirect_url = get_peak_publisher_boot_settings()['standalone_redirect_url'];
+        if ($redirect_url !== '') {
+            wp_redirect($redirect_url, 302); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- see above
             exit;
-        }, 9999);
-    }
+        }
+    }, 9999);
 
     // Re-enable redirection from "/admin" to real admin url (because it's disabled by disabling themes)
     add_action('init', function() {
@@ -159,6 +160,33 @@ function init_custom_post_types(): void {
         'rewrite' => false,
     ]);
 
+    // pblsh_wporg_plugin
+    register_post_type('pblsh_wporg_plugin', [
+        'labels' => [
+            'name' => 'WordPress.org Plugins',
+            'singular_name' => 'WordPress.org Plugin',
+            'menu_name' => 'WordPress.org Plugins',
+            'name_admin_bar' => 'WordPress.org Plugin',
+            'add_new' => 'Add New',
+            'add_new_item' => 'Add New WordPress.org Plugin',
+            'new_item' => 'New WordPress.org Plugin',
+            'edit_item' => 'Edit WordPress.org Plugin',
+            'view_item' => 'View WordPress.org Plugin',
+            'all_items' => 'All WordPress.org Plugins',
+            'search_items' => 'Search WordPress.org Plugins',
+            'not_found' => 'No wordpress.org plugins found',
+            'not_found_in_trash' => 'No wordpress.org plugins found in Trash',
+        ],
+        'public' => false,
+        'show_ui' => true,
+        'show_in_menu' => false,
+        'show_in_rest' => false,
+        'supports' => ['title'/* , 'editor' */],
+        'capability_type' => 'post',
+        'has_archive' => false,
+        'rewrite' => false,
+    ]);
+
     // pblsh_release
     register_post_type('pblsh_release', [
         'labels' => [
@@ -181,6 +209,25 @@ function init_custom_post_types(): void {
         'show_in_menu' => false,
         'show_in_rest' => false,
         'supports' => ['title'/* , 'editor' */],
+        'capability_type' => 'post',
+        'has_archive' => false,
+        'rewrite' => false,
+    ]);
+
+    // pblsh_wporg_account — a connected wordpress.org account (includes/wporg_accounts.php).
+    // Never public, no admin UI, no REST, no export, no revisions: its meta holds the
+    // encrypted SVN password.
+    register_post_type('pblsh_wporg_account', [
+        'labels' => [
+            'name' => 'wordpress.org Accounts',
+            'singular_name' => 'wordpress.org Account',
+        ],
+        'public' => false,
+        'show_ui' => false,
+        'show_in_menu' => false,
+        'show_in_rest' => false,
+        'can_export' => false,
+        'supports' => ['title'],
         'capability_type' => 'post',
         'has_archive' => false,
         'rewrite' => false,

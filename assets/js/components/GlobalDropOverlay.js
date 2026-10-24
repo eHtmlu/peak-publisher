@@ -1,55 +1,115 @@
 // GlobalDropOverlay Component - handles app-wide drag & drop upload
-lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) => {
-    const { __ } = wp.i18n;
+lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated, activeUploadContext = {} } = {}) => {
+    const { __, _n } = wp.i18n;
     const sprintf = wp.i18n.sprintf ?? window.sprintf;
-    const { useState, useEffect, useRef, createElement, createInterpolateElement } = wp.element;
-    const { Button, CheckboxControl } = wp.components;
+    const { useState, useEffect, useRef, createElement } = wp.element;
+    const { Button, TextControl, Spinner } = wp.components;
     const { useSelect } = wp.data;
-    const { getSvgIcon } = Pblsh.Utils;
+    const { getSvgIcon, getChannelLabel, getChannelDescription, getChannelIcon } = Pblsh.Utils;
+    const { getReleaseContext, getReleasePresentation } = Pblsh.UploadResultUtils;
+    const { useUploadChecks } = Pblsh.Hooks;
+    const { WporgImportFacts, WporgAccountForm, WporgAccountSpellingNotice, ChannelChoiceCards, Checklist, CurrentReleaseSwitch, NoticeBox, ScrollFrame, PublishProgress } = Pblsh.Components;
 
     const fileInputRef = useRef(null);
     const dialogRef = useRef(null);
+    const destinationPanelRef = useRef(null);
+    const destinationTriggerRef = useRef(null);
+    const activeUploadContextRef = useRef(activeUploadContext && typeof activeUploadContext === 'object' ? activeUploadContext : {});
     const [visible, setVisible] = useState(false);
     const [dragCounter, setDragCounter] = useState(0);
     const [zipProgress, setZipProgress] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [processPhase, setProcessPhase] = useState('');
+    // True only while the wporg import request itself runs — the import
+    // signals (busy label, stripes) must not fire for other processing.
+    const importRunning = isProcessing && processPhase === 'wporg_import';
+    // While the finalize runs: how far it got, from the server's finalize status
+    // ({ phase, done, total }, PublishProgress).
+    const publishing = isProcessing && processPhase === 'finalize';
+    const [finalizeProgress, setFinalizeProgress] = useState(null);
     const [validationResult, setValidationResult] = useState(null);
     const [filename, setFilename] = useState('');
-    const [useDifferentCustomUpdateServer, setUseDifferentCustomUpdateServer] = useState(false);
-    const [usePeakPublisherForNewUpdateServer, setUsePeakPublisherForNewUpdateServer] = useState(false);
-    const [useWordPressOrgUpdateServer, setUseWordPressOrgUpdateServer] = useState(false);
-    const [replaceRelease, setReplaceRelease] = useState(false);
-    const [addWithoutTopLevelFolder, setAddWithoutTopLevelFolder] = useState(false);
-    const [changePluginFileName, setChangePluginFileName] = useState(false);
-    const [useUnexpectedPluginVersion, setUseUnexpectedPluginVersion] = useState(false);
-    const [useOlderPluginVersion, setUseOlderPluginVersion] = useState(false);
-    const [useNotPeakPublisherForNewUpdateServer, setUseNotPeakPublisherForNewUpdateServer] = useState(false);
-    const [keepWorkspaceArtifacts, setKeepWorkspaceArtifacts] = useState(false);
-    const [keepReadmeTxtBom, setKeepReadmeTxtBom] = useState(false);
-    const [keepReadmeTxtEncoding, setKeepReadmeTxtEncoding] = useState(false);
-    const [keepReadmeTxtAsIs, setKeepReadmeTxtAsIs] = useState(false);
-    const [keepOldBootstrapCode, setKeepOldBootstrapCode] = useState(false);
+    const [destinationPanelOpen, setDestinationPanelOpen] = useState(false);
+    const [slugEditValue, setSlugEditValue] = useState('');
+    const [slugEditError, setSlugEditError] = useState('');
+    // Focus target when a failed slug change reopens the destination panel.
+    const slugEditInputRef = useRef(null);
+    const [selectedHostingType, setSelectedHostingType] = useState(null);
+    // The current-release decision (decide_current_release() on the server): the server names the
+    // relation between the upload and the plugin's current release plus the default; the
+    // switch above the checklist encodes the deviation from that default. The deviation counts only while
+    // relation and pre-release flag still match the target's facts — a re-resolution
+    // (set_slug, refresh_target_context) may change the default, and a surviving deviation
+    // would invert it into an unwanted rollback.
+    const [currentReleaseDecision, setCurrentReleaseDecision] = useState({ relation: null, pre_release: null, deviate: false });
+
+    // Owns the per-upload confirmation decisions and builds the checklist items (upload-checks.js).
+    const uploadChecks = useUploadChecks();
 
     const serverSettings = useSelect((select) => select('pblsh/settings').getServer(), []);
+    // What connecting the account in this dialog found out about the username's spelling,
+    // carried into the step that follows the account form; gone with the dialog.
+    const [accountSpelling, setAccountSpelling] = useState(null);
+
+    // The analysis records wordpress.org's verdict about the stored password on the account
+    // (credentials_rejected); the account form reads it from the accounts store.
+    const wporgAccessStatus = validationResult?.data?.hosting_type_targets?.wporg?.wporg_access_status || '';
+    useEffect(() => {
+        if (wporgAccessStatus === 'credentials_rejected') {
+            window.Pblsh.Controllers.WporgAccounts.fetch().catch(() => {});
+        }
+    }, [wporgAccessStatus, validationResult?.upload_id]);
+
+    function getActiveUploadContext() {
+        // Snapshot the central upload context for this upload run
+        const context = activeUploadContextRef.current;
+        return context && typeof context === 'object' ? { ...context } : {};
+    }
+
+    function isUploadPhaseOk(result) {
+        return result && result.status === 'ok';
+    }
+
+    function withUploadId(result, upload_id) {
+        return {
+            ...result,
+            upload_id: result?.upload_id || upload_id,
+        };
+    }
+
+    function showUploadPhaseResult(result, upload_id) {
+        setIsProcessing(false);
+        setUploadProgress(false);
+        setZipProgress(false);
+        setValidationResult(withUploadId(result, upload_id));
+    }
+
+    function resetOverlayTransientState() {
+        setDragCounter(0);
+        setVisible(false);
+        setZipProgress(false);
+        setUploadProgress(false);
+        setIsProcessing(false);
+        setProcessPhase('');
+        setFilename('');
+        setAccountSpelling(null);
+        resetResultDecisions();
+    }
 
     function resetResultDecisions() {
-        setUseDifferentCustomUpdateServer(false);
-        setUsePeakPublisherForNewUpdateServer(false);
-        setUseWordPressOrgUpdateServer(false);
-        setReplaceRelease(false);
-        setAddWithoutTopLevelFolder(false);
-        setChangePluginFileName(false);
-        setUseUnexpectedPluginVersion(false);
-        setUseOlderPluginVersion(false);
-        setUseNotPeakPublisherForNewUpdateServer(false);
-        setKeepWorkspaceArtifacts(false);
-        setKeepReadmeTxtBom(false);
-        setKeepReadmeTxtEncoding(false);
-        setKeepReadmeTxtAsIs(false);
-        setKeepOldBootstrapCode(false);
+        setDestinationPanelOpen(false);
+        setSlugEditValue('');
+        setSlugEditError('');
+        setSelectedHostingType(null);
+        setCurrentReleaseDecision({ relation: null, pre_release: null, deviate: false });
+        uploadChecks.reset();
     }
+
+    useEffect(() => {
+        // Mirror the latest upload context for window event handlers
+        activeUploadContextRef.current = activeUploadContext && typeof activeUploadContext === 'object' ? activeUploadContext : {};
+    }, [activeUploadContext]);
 
     useEffect(() => {
         // Check if a drag event carries external files (not an internal page drag like screenshot reordering)
@@ -158,693 +218,1167 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
     }, []);
 
     const closeOverlay = () => {
-        setVisible(false);
-        setZipProgress(false);
-        setUploadProgress(false);
-        setIsProcessing(false);
+        resetOverlayTransientState();
         setValidationResult(null);
-        setFilename('');
-        resetResultDecisions();
     };
 
-    function startUpload(file) {
-        setVisible(true);
-        setUploadProgress(0);
-        setIsProcessing(false);
-        setValidationResult(null);
-        Pblsh.API.uploadStart(file, (percent) => {
-            setUploadProgress(percent);
-            if (percent === 100) {
-                setUploadProgress(false);
-                setIsProcessing(true);
-                setProcessPhase('upload_prepare');
+    useEffect(() => {
+        // Close the destination panel on any pointerdown outside of it — blur alone can't tell
+        // an outside click from a click on the panel's scrollbar or other non-focusable areas.
+        if (!destinationPanelOpen) return;
+        const onPointerDown = (event) => {
+            if (destinationPanelRef.current && !destinationPanelRef.current.contains(event.target)) {
+                setDestinationPanelOpen(false);
             }
-        }, { builtInBrowserBy: '' })
-        .then(async (res1) => {
+        };
+        document.addEventListener('pointerdown', onPointerDown, true);
+        return () => document.removeEventListener('pointerdown', onPointerDown, true);
+    }, [destinationPanelOpen]);
+
+    useEffect(() => {
+        // Reset the target selection per upload. Keyed on upload_id so later updates of the same
+        // result (finalize errors, import refresh) keep the user's choice.
+        const meta = validationResult?.data || {};
+        if (meta?.hosting_type_choice && meta?.hosting_type_targets) {
+            setSelectedHostingType(meta.hosting_type_default || null);
+        } else {
+            setSelectedHostingType(null);
+        }
+        setCurrentReleaseDecision({ relation: null, pre_release: null, deviate: false });
+    }, [validationResult?.upload_id]);
+
+    // The checklist's receipts belong to one destination (channel × slug): a channel switch or
+    // a slug change shows other facts, and what was ticked for the old ones is withdrawn.
+    // Keyed on the destination, so later updates of the same result (finalize errors, the
+    // post-import refresh) keep the ticks.
+    const activeDestination = (() => {
+        const meta = validationResult?.data || {};
+        const key = getActiveTargetKey(meta);
+        return key ? key + ':' + (meta.hosting_type_targets?.[key]?.slug || '') : '';
+    })();
+    useEffect(() => {
+        uploadChecks.reset();
+    }, [validationResult?.upload_id, activeDestination]);
+
+    async function runUploadWorkflow(file, context, uploadStartOptions = {}) {
+        setUploadProgress(0);
+
+        try {
+            const res1 = await Pblsh.API.uploadStart(file, (percent) => {
+                setUploadProgress(percent);
+                if (percent >= 100) {
+                    setUploadProgress(false);
+                    setIsProcessing(true);
+                    setProcessPhase('upload_prepare');
+                }
+            }, uploadStartOptions);
+
             setUploadProgress(false);
             const uploadId = res1 && res1.upload_id ? res1.upload_id : null;
+            if (!isUploadPhaseOk(res1) && Array.isArray(res1?.errors)) {
+                showUploadPhaseResult(res1, uploadId);
+                return;
+            }
             if (!uploadId) throw new Error('Missing upload_id after upload');
 
             setIsProcessing(true);
             setProcessPhase('unpack');
             const resUnpack = await Pblsh.API.uploadContinue(uploadId, 'unpack');
-            setProcessPhase('analyze');
-            const res2 = await Pblsh.API.uploadContinue(uploadId, 'analyze');
-            const next = res2 && res2.next ? res2.next : 'result';
-            if (next === 'rebuild_zip') {
-                setProcessPhase('rebuild_zip');
-                await Pblsh.API.uploadContinue(uploadId, 'rebuild_zip');
+            if (!isUploadPhaseOk(resUnpack)) {
+                showUploadPhaseResult(resUnpack, uploadId);
+                return;
             }
+
+            setProcessPhase('analyze');
+            const resAnalyze = await Pblsh.API.uploadContinue(uploadId, 'analyze', context);
+            if (!isUploadPhaseOk(resAnalyze)) {
+                showUploadPhaseResult(resAnalyze, uploadId);
+                return;
+            }
+
             setProcessPhase('result');
-                const res3 = await Pblsh.API.uploadContinue(uploadId, 'result');
+            const resResult = await Pblsh.API.uploadContinue(uploadId, 'result');
             setIsProcessing(false);
-            setValidationResult(res3);
-        })
-        .catch((err) => {
+            setValidationResult(withUploadId(resResult, uploadId));
+        } catch (err) {
+            setZipProgress(false);
             setUploadProgress(false);
             setIsProcessing(false);
-            setValidationResult({ status: 'error', errors: [ { code: 'upload_error', message: err.message } ], data: {} });
-        });
+            setValidationResult({ status: 'error', errors: [ { code: 'upload_error', message: err?.message || __('Upload failed.', 'peak-publisher') } ], data: {} });
+        }
     }
 
-    function startUploadDirectory(filesWithPaths) {
+    function startUpload(file) {
+        // Read upload context exactly when the upload starts
+        const context = getActiveUploadContext();
+        setVisible(true);
+        setZipProgress(false);
+        setIsProcessing(false);
+        setValidationResult(null);
+        runUploadWorkflow(file, context);
+    }
+
+    async function startUploadDirectory(filesWithPaths) {
+        // Read upload context exactly when directory upload starts
+        const context = getActiveUploadContext();
         setVisible(true);
         setZipProgress(0);
         setUploadProgress(false);
         setIsProcessing(false);
         setValidationResult(null);
-        Pblsh.UploadUtils.createZipFromFiles(filesWithPaths, (p) => {
-            setZipProgress(prev => Math.max(prev, Math.floor(p)));
-        })
-        .then((zipFile) => {
-            setZipProgress(false);
-            setUploadProgress(0);
-            Pblsh.API.uploadStart(zipFile, (percent) => {
-                const mapped = percent;
-                setUploadProgress(mapped);
-                if (mapped >= 100) {
-                    setUploadProgress(false);
-                    setIsProcessing(true);
-                    setProcessPhase('upload_prepare');
-                }
-            }, { builtInBrowserBy: 'jszip' })
-            .then(async (res1) => {
-                setUploadProgress(false);
-                const uploadId = res1 && res1.upload_id ? res1.upload_id : null;
-                if (!uploadId) throw new Error('Missing upload_id after upload');
 
-                setIsProcessing(true);
-                setProcessPhase('unpack');
-                const resUnpack = await Pblsh.API.uploadContinue(uploadId, 'unpack');
-                setProcessPhase('analyze');
-                const res2 = await Pblsh.API.uploadContinue(uploadId, 'analyze');
-                const next = res2 && res2.next ? res2.next : 'result';
-                if (next === 'rebuild_zip') {
-                    setProcessPhase('rebuild_zip');
-                    await Pblsh.API.uploadContinue(uploadId, 'rebuild_zip');
-                }
-                setProcessPhase('result');
-                const res3 = await Pblsh.API.uploadContinue(uploadId, 'result');
-                setIsProcessing(false);
-                setValidationResult(res3);
-            })
-            .catch((err) => {
-                setUploadProgress(false);
-                setIsProcessing(false);
-                setValidationResult({ status: 'error', errors: [ { code: 'upload_error', message: err.message } ], data: {} });
+        let zipFile = null;
+        try {
+            zipFile = await Pblsh.UploadUtils.createZipFromFiles(filesWithPaths, (p) => {
+                setZipProgress(prev => Math.max(prev, Math.floor(p)));
             });
-        })
-        .catch((err) => {
+        } catch (err) {
             setZipProgress(false);
             setUploadProgress(false);
             setIsProcessing(false);
             setValidationResult({ status: 'error', errors: [ { code: 'zip_error', message: err?.message || 'Zipping failed' } ], data: {} });
-        });
+            return;
+        }
+
+        setZipProgress(false);
+        runUploadWorkflow(zipFile, context, { built_in_browser: 'jszip' });
     }
     
 
-    function finalizeCreation(uploadId) {
-        if (!uploadId) return;
-        setIsProcessing(true);
-        Pblsh.API.finalizeUpload(uploadId)
-            .then((res) => {
-                setIsProcessing(false);
-                if (res && res.status === 'ok' && res.plugin_id) {
-                    if (typeof onCreated === 'function') {
-                        closeOverlay();
-                        onCreated(res.plugin_id);
-                        return;
-                    }
-                } else {
-                    setValidationResult({ status: 'error', errors: [ { code: 'finalize_failed', message: (res && res.message) ? res.message : 'Finalize failed.' } ], data: validationResult?.data || {} });
-                }
-            })
-            .catch((err) => {
-                setIsProcessing(false);
-                setValidationResult({ status: 'error', errors: [ { code: 'finalize_error', message: err.message } ], data: validationResult?.data || {} });
-            });
+    function getTargetKeys(meta = {}) {
+        // Key order follows the server's target order — it defines the display order.
+        const targets = meta?.hosting_type_targets || {};
+        return Object.keys(targets).filter((key) => targets[key]);
     }
 
-    function formatBytes(bytes) {
-        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const index = Math.floor(Math.log(bytes) / Math.log(1024));
-        return (bytes / Math.pow(1024, index)).toFixed(2) + ' ' + units[index];
+    function getActiveTargetKey(meta = {}) {
+        const targets = meta?.hosting_type_targets || {};
+        if (!targets || typeof targets !== 'object') return null;
+        if (meta?.hosting_type_choice) {
+            if (selectedHostingType && targets[selectedHostingType]) return selectedHostingType;
+            if (meta.hosting_type_default && targets[meta.hosting_type_default]) return meta.hosting_type_default;
+            return null;
+        }
+        if (meta?.hosting_type_resolved && targets[meta.hosting_type_resolved]) return meta.hosting_type_resolved;
+        const keys = getTargetKeys(meta);
+        return keys.length === 1 ? keys[0] : null;
+    }
+
+    function getEffectiveMetaForTarget(meta = {}, targetKey = null) {
+        // Projects the active channel's identity and release context onto the meta the
+        // checklist and gate read — each target carries its own resolved slug.
+        const target = targetKey ? meta?.hosting_type_targets?.[targetKey] : null;
+        if (!target) return meta;
+        return {
+            ...meta,
+            hosting_type_resolved: targetKey,
+            slug: target.slug || '',
+            plugin_info: { ...(meta.plugin_info || {}), plugin_basename: target.plugin_basename || '' },
+            existing_plugin: target.existing_plugin_id || false,
+            related_releases: target.related_releases || false,
+        };
+    }
+
+
+    function candidateDestination(candidate, channelKey) {
+        // The single place a candidate becomes a destination object — the existing flag always
+        // derives from the candidate's analysis annotation, never from assumptions at the call site.
+        return {
+            hostingType: channelKey,
+            slug: candidate.slug,
+            existing: (candidate.existing || []).includes(channelKey),
+            sources: candidate.sources || [],
+        };
+    }
+
+    function getDestinations(meta = {}) {
+        // Concrete destinations (channel × slug) derived from the per-channel targets and the
+        // candidate annotations: the channel's resolved slug is one destination, and every
+        // candidate identifying an existing plugin in a channel stays a destination of its
+        // own — regardless of how the automatic resolution settled and even when the channel
+        // is currently not included in the targets (choosing the match restores the channel).
+        // An existing match must never drop off the list.
+        const targets = meta?.hosting_type_targets || {};
+        const candidates = Array.isArray(meta?.plugin_info?.slug_candidates) ? meta.plugin_info.slug_candidates : [];
+        const destinations = [];
+        // wporg before self_hosted — mirrors the server's target insertion order.
+        ['wporg', 'self_hosted'].forEach((key) => {
+            const target = targets[key];
+            if (target?.slug) {
+                const candidate = candidates.find((c) => c.slug === target.slug);
+                destinations.push({
+                    hostingType: key,
+                    slug: target.slug,
+                    existing: !!target.existing_plugin_id,
+                    sources: candidate?.sources || (target.slug_source ? [target.slug_source] : []),
+                });
+            }
+            candidates.filter((c) => (c.existing || []).includes(key) && c.slug !== target?.slug).forEach((candidate) => {
+                destinations.push(candidateDestination(candidate, key));
+            });
+            if (target && !target.slug && !candidates.some((c) => (c.existing || []).includes(key))) {
+                // No usable slug at all — the included channel still appears so the custom input has an anchor.
+                destinations.push({ hostingType: key, slug: '', existing: false, sources: [] });
+            }
+        });
+        return destinations;
+    }
+
+    function candidateAlternativesForChannel(meta, destinations, key) {
+        // Candidates that would be NEW destinations of the channel: not already represented
+        // by one of its rows, and whose choice keeps the channel included (candidate_channels
+        // — same rule as the actual inclusion). Candidates with an existing match in the
+        // channel are always among its destinations already, so they never appear here.
+        const candidates = Array.isArray(meta?.plugin_info?.slug_candidates) ? meta.plugin_info.slug_candidates : [];
+        const coveredSlugs = destinations.filter((destination) => destination.hostingType === key).map((destination) => destination.slug);
+        return candidates.filter((candidate) => !coveredSlugs.includes(candidate.slug)
+            && (meta?.candidate_channels?.[candidate.slug] || []).includes(key));
+    }
+
+    function selectDestination(destination, meta, uploadId) {
+        const target = meta?.hosting_type_targets?.[destination.hostingType];
+        const needsSlugChange = !!destination.slug && destination.slug !== target?.slug;
+        if (!needsSlugChange) {
+            setSelectedHostingType(destination.hostingType);
+            setDestinationPanelOpen(false);
+            // The clicked option unmounts with the panel — focus returns to the trigger.
+            window.requestAnimationFrame(() => destinationTriggerRef.current?.focus());
+            return;
+        }
+        // Panel close and channel switch apply on success inside runSlugSelection: a failed
+        // roundtrip keeps the panel (and error) visible, and switching the channel before
+        // the result arrives would flash the destination screen while the current data
+        // still shows the channel as unresolved (or not included at all).
+        applySlug(uploadId, destination.slug, destination.hostingType);
+    }
+
+    function renderNewPluginOptionText(destination) {
+        // Assignment-list variant for "new plugin" rows: a new plugin's slug is provisional —
+        // it resolves later and stays editable in the publish-path row (same philosophy as
+        // the channel cards) — so the row shows the channel description instead of a slug.
+        return createElement('span', { className: 'pblsh--destination-option__text' },
+            createElement('span', { className: 'pblsh--destination-option__headline' },
+                getChannelIcon(destination.hostingType) && createElement('span', { className: 'pblsh--destination-option__icon' }, getSvgIcon(getChannelIcon(destination.hostingType), { size: 18 })),
+                createElement('span', { className: 'pblsh--destination-option__label' }, getChannelLabel(destination.hostingType)),
+                createElement('span', { className: 'pblsh--destination-option__badge is-new' }, __('new plugin', 'peak-publisher')),
+            ),
+            createElement('span', { className: 'pblsh--destination-option__desc' }, getChannelDescription(destination.hostingType)),
+        );
+    }
+
+    function renderDestinationOptionText(destination) {
+        // Shared option anatomy for the publish-path panel options and the assignment list's
+        // existing rows: "channel → slug" like the closed trigger, with the badge
+        // right-aligned (flex-wrap lets it break to its own line for long slugs).
+        return createElement('span', { className: 'pblsh--destination-option__text' },
+            createElement('span', { className: 'pblsh--destination-option__headline' },
+                getChannelIcon(destination.hostingType) && createElement('span', { className: 'pblsh--destination-option__icon' }, getSvgIcon(getChannelIcon(destination.hostingType), { size: 18 })),
+                createElement('span', { className: 'pblsh--destination-option__label' }, getChannelLabel(destination.hostingType)),
+                createElement('span', { className: 'pblsh--destination-option__sep', 'aria-hidden': 'true' }, getSvgIcon('arrow_right', { size: 16 })),
+                // Every rendered destination row carries a slug (assignment rows and panel
+                // options are candidate- or target-backed; the slugless state never reaches them).
+                createElement('code', { className: 'pblsh--destination-option__slug' }, destination.slug),
+                createElement('span', { className: 'pblsh--destination-option__badge' + (destination.existing ? ' is-existing' : ' is-new') },
+                    destination.existing ? __('existing', 'peak-publisher') : __('new plugin', 'peak-publisher')),
+            ),
+            destination.sources.length > 0 && createElement('span', { className: 'pblsh--destination-option__desc' },
+                sprintf(__('slug from %s', 'peak-publisher'), destination.sources.map(getSlugSourceLabel).join(', '))),
+        );
+    }
+
+    // The upload's own identity — name and version from the plugin file — as the first line
+    // of the destination decision: what the user compares the destinations against.
+    function renderUploadIdentity(meta) {
+        return createElement('p', { className: 'pblsh--upload-result__upload-identity' },
+            createElement('strong', null, meta?.plugin_data?.Name || ''),
+            ' ',
+            meta?.plugin_data?.Version || '',
+        );
+    }
+
+    function renderDestinationChoice(meta = {}, uploadId) {
+        const destinations = getDestinations(meta);
+        if (destinations.length === 0) return null;
+        const allNew = destinations.every((destination) => !destination.existing);
+
+        if (!allNew) {
+            // Assignment mode: at least one destination is an existing plugin — the decision is
+            // an assignment, so the options render as one vertical list with the shared
+            // "channel → slug" anatomy. Existing rows first, then one new-plugin alternative
+            // per channel (the release may belong to neither match).
+            const rows = [...destinations.filter((destination) => destination.existing)];
+            const newRows = destinations.filter((destination) => !destination.existing);
+            getTargetKeys(meta).forEach((key) => {
+                if (newRows.some((destination) => destination.hostingType === key)) return;
+                const candidate = candidateAlternativesForChannel(meta, destinations, key)[0];
+                if (candidate) {
+                    newRows.push(candidateDestination(candidate, key));
+                }
+            });
+            rows.push(...newRows);
+
+            return createElement('div', { className: 'pblsh--destination-choice', role: 'radiogroup', 'aria-label': __('Publish destination', 'peak-publisher') },
+                createElement('h3', { className: 'pblsh--destination-choice__prompt' }, __('Where does this release belong?', 'peak-publisher')),
+                rows.map((destination) => {
+                    // A channel can appear more than once here (existing row + new-plugin
+                    // alternative) — the id needs the slug; "--" separates the two parts
+                    // unambiguously (a hosting type never contains consecutive dashes).
+                    const value = destination.hostingType + '--' + destination.slug;
+                    const id = 'pblsh-upload-destination-' + value;
+                    return createElement('label', {
+                        key: destination.hostingType + ':' + destination.slug,
+                        className: 'pblsh--option-card pblsh--destination-choice__option pblsh--destination-option',
+                        htmlFor: id,
+                    },
+                        createElement('input', {
+                            id,
+                            type: 'radio',
+                            name: 'pblsh-upload-destination',
+                            value,
+                            checked: false,
+                            onChange: () => selectDestination(destination, meta, uploadId),
+                        }),
+                        destination.existing ? renderDestinationOptionText(destination) : renderNewPluginOptionText(destination),
+                    );
+                }),
+                createElement('div', { className: 'pblsh--destination-choice__slug-edit' },
+                    createElement('span', { className: 'pblsh--destination-choice__slug-edit-label' },
+                        // Every assignment row carries a slug (candidate rows always do, and the
+                        // no-candidates case never reaches this mode), so the label is static.
+                        __('None of these? Enter a custom slug:', 'peak-publisher')),
+                    renderSlugEdit(uploadId),
+                ),
+            );
+        }
+
+        const slugMissing = destinations.some((destination) => !destination.slug);
+        if (slugMissing) {
+            // No usable slug from the upload (uniform across channels — the candidates are
+            // global): a destination is channel × slug, so without a slug the channel cards
+            // would be dead ends. The slug is the only open question here; the channel
+            // choice follows on this same screen once an identity exists.
+            return createElement('div', { className: 'pblsh--destination-choice' },
+                createElement('div', { className: 'pblsh--destination-choice__slug-edit' },
+                    createElement('span', { className: 'pblsh--destination-choice__slug-edit-label' },
+                        __('No usable plugin slug could be derived from your upload. Enter one:', 'peak-publisher')),
+                    renderSlugEdit(uploadId),
+                ),
+            );
+        }
+
+        // Channel mode: every destination is a new plugin — the decision is only the channel.
+        // The slug resolves automatically afterwards and stays editable in the publish-path
+        // row, so the cards deliberately don't show it. Rendering is the shared channel
+        // cards component — the identical choice the add-new flow presents.
+        return createElement(ChannelChoiceCards, {
+            onSelect: (channelKey) => {
+                const destination = destinations.find((entry) => entry.hostingType === channelKey);
+                if (destination) {
+                    selectDestination(destination, meta, uploadId);
+                }
+            },
+        });
+    }
+
+    // The dialog follows a publish through the server's finalize status (finalize_status_view()):
+    // it asks every second while the request runs, for the progress, and keeps asking when the
+    // request ends without an answer — a gateway in front of the site may cut it off long before
+    // a large wordpress.org deploy is done, while the server carries on. The server writes the
+    // status at most once a second: asking more often learns nothing new. The next question
+    // starts a second after the last answer, so a slow host slows the questions down.
+    const FINALIZE_POLL_INTERVAL = 1000;
+    // apiFetch's codes for a request that got no answer from WordPress (a gateway's error page,
+    // a dropped connection): the publish may still be running.
+    const FINALIZE_NO_ANSWER_CODES = ['invalid_json', 'fetch_error', 'offline_error'];
+    // How long the dialog keeps asking a server it cannot reach once the request lost its answer.
+    const FINALIZE_UNREACHABLE_AFTER = 120000;
+    // A request cut off at once may still reach WordPress and start: only a status still missing
+    // this long after the answer was lost means the publish did not start.
+    const FINALIZE_START_GRACE = 10000;
+
+    /**
+     * Runs the finalize request and resolves with its response — the request's own, or the one
+     * the status records when the request lost its answer or when the server refused it
+     * because an earlier attempt is still publishing (finalize_running). Without either, an
+     * error of its own: the publish did not start, or its outcome stayed unknown.
+     *
+     * @param {{ version: string, isWporg: boolean, pluginId: number|null }} publish What is
+     *        published where, for the message of an unknown outcome.
+     */
+    function followFinalize(uploadId, opts, publish) {
+        const unknownOutcome = {
+            code: 'finalize_result_unknown',
+            message: publish.isWporg
+                ? sprintf(__('Your server did not report how publishing version %s ended. Open the plugin and use Refresh to see whether it arrived on wordpress.org before you publish again.', 'peak-publisher'), publish.version)
+                : (publish.pluginId
+                    ? sprintf(__('Your server did not report how publishing version %s ended. Open the plugin and check its releases before you publish again.', 'peak-publisher'), publish.version)
+                    : sprintf(__('Your server did not report how publishing version %s ended. Look for the plugin in the plugin list before you publish again.', 'peak-publisher'), publish.version)),
+        };
+        const notStarted = {
+            code: 'finalize_not_started',
+            message: __('Your server did not answer, and publishing did not start. Publish again.', 'peak-publisher'),
+        };
+
+        return new Promise((resolve) => {
+            let settled = false;
+            let timer = null;
+            let answerLostAt = null;
+            let reachedAt = Date.now();
+            const settle = (res) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve(res);
+            };
+            const poll = async () => {
+                try {
+                    const status = await Pblsh.API.getFinalizeStatus(uploadId);
+                    if (settled) return;
+                    reachedAt = Date.now();
+                    if (status?.state === 'running') {
+                        setFinalizeProgress({ phase: status.phase, done: status.done, total: status.total });
+                    } else if (status?.state === 'finished') {
+                        settle(status.response);
+                    } else if (answerLostAt !== null && status?.state === 'lost') {
+                        settle(unknownOutcome);
+                    } else if (answerLostAt !== null && status?.state === 'not_started' && Date.now() - answerLostAt >= FINALIZE_START_GRACE) {
+                        settle(notStarted);
+                    }
+                } catch (err) {
+                    if (answerLostAt !== null && Date.now() - reachedAt >= FINALIZE_UNREACHABLE_AFTER) {
+                        settle(unknownOutcome);
+                    }
+                }
+                if (!settled) {
+                    timer = setTimeout(poll, FINALIZE_POLL_INTERVAL);
+                }
+            };
+            timer = setTimeout(poll, FINALIZE_POLL_INTERVAL);
+
+            Pblsh.API.finalizeUpload(uploadId, opts).then((res) => {
+                if (res?.code === 'finalize_running') {
+                    // An earlier attempt is publishing this upload (its answer was lost, the
+                    // user published again, then it started after all): its status decides.
+                    answerLostAt = Date.now();
+                    return;
+                }
+                settle(res);
+            }, (err) => {
+                if (FINALIZE_NO_ANSWER_CODES.includes(err?.code)) {
+                    // The status decides from here on.
+                    answerLostAt = Date.now();
+                    return;
+                }
+                // Shape the exception like an error response so a single error path handles both.
+                settle({ code: err?.code || 'finalize_error', message: err?.message || '' });
+            });
+        });
+    }
+
+    async function finalizeCreation(uploadId, opts, publish) {
+        if (!uploadId) return;
+        setIsProcessing(true);
+        // The operation declares what it is — a leftover re-resolution phase
+        // must not show the destination wait state during the finalize.
+        setProcessPhase('finalize');
+        setFinalizeProgress({ phase: 'prepare', done: 0, total: 0 });
+        const res = await followFinalize(uploadId, opts, publish);
+        setIsProcessing(false);
+        setFinalizeProgress(null);
+
+        if (res && res.status === 'ok' && res.plugin_id) {
+            if (typeof onCreated === 'function') {
+                closeOverlay();
+                onCreated(res.plugin_id);
+            }
+            return;
+        }
+
+        const fallbackError = { code: res?.code || 'finalize_failed', message: res?.message || __('Finalize failed.', 'peak-publisher') };
+        setValidationResult({
+            ...(validationResult || {}),
+            ...(res && typeof res === 'object' ? res : {}),
+            status: 'error',
+            upload_id: res?.upload_id || uploadId,
+            data: res?.data || validationResult?.data || {},
+            errors: Array.isArray(res?.errors) && res.errors.length > 0 ? res.errors : [fallbackError],
+        });
+    }
+
+    function renderUploadResultHeader(header = {}) {
+        return createElement('header', { className: 'pblsh--upload-result__plugin' },
+            createElement('h2', { className: 'pblsh--upload-result__plugin__headline' }, header.headline),
+            header.desc !== undefined && createElement('div', { className: 'pblsh--upload-result__plugin__desc' }, header.desc),
+            header.type !== undefined && createElement('div', { className: 'pblsh--upload-result__plugin__type' }, header.type),
+        );
+    }
+
+    function renderChecklist(items) {
+        const normalizedItems = items.flat(Infinity).filter(Boolean);
+        if (normalizedItems.length === 0) return null;
+        return createElement('div', { className: 'pblsh--upload-result__checks' },
+            createElement(Checklist, { items: normalizedItems }),
+        );
+    }
+
+    function renderDiscardButton(uploadId) {
+        return createElement(Button, {
+            isSecondary: true,
+            // Discarding deletes the workspace a running publish reads its files from.
+            disabled: publishing,
+            onClick: async () => {
+                closeOverlay();
+                if (uploadId) {
+                    // Fire-and-forget: leftovers of a failed discard are collected by the tmp-uploads cleanup.
+                    try { await Pblsh.API.discardUpload(uploadId); } catch (e) {}
+                }
+            },
+            __next40pxDefaultSize: true,
+        }, __('Discard', 'peak-publisher'));
+    }
+
+    function renderUploadResultShell({
+        classNames = [],
+        // The release block (name, version, release type). Absent while the destination is
+        // undecided and on its pre-screens: it depends on the destination, and the dialog
+        // grows top-down — publish path, release block, checklist.
+        header = null,
+        identity = null,
+        // Pinned error strip between body and footer: errors are dialog state,
+        // not body content — visible in every scroll position and right next
+        // to the action they belong to.
+        notices = null,
+        body = null,
+        checklistItems = null,
+        actions = [],
+    }) {
+        const bodyContent = [
+            body,
+            checklistItems !== null && renderChecklist(checklistItems),
+        ].filter(Boolean);
+        const visibleActions = actions.flat(Infinity).filter(Boolean);
+        return createElement('div', {
+            className: ['pblsh--upload-result', ...classNames].filter(Boolean).join(' '),
+        },
+            identity,
+            header && renderUploadResultHeader(header),
+            bodyContent.length > 0 && createElement(ScrollFrame, { className: 'pblsh--upload-result__body-frame', scrollerClassName: 'pblsh--upload-result__body' }, ...bodyContent),
+            notices,
+            visibleActions.length > 0 && createElement('footer', { className: 'pblsh--upload-result__actions' }, ...visibleActions),
+        );
+    }
+
+    function getSlugSourceLabel(source) {
+        switch (source) {
+            case 'plugin_name':
+                return __('plugin name', 'peak-publisher');
+            case 'top_level_folder':
+                return __('top-level folder', 'peak-publisher');
+            case 'zip_filename':
+                return __('ZIP filename', 'peak-publisher');
+            case 'main_file_basename':
+                return __('main plugin file name', 'peak-publisher');
+            case 'user_defined':
+                return __('your input', 'peak-publisher');
+            default:
+                return source ? String(source) : __('source unknown', 'peak-publisher');
+        }
+    }
+
+    function renderSlugEdit(uploadId) {
+        return createElement('div', { className: 'pblsh--slug-edit' },
+            createElement(TextControl, {
+                ref: slugEditInputRef,
+                label: __('Custom plugin slug', 'peak-publisher'),
+                hideLabelFromVision: true,
+                placeholder: __('custom-slug', 'peak-publisher'),
+                value: slugEditValue,
+                // Live transform while typing (lowercase, whitespace/underscores to hyphens, rest stripped);
+                // the structural hyphen rules stay Apply-only so intermediate states like "my-" remain typable.
+                onChange: (value) => {
+                    setSlugEditValue(value.toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, ''));
+                    setSlugEditError('');
+                },
+                disabled: isProcessing,
+                __next40pxDefaultSize: true,
+                __nextHasNoMarginBottom: true,
+            }),
+            createElement(Button, {
+                isPrimary: true,
+                onClick: () => applySlug(uploadId, slugEditValue),
+                isBusy: isProcessing,
+                disabled: isProcessing,
+                __next40pxDefaultSize: true,
+            }, __('Apply', 'peak-publisher')),
+            slugEditError && createElement('p', { className: 'pblsh--slug-edit__error' }, slugEditError),
+        );
+    }
+
+    function renderDestinationControl(meta, uploadId) {
+        const targets = meta?.hosting_type_targets || {};
+        const activeKey = getActiveTargetKey(meta);
+        const active = targets[activeKey];
+        if (!active) return null;
+        const destinations = getDestinations(meta);
+        const rowContent = [
+            getChannelIcon(activeKey) && createElement('span', { className: 'pblsh--publish-path__trigger-icon' }, getSvgIcon(getChannelIcon(activeKey), { size: 18 })),
+            createElement('span', null, getChannelLabel(activeKey)),
+            createElement('span', { className: 'pblsh--publish-path__sep', 'aria-hidden': 'true' }, getSvgIcon('arrow_right', { size: 16 })),
+            // The result gate only renders this row for a target with a resolved slug —
+            // a slugless state stays on the destination screen.
+            createElement('code', { className: 'pblsh--publish-path__value' }, active.slug),
+        ];
+
+        if (!meta?.hosting_type_choice && getTargetKeys(meta).length === 1 && active.slug_locked) {
+            // A settled fact, not a decision: exactly one existing match and no channel choice.
+            return createElement('span', { className: 'pblsh--publish-path__trigger is-static' }, ...rowContent);
+        }
+
+        // The panel lists every alternative of the active channel — a selection must never
+        // silently drop the channel it was offered under (guaranteed by the helper's
+        // candidate_channels check).
+        const extraCandidates = candidateAlternativesForChannel(meta, destinations, activeKey);
+
+        return createElement('div', {
+            className: 'pblsh--publish-path__select',
+            ref: destinationPanelRef,
+            onKeyDown: (event) => {
+                if (event.key === 'Escape') {
+                    if (destinationPanelOpen) {
+                        // Close only the panel, not the dialog: cancelling the keydown keeps
+                        // the native <dialog> Escape behavior from firing.
+                        event.preventDefault();
+                        setDestinationPanelOpen(false);
+                        destinationTriggerRef.current?.focus();
+                    }
+                    return;
+                }
+                if (![ 'ArrowDown', 'ArrowUp', 'Home', 'End' ].includes(event.key)) return;
+                // Native caret movement stays untouched inside the custom-slug input.
+                if (event.target instanceof HTMLInputElement) return;
+                const key = event.key;
+                if (!destinationPanelOpen) {
+                    if (key === 'ArrowDown' || key === 'ArrowUp') {
+                        event.preventDefault();
+                        setDestinationPanelOpen(true);
+                        window.requestAnimationFrame(() => {
+                            const options = destinationPanelRef.current?.querySelectorAll('[role="option"]') || [];
+                            options[key === 'ArrowDown' ? 0 : options.length - 1]?.focus();
+                        });
+                    }
+                    return;
+                }
+                const options = Array.from(event.currentTarget.querySelectorAll('[role="option"]'));
+                if (options.length === 0) return;
+                event.preventDefault();
+                const currentIndex = options.indexOf(document.activeElement);
+                const nextIndex = key === 'Home' ? 0
+                    : key === 'End' ? options.length - 1
+                    : currentIndex === -1 ? (key === 'ArrowDown' ? 0 : options.length - 1)
+                    : Math.min(Math.max(currentIndex + (key === 'ArrowDown' ? 1 : -1), 0), options.length - 1);
+                options[nextIndex]?.focus();
+            },
+            // Close only on real focus travel (Tab). Clicks on non-focusable areas move focus
+            // to null or to the dialog itself (it carries tabindex="-1") — both cases can't
+            // distinguish inside from outside, so the outside-pointerdown listener decides there.
+            onBlur: (event) => {
+                const next = event.relatedTarget;
+                if (!next || next === dialogRef.current) return;
+                if (!event.currentTarget.contains(next)) setDestinationPanelOpen(false);
+            },
+        },
+            createElement('button', {
+                type: 'button',
+                ref: destinationTriggerRef,
+                className: 'pblsh--publish-path__trigger',
+                'aria-haspopup': 'listbox',
+                'aria-expanded': destinationPanelOpen,
+                'aria-controls': destinationPanelOpen ? 'pblsh-publish-path-listbox' : undefined,
+                onClick: () => setDestinationPanelOpen(!destinationPanelOpen),
+                disabled: isProcessing,
+            },
+                // Visually hidden prefix: the accessible name must contain the current value
+                // (channel → slug), so no aria-label may override the button's contents.
+                createElement('span', { className: 'screen-reader-text' }, __('Publish destination:', 'peak-publisher') + ' '),
+                ...rowContent,
+                createElement('span', { className: 'pblsh--publish-path__chevron' }, getSvgIcon('chevron_down', { size: 18 })),
+            ),
+            destinationPanelOpen && createElement('div', { className: 'pblsh--publish-path__options' },
+                // Only the option list scrolls; the custom-slug input sits below it as a fixed footer.
+                createElement('div', { id: 'pblsh-publish-path-listbox', className: 'pblsh--publish-path__list', role: 'listbox', 'aria-label': __('Publish destination', 'peak-publisher') },
+                    destinations.map((destination) => {
+                        const isActive = destination.hostingType === activeKey && destination.slug === (active.slug || '');
+                        return createElement('button', {
+                            key: destination.hostingType + ':' + destination.slug,
+                            type: 'button',
+                            role: 'option',
+                            'aria-selected': isActive,
+                            className: 'pblsh--publish-path__option pblsh--destination-option' + (isActive ? ' is-selected' : ''),
+                            onClick: () => selectDestination(destination, meta, uploadId),
+                            disabled: isProcessing,
+                        }, renderDestinationOptionText(destination));
+                    }),
+                    extraCandidates.map((candidate) => createElement('button', {
+                        key: 'candidate:' + candidate.slug,
+                        type: 'button',
+                        role: 'option',
+                        'aria-selected': false,
+                        className: 'pblsh--publish-path__option pblsh--destination-option',
+                        onClick: () => applySlug(uploadId, candidate.slug),
+                        disabled: isProcessing,
+                    }, renderDestinationOptionText(candidateDestination(candidate, activeKey)))),
+                ),
+                renderSlugEdit(uploadId),
+            ),
+        );
+    }
+
+    function renderPublishPath(meta, uploadId) {
+        if (!meta?.plugin_ok) return null;
+        return createElement('div', { className: 'pblsh--publish-path' }, renderDestinationControl(meta, uploadId));
+    }
+
+    // The current-release decision of the active target for the check context, or null where
+    // there is nothing to decide: no plugin, or a target without facts (the wordpress.org
+    // pre-screens). make_current = default XOR deviation, the deviation only for the facts it
+    // was made on.
+    function getCurrentReleaseDecision(meta, target) {
+        const facts = target?.current_release;
+        if (!facts || !meta?.plugin_ok) return null;
+        const deviates = currentReleaseDecision.deviate
+            && currentReleaseDecision.relation === facts.relation
+            && currentReleaseDecision.pre_release === facts.pre_release;
+        return { facts, makeCurrent: facts.default_make_current !== deviates };
+    }
+
+    // The "Set as current" switch above the checklist. Locked where the facts leave no choice — every
+    // forced default is "on"; the consequence of the decision, and the reason for a lock, is
+    // the checklist's current-release row (upload-checks.js).
+    function renderCurrentReleaseSwitch(context) {
+        const { currentRelease } = context;
+        if (!currentRelease) return null;
+        const { facts, makeCurrent } = currentRelease;
+        return createElement(CurrentReleaseSwitch, {
+            checked: makeCurrent,
+            locked: !facts.choice,
+            disabled: isProcessing,
+            onChange: (value) => setCurrentReleaseDecision({ relation: facts.relation, pre_release: facts.pre_release, deviate: value !== facts.default_make_current }),
+        });
+    }
+
+    // The decision the finalize request carries — always for a target with facts, so the
+    // server can check even a forced default for contradiction.
+    function getCurrentReleaseFinalizeOptions(context) {
+        return context.currentRelease ? { make_current: context.currentRelease.makeCurrent } : {};
+    }
+
+    async function runSlugSelection(upload_id, slug, selectHostingTypeOnSuccess = null) {
+        setIsProcessing(true);
+        // The operation declares what it is — the result body shows the
+        // transitional wait state on this phase instead of the old slug's facts.
+        setProcessPhase('set_slug');
+        // The panel closes together with the switch to the wait state; a
+        // failure reopens it, because the error message lives under the slug
+        // input — and puts the focus back there for the correction.
+        setDestinationPanelOpen(false);
+        const reopenWithError = (message) => {
+            setSlugEditError(message || __('Could not set the plugin slug.', 'peak-publisher'));
+            setDestinationPanelOpen(true);
+            window.requestAnimationFrame(() => slugEditInputRef.current?.focus());
+        };
+        try {
+            const resSet = await Pblsh.API.uploadContinue(upload_id, 'set_slug', { slug });
+            if (resSet?.status !== 'ok') {
+                reopenWithError(resSet?.errors?.[0]?.message);
+                return;
+            }
+            const resResult = await Pblsh.API.uploadContinue(upload_id, 'result');
+            setSlugEditValue('');
+            setValidationResult(withUploadId(resResult, upload_id));
+            if (selectHostingTypeOnSuccess) {
+                // Deferred channel switch: applied together with the result that resolves the
+                // channel, never before it (see selectDestination).
+                setSelectedHostingType(selectHostingTypeOnSuccess);
+            }
+            // The focused element (option or Apply button) unmounts with the panel/screen —
+            // focus continues on the publish-path trigger of the fresh result view.
+            window.requestAnimationFrame(() => destinationTriggerRef.current?.focus());
+        } catch (error) {
+            reopenWithError(error?.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    }
+
+    async function applySlug(upload_id, value, selectHostingTypeOnSuccess = null) {
+        const slug = String(value || '').trim();
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+            setSlugEditError(__('Slugs consist of lowercase letters, numbers, and hyphens.', 'peak-publisher'));
+            return;
+        }
+        setSlugEditError('');
+        await runSlugSelection(upload_id, slug, selectHostingTypeOnSuccess);
+    }
+
+    async function refreshTargetContext(upload_id, meta) {
+        // Re-run the server's target resolution after gate progress (account saved, import done).
+        setIsProcessing(true);
+        // Its own phase: the import signals end with the import — this tail is
+        // a destination re-resolution and shows the same wait state as one.
+        setProcessPhase('refresh_target');
+        try {
+            const refreshed = await Pblsh.API.uploadContinue(upload_id, 'refresh_target_context');
+            setValidationResult(refreshed);
+        } catch (error) {
+            // The upload itself is long done — only the destination re-resolution
+            // failed, and the code says so (WporgImportFacts titles by it).
+            setValidationResult({
+                status: 'error',
+                errors: [{ code: 'wporg_target_refresh_failed', message: error?.message || __('Could not refresh the publish destination.', 'peak-publisher') }],
+                data: meta || {},
+                upload_id,
+            });
+        } finally {
+            setIsProcessing(false);
+        }
+    }
+
+    async function importWporgAndContinue(upload_id, meta, target) {
+        // Import current wordpress.org state before refreshing the deploy target
+        const slug = meta?.slug || '';
+        const username = target?.pre_deploy_import?.username || '';
+        if (!upload_id || !slug || !username) return;
+
+        const fail = (code, message) => {
+            setValidationResult({
+                status: 'error',
+                errors: [{ code, message: message || __('wordpress.org import failed.', 'peak-publisher') }],
+                data: meta || {},
+                upload_id,
+            });
+            setIsProcessing(false);
+        };
+
+        setIsProcessing(true);
+        // The operation declares what it is — the import signals (busy button
+        // label, identity-card stripes) key on this phase, not on the generic
+        // processing flag (a slug change must not light them up).
+        setProcessPhase('wporg_import');
+        try {
+            const response = await Pblsh.API.importWporgPlugins(username, [slug]);
+            const imported = Array.isArray(response?.imported) ? response.imported : [];
+            const skipped = Array.isArray(response?.skipped) ? response.skipped : [];
+            const importedOk = imported.some((item) => item && item.slug === slug);
+            const alreadyImported = skipped.some((item) => item && item.slug === slug && item.reason === 'already_imported');
+            if (!importedOk && !alreadyImported) {
+                // The server's structured skip reason travels through as the error code.
+                const firstSkip = skipped.find((item) => item && item.slug === slug) || skipped[0] || null;
+                fail(firstSkip?.reason || 'wporg_import_failed', firstSkip?.message);
+                return;
+            }
+        } catch (error) {
+            fail('wporg_import_failed', error?.message);
+            return;
+        }
+        // The freshly imported plugin belongs on the main list right away; the
+        // flow continues inside this dialog, so refresh in the background — a
+        // failure there costs this flow nothing.
+        window.Pblsh.Controllers.Plugins.fetchList().catch(() => {});
+        setIsProcessing(false);
+        await refreshTargetContext(upload_id, meta);
+    }
+
+    function getUploadCheckContext(result, meta, targetKey) {
+        const pluginData = meta?.plugin_data || {};
+        const uploadId = result?.upload_id || false;
+        const target = targetKey ? (meta?.hosting_type_targets?.[targetKey] || {}) : {};
+        const validation = target?.target_validation || {};
+        const blockers = Array.isArray(validation.blocking_errors) ? validation.blocking_errors : [];
+        const preDeployRequired = !!target?.pre_deploy_import?.required;
+        const releaseContext = getReleaseContext(meta);
+        const resultErrors = Array.isArray(result?.errors) ? result.errors : [];
+
+        return {
+            result,
+            meta,
+            pluginData,
+            settings: serverSettings || {},
+            uploadId,
+            targetKey,
+            isWporg: targetKey === 'wporg',
+            target,
+            validation,
+            blockers,
+            preDeployRequired,
+            releaseContext,
+            // A closed wporg plugin flips the submit verb to "commit" — the
+            // publish promise doesn't hold while wordpress.org distributes nothing.
+            presentation: getReleasePresentation(meta, releaseContext, targetKey === 'wporg',
+                targetKey === 'wporg' && target?.wporg_directory_hint?.state === 'closed'),
+            resultErrors,
+            currentRelease: getCurrentReleaseDecision(meta, target),
+        };
+    }
+
+    // Routing for the wporg pre-screens that run before the regular checklist:
+    // account (credentials missing, undecryptable or rejected) → import (state not
+    // mirrored yet) → checklist; the one dead end (repository vanished) is 'not_found'.
+    function wporgScreen(context) {
+        const { meta, target, preDeployRequired } = context;
+        if (!meta.plugin_ok) return null;
+        const accessStatus = target?.wporg_access_status || '';
+        const blockingReason = target?.blocking_reason || '';
+        // credentials_rejected means the stored password no longer works — the account
+        // screen with its re-entry form is the fix, same as having no credentials.
+        const needsCredentials = blockingReason === 'wporg_no_credentials'
+            || accessStatus === 'no_credentials'
+            || accessStatus === 'credentials_rejected'
+            || (preDeployRequired && !target?.pre_deploy_import?.username);
+
+        if (needsCredentials) return 'account';
+        if (preDeployRequired) return 'import';
+
+        // The one hard fact that blocks: the repository does not exist. 'error'
+        // and 'not_checked' are warn-only (checklist warning) — the publish
+        // surfaces real errors, the MERGE is the hard gate.
+        if (accessStatus === 'not_found') return 'not_found';
+
+        return null;
+    }
+
+    // Process errors (failed server phases) are not facts of the upload — they
+    // render as pinned flush notices between body and footer, not as checklist
+    // rows. Blocker codes are excluded: those have their dedicated checklist
+    // items. Message leads, the machine code stays visible for support cases.
+    function renderResultErrorNotices(resultErrors, blockers, uploadId, meta, target) {
+        const blockerCodes = (Array.isArray(blockers) ? blockers : []).map((blocker) => blocker?.code).filter(Boolean);
+        const errors = (Array.isArray(resultErrors) ? resultErrors : [])
+            .filter((error) => error && !blockerCodes.includes(error.code));
+        if (errors.length === 0) {
+            return null;
+        }
+        return errors.map((error, index) => createElement(NoticeBox, {
+            key: index,
+            variant: 'error',
+            className: 'pblsh--notice-box--flush',
+            error: {
+                code: error?.code || null,
+                // A phase error without a message still needs a human line.
+                message: error?.message || __('An unknown error occurred.', 'peak-publisher'),
+            },
+        },
+            // The pointer changed under the dialog: reloading re-resolves the targets, the
+            // checklist rebuilds on fresh facts (a deviation survives only for the same relation).
+            error?.code === 'current_release_changed' && createElement(Button, {
+                isSecondary: true,
+                onClick: () => refreshTargetContext(uploadId, meta),
+                disabled: isProcessing,
+                __next40pxDefaultSize: true,
+            }, __('Reload', 'peak-publisher')),
+            // The server did not report how the publish ended: the plugin shows what arrived.
+            error?.code === 'finalize_result_unknown' && target?.existing_plugin_id && createElement(Button, {
+                isSecondary: true,
+                onClick: () => {
+                    closeOverlay();
+                    onCreated(target.existing_plugin_id);
+                },
+                __next40pxDefaultSize: true,
+            }, __('Open plugin', 'peak-publisher')),
+        ));
+    }
+
+    function buildUploadActions(context, checklistItems) {
+        const { meta, uploadId, targetKey, isWporg, target, validation, blockers, presentation } = context;
+        // Only 'error' rows block the finalize — every other type is informational.
+        const checksPass = Array.isArray(checklistItems)
+            ? checklistItems.every(item => item.type !== 'error')
+            : false;
+        const targetFinalizable = !isWporg || (!!target?.available && !!validation.finalizable && blockers.length === 0);
+        const canFinalize = !!meta.plugin_ok && !!meta.slug && checksPass && targetFinalizable;
+        // The upload's two decisions: the channel and whether the release becomes current.
+        const finalizeOptions = {
+            ...(meta?.hosting_type_choice ? { hosting_type: targetKey } : {}),
+            ...getCurrentReleaseFinalizeOptions(context),
+        };
+
+        return [
+            renderDiscardButton(uploadId),
+            meta.plugin_ok && createElement(Button, {
+                isPrimary: true,
+                isBusy: publishing,
+                disabled: !canFinalize || isProcessing,
+                className: 'pblsh--button--add-plugin',
+                onClick: () => finalizeCreation(uploadId, finalizeOptions, {
+                    version: context.pluginData.Version || '',
+                    isWporg,
+                    pluginId: target?.existing_plugin_id || null,
+                }),
+                __next40pxDefaultSize: true,
+            }, presentation.submitLabel),
+        ];
+    }
+
+    function buildUploadValidationModel(result, meta, targetKey) {
+        const context = getUploadCheckContext(result, meta, targetKey);
+        const { pluginData, isWporg, presentation, target, uploadId, resultErrors } = context;
+        const screen = isWporg ? wporgScreen(context) : null;
+        const accessStatus = target?.wporg_access_status || '';
+
+        // The wporg pre-screens are ordinary steps of this dialog: their content lives
+        // in the body, their primary action (if any) in the shared footer.
+        let body = null;
+        let actions = null;
+        if (screen === 'account') {
+            body = createElement(WporgAccountForm, {
+                // The saved credentials re-resolve the target context.
+                onSaved: (spelling) => { setAccountSpelling(spelling); return refreshTargetContext(uploadId, meta); },
+            });
+            actions = [renderDiscardButton(uploadId)];
+        } else if (screen === 'import') {
+            body = createElement(WporgImportFacts, {
+                slug: meta?.slug || '',
+                accessStatus,
+                accessMessage: target?.wporg_access_message || '',
+                directoryHint: target?.wporg_directory_hint || null,
+                username: target?.pre_deploy_import?.username || '',
+                importing: importRunning,
+                errors: resultErrors,
+            });
+            // target.available is the server's one availability rule — false for a
+            // slug that does not exist on wordpress.org: nothing to import then, the
+            // facts explain it and point to the publish path instead of a dead action.
+            const canImport = !!meta?.slug && !!uploadId && !!target.available
+                && !!target?.pre_deploy_import?.username;
+            // The known release count sets the duration expectation while the
+            // busy button is the only live feedback of the running import.
+            const importReleaseCount = target?.wporg_directory_hint?.release_count;
+            actions = [
+                renderDiscardButton(uploadId),
+                createElement(Button, {
+                    isPrimary: true,
+                    isBusy: importRunning,
+                    disabled: !canImport || isProcessing,
+                    onClick: () => importWporgAndContinue(uploadId, meta, target),
+                    __next40pxDefaultSize: true,
+                }, importRunning
+                    ? (Number.isFinite(importReleaseCount) && importReleaseCount > 0
+                        ? sprintf(_n('Importing %d release…', 'Importing %d releases…', importReleaseCount, 'peak-publisher'), importReleaseCount)
+                        : __('Importing…', 'peak-publisher'))
+                    : __('Import and continue…', 'peak-publisher')),
+            ];
+        } else if (screen === 'not_found') {
+            // Dead end — an imported plugin whose SVN repository no longer exists;
+            // rendered in the shared checklist language.
+            body = createElement(Checklist, {
+                items: [
+                    {
+                        title: __('Not available on wordpress.org', 'peak-publisher'),
+                        type: 'error',
+                        desc: __('The plugin’s SVN repository no longer exists on wordpress.org.', 'peak-publisher'),
+                    },
+                ],
+            });
+            actions = [renderDiscardButton(uploadId)];
+        }
+
+        const checklistItems = screen ? null : uploadChecks.buildUploadCheckItems(context);
+        if (!screen) {
+            // The decision sits right above its consequences: the switch opens the body, the
+            // checklist's current-release row answers it.
+            const currentReleaseSwitch = renderCurrentReleaseSwitch(context);
+            body = currentReleaseSwitch && createElement('div', { className: 'pblsh--upload-result__current-release' }, currentReleaseSwitch);
+        }
+        if (isWporg && screen !== 'account' && screen !== 'not_found' && accountSpelling) {
+            // What connecting the account just found out about the username's spelling,
+            // carried into the step that follows the account form.
+            body = createElement(wp.element.Fragment, null,
+                createElement(WporgAccountSpellingNotice, { spelling: accountSpelling, className: 'pblsh--upload-result__spelling' }),
+                body,
+            );
+        }
+
+        return {
+            classNames: presentation.classNames,
+            // The import screen owns its error display (WporgImportFacts).
+            notices: screen === 'import' ? null : renderResultErrorNotices(resultErrors, context.blockers, uploadId, meta, target),
+            // The pinned publish path row (channel + slug).
+            identity: renderPublishPath(meta, context.uploadId),
+            // The release block, once the checklist can be shown: the wporg pre-screens are the
+            // destination's preconditions and render under the publish path alone — the release
+            // type, in particular, is only known after the import.
+            header: screen ? null : (meta.plugin_ok ? {
+                headline: pluginData.Name,
+                desc: pluginData.Version,
+                type: presentation.type,
+            } : {
+                headline: __('Not a plugin', 'peak-publisher'),
+                desc: __('No valid plugin main file could be found', 'peak-publisher'),
+                type: presentation.type,
+            }),
+            body,
+            checklistItems,
+            actions: actions || buildUploadActions(context, checklistItems),
+        };
     }
 
     function renderValidation(result) {
-        const ok = result && result.status === 'ok' && (!result.errors || result.errors.length === 0);
-        const errors = Array.isArray(result?.errors) ? result.errors : [];
-        const meta = result?.data || {};
-        const pluginData = result?.data?.plugin_data || {};
-        const settings = serverSettings || {};
-        const upload_id = result?.upload_id || false;
-
-        const previous_release = result?.data?.related_releases?.previous || false;
-        const next_release = result?.data?.related_releases?.next || false;
-        const latest_release = result?.data?.related_releases?.latest || false;
-        const existing_release = result?.data?.related_releases?.existing || false;
-
-
-        const previous_release_version = previous_release ? previous_release.normalized_version.split('.').map((v) => isNaN(Number(v)) ? -1 : Number(v)) : [];
-        const plugin_version = result?.data?.plugin_info?.normalized_version ? result.data.plugin_info.normalized_version.split('.').map((v) => isNaN(Number(v)) ? -1 : Number(v)) : [];
-        
-        const natural_successors = [];
-        if (previous_release_version.length > 0 && plugin_version.length > 0) {
-            while (previous_release_version.length < plugin_version.length) {
-                previous_release_version.push(0);
-            }
-            while (plugin_version.length < previous_release_version.length) {
-                plugin_version.push(0);
-            }
-
-            for (let i = 0; i < previous_release_version.length; i++) {
-                natural_successors.push([...previous_release_version.slice(0, i), previous_release_version[i] + 1, ...(new Array(plugin_version.length - i - 1).fill(0))].join('.'));
-            }
+        let meta = result?.data || {};
+        const activeTargetKey = getActiveTargetKey(meta);
+        const activeTarget = activeTargetKey ? meta?.hosting_type_targets?.[activeTargetKey] : null;
+        if (meta?.plugin_ok && ((meta?.hosting_type_choice && !activeTargetKey) || (activeTarget && !activeTarget.slug))) {
+            // Open destination decision — channel choice or slug ambiguity: the choice is the
+            // only content, so it lives in the scrollable body instead of the fixed slot and
+            // the publish-path row stays hidden until the destination is settled. The body is
+            // the gray decision surface at the dialog's top — the publish-path row unfolded, in
+            // its color and place: once the destination is chosen, that surface collapses into
+            // the row. No release block yet (it depends on the destination); the upload names
+            // itself in the decision's first line instead.
+            return renderUploadResultShell({
+                classNames: ['pblsh--upload-result--choosing'],
+                body: createElement(wp.element.Fragment, null,
+                    renderUploadIdentity(meta),
+                    renderDestinationChoice(meta, result?.upload_id),
+                ),
+                actions: [renderDiscardButton(result?.upload_id)],
+            });
         }
-        const is_natural_successor = natural_successors.includes(plugin_version.join('.'));
+        if (activeTargetKey) {
+            meta = getEffectiveMetaForTarget(meta, activeTargetKey);
+            result = { ...result, data: meta };
+        }
 
-
-        const is_new_major_release = meta.existing_plugin && (
-            (previous_release && plugin_version[0] > previous_release_version[0]) ||
-            (!previous_release && plugin_version[1] === 0 && plugin_version[2] === 0)
-        );
-        const is_new_minor_release = meta.existing_plugin && (
-            (previous_release && plugin_version[0] === previous_release_version[0] && plugin_version[1] > previous_release_version[1]) ||
-            (!previous_release && plugin_version[1] > 0 && plugin_version[2] === 0)
-        );
-        const is_new_patch_release = meta.existing_plugin && (
-            (previous_release && plugin_version[0] === previous_release_version[0] && plugin_version[1] === previous_release_version[1] && plugin_version[2] > previous_release_version[2]) ||
-            (!previous_release && plugin_version[2] > 0)
-        );
-        const is_new_unknown_release = meta.existing_plugin && !is_new_major_release && !is_new_minor_release && !is_new_patch_release;
-
-        const free_from_workspace_artifacts = meta?.cleanup_info?.found_workspace_artifacts?.every(item => item.deleted);
-        const workspace_artifacts_count = meta?.cleanup_info?.found_workspace_artifacts?.reduce((total, item) => total + item.count, 0);
-        const workspace_artifacts_size = formatBytes(meta?.cleanup_info?.found_workspace_artifacts?.reduce((total, item) => total + item.bytes, 0));
-
-        const workspace_artifacts_not_deleted_count = meta?.cleanup_info?.found_workspace_artifacts?.reduce((total, item) => total + (item.deleted ? 0 : item.count), 0);
-        const workspace_artifacts_not_deleted_size = formatBytes(meta?.cleanup_info?.found_workspace_artifacts?.reduce((total, item) => total + (item.deleted ? 0 : item.bytes), 0));
-
-        const readme_txt_already_utf8 = !!meta?.cleanup_info?.readme_txt?.already_utf8;
-        const readme_txt_already_without_bom = !!meta?.cleanup_info?.readme_txt?.already_without_bom;
-        const readme_txt_detected_encoding = meta?.cleanup_info?.readme_txt?.detected_encoding || '';
-        const readme_txt_converted_to_utf8 = !!meta?.cleanup_info?.readme_txt?.converted_to_utf8;
-        const readme_txt_removed_utf8_bom = !!meta?.cleanup_info?.readme_txt?.removed_utf8_bom;
-        const readme_txt_can_be_encoded_to_json = !!meta?.cleanup_info?.readme_txt?.can_be_encoded_to_json;
-
-        const resultList = (meta.plugin_ok ? [
-
-            // Plugin file
-            [
-                !previous_release && {
-                    title: __('Valid plugin file', 'peak-publisher'),
-                    type: 'ok',
-                    desc: [
-                        meta.plugin_info?.main_file
-                    ]
-                },
-                previous_release && [
-                    // Expected plugin file
-                    previous_release.plugin_basename === meta.plugin_info?.plugin_basename && {
-                        title: __('Expected plugin file', 'peak-publisher'),
-                        type: 'ok',
-                        desc: __('The plugin file name matches the previous release.', 'peak-publisher'),
-                    },
-                    // Unexpected plugin file
-                    previous_release.plugin_basename !== meta.plugin_info?.plugin_basename && {
-                        title: __('Unexpected plugin file', 'peak-publisher'),
-                        type: changePluginFileName ? 'ok' : 'error',
-                        desc: [
-                            sprintf(__('The uploaded release %s has the plugin file name %s which does not match the previous release %s with the plugin file name %s.', 'peak-publisher'), pluginData.Version, meta.plugin_info?.plugin_basename.split('/').pop(), previous_release.version, previous_release.plugin_basename.split('/').pop()),
-                            createElement('br'),
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I want to change the plugin filename. I\'m aware that WordPress will interpret this as a different plugin, and that this is very risky and should be avoided if possible.', 'peak-publisher'),
-                                checked: changePluginFileName,
-                                onChange: (value) => setChangePluginFileName(value),
-                            }),
-                        ],
-                    }
-                ]
-            ],
-
-            // Plugin version number
-            [
-                !pluginData.Version && {
-                    title: __('Missing version number', 'peak-publisher'),
-                    type: 'error',
-                    desc: __('You need to add a version number to your plugin file.', 'peak-publisher')
-                },
-                pluginData.Version && [
-                    !existing_release && [
-                        !latest_release && {
-                            title: __('Valid version number', 'peak-publisher'),
-                            type: 'ok',
-                            desc: pluginData.Version,
-                        },
-                        latest_release && [
-                            // Expected version number
-                            is_natural_successor && !next_release && {
-                                title: __('Expected version number', 'peak-publisher'),
-                                type: 'ok',
-                                desc: [
-                                    sprintf(__('Version %s, as expected after the latest release (%s).', 'peak-publisher'), pluginData.Version, latest_release.version),
-                                ]
-                            },
-                            // Unexpected version number
-                            (!is_natural_successor || next_release) && {
-                                title: __('Unexpected version number', 'peak-publisher'),
-                                type: (!next_release || useOlderPluginVersion) && (!previous_release || is_natural_successor || (previous_release && !is_natural_successor && useUnexpectedPluginVersion)) ? 'ok' : 'error',
-                                desc: [
-                                    next_release && [
-                                        latest_release.normalized_version !== next_release.normalized_version && sprintf(__('Releases with higher version numbers (%s to %s) already exist.', 'peak-publisher'), next_release.version, latest_release.version),
-                                        latest_release.normalized_version === next_release.normalized_version && sprintf(__('A release with a higher version number (%s) already exists.', 'peak-publisher'), latest_release.version),
-                                        createElement('br'),
-                                        createElement(CheckboxControl, {
-                                            __nextHasNoMarginBottom: true,
-                                            label: __('That\'s fine, this release isn\'t meant to be the latest one.', 'peak-publisher'),
-                                            checked: useOlderPluginVersion,
-                                            onChange: (value) => setUseOlderPluginVersion(value),
-                                        }),
-                                    ],
-                                    previous_release && !is_natural_successor && [
-                                        sprintf(__('%s is an unexpected successor to the previous release (%s).', 'peak-publisher'), pluginData.Version, previous_release.version),
-                                        createElement('br'),
-                                        sprintf(__('Expected would be %s.', 'peak-publisher'), natural_successors.join(', ')),
-                                        createElement('br'),
-                                        createElement(CheckboxControl, {
-                                            __nextHasNoMarginBottom: true,
-                                            label: sprintf(__('That\'s fine, I want to use the version number %s anyway.', 'peak-publisher'), pluginData.Version),
-                                            checked: useUnexpectedPluginVersion,
-                                            onChange: (value) => setUseUnexpectedPluginVersion(value),
-                                        }),
-                                    ],
-                                ]
-                            },
-                        ],
-                    ],
-                    existing_release && {
-                        title: __('Version number already exists', 'peak-publisher'),
-                        type: replaceRelease ? 'ok' : 'error',
-                        desc: [
-                            sprintf(__('A release with the version number %s already exists for this plugin.', 'peak-publisher'), pluginData.Version),
-                            createElement('br'),
-                            //createElement('br'),
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I want to replace the existing release. I understand that this is not recommended if the existing release is or was already published.', 'peak-publisher'),
-                                checked: replaceRelease,
-                                onChange: (value) => setReplaceRelease(value),
-                            }),
-                        ]
-                    }
-                ]
-            ],
-
-            // Update URI
-            [
-                pluginData?.UpdateURI && [
-                    pluginData?.UpdateURI === PblshData?.bootstrapUpdateURI && {
-                        title: __('Expected update URI', 'peak-publisher'),
-                        type: 'ok',
-                        desc: pluginData.UpdateURI
-                    },
-                    pluginData?.UpdateURI !== PblshData?.bootstrapUpdateURI && {
-                        title: __('Unexpected update URI', 'peak-publisher'),
-                        type: useDifferentCustomUpdateServer ? 'ok' : 'error',
-                        desc: [
-                            sprintf(__('The specified update URI is %s.', 'peak-publisher'), pluginData.UpdateURI),
-                            createElement('br'),
-                            sprintf(__('Expected would be %s.', 'peak-publisher'), PblshData.bootstrapUpdateURI),
-                            createElement('br'),
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I will use a different update server for this plugin from now on.', 'peak-publisher'),
-                                checked: useDifferentCustomUpdateServer,
-                                onChange: (value) => setUseDifferentCustomUpdateServer(value),
-                            }),
-                        ]
-                    }
-                ],
-                !pluginData?.UpdateURI && {
-                    title: __('Missing update URI', 'peak-publisher'),
-                    type: useWordPressOrgUpdateServer ? 'ok' : 'error',
-                    desc: [
-                        __('You need to add a valid update URI to your plugin file.', 'peak-publisher'),
-                        createElement('br'),
-                        createElement(CheckboxControl, {
-                            __nextHasNoMarginBottom: true,
-                            label: __('That\'s fine, my new update server will be wordpress.org, so no update URI is needed.', 'peak-publisher'),
-                            checked: useWordPressOrgUpdateServer,
-                            onChange: (value) => setUseWordPressOrgUpdateServer(value),
-                        }),
-                    ]
-                }
-            ],
-
-            // Bootstrap code
-            [
-                meta.plugin_info?.bootstrap_file && [
-                    !useDifferentCustomUpdateServer && !useWordPressOrgUpdateServer && [
-                        meta.plugin_info?.bootstrap_is_latest && {
-                            title: __('Expected bootstrap code', 'peak-publisher'),
-                            type: 'ok',
-                            desc: sprintf(__('Found in %s.', 'peak-publisher'), meta.plugin_info?.bootstrap_file)
-                        },
-                        !meta.plugin_info?.bootstrap_is_latest && {
-                            title: __('Unexpected bootstrap code', 'peak-publisher'),
-                            type: keepOldBootstrapCode ? 'ok' : 'error',
-                            desc: [
-                                sprintf(__('Found in %s, but it is not the latest bootstrap code version.', 'peak-publisher'), meta.plugin_info?.bootstrap_file),
-                                createElement('br'),
-                                createElement(CheckboxControl, {
-                                    __nextHasNoMarginBottom: true,
-                                    label: __('That\'s fine, I want to use the old version of the bootstrap code. I understand that this is not recommended.', 'peak-publisher'),
-                                    checked: keepOldBootstrapCode,
-                                    onChange: (value) => setKeepOldBootstrapCode(value),
-                                }),
-                            ],
-                        },
-                    ],
-                    useDifferentCustomUpdateServer && {
-                        title: __('Found bootstrap code', 'peak-publisher'),
-                        type: usePeakPublisherForNewUpdateServer ? 'ok' : 'error',
-                        desc: [
-                            sprintf(__('Do you plan to use Peak Publisher again for your new update server? Otherwise, you will need to remove the bootstrap code from %s.', 'peak-publisher'), meta.plugin_info?.bootstrap_file),
-                            createElement('br'),
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: __('Yes, I will use Peak Publisher again for my new update server.', 'peak-publisher'),
-                                checked: usePeakPublisherForNewUpdateServer,
-                                onChange: (value) => setUsePeakPublisherForNewUpdateServer(value),
-                            })
-                        ]
-                    },
-                    useWordPressOrgUpdateServer && {
-                        title: __('Bootstrap code must be removed', 'peak-publisher'),
-                        type: 'error',
-                        desc: sprintf(__('You need to remove the bootstrap code from %s since your new update server is wordpress.org.', 'peak-publisher'), meta.plugin_info?.bootstrap_file)
-                    }
-                ],
-                !meta.plugin_info?.bootstrap_file && [
-                    !useDifferentCustomUpdateServer && !useWordPressOrgUpdateServer && {
-                        title: __('Missing bootstrap code', 'peak-publisher'),
-                        type: 'error',
-                        desc: __('You need to add the bootstrap code to your plugin.', 'peak-publisher')
-                    },
-                    useDifferentCustomUpdateServer && {
-                        title: __('Bootstrap code not found', 'peak-publisher'),
-                        type: useNotPeakPublisherForNewUpdateServer ? 'ok' : 'error',
-                        desc: [
-                            __('If you use Peak Publisher again for your new update server, you will need to add the bootstrap code to your plugin.', 'peak-publisher'),
-                            createElement('br'),
-                            createElement(CheckboxControl, {
-                                __nextHasNoMarginBottom: true,
-                                label: __('That\'s fine, I will use something other than Peak Publisher for my new update server.', 'peak-publisher'),
-                                checked: useNotPeakPublisherForNewUpdateServer,
-                                onChange: (value) => setUseNotPeakPublisherForNewUpdateServer(value),
-                            }),
-                        ]
-                    },
-                    useWordPressOrgUpdateServer && {
-                        title: __('Bootstrap code not found', 'peak-publisher'),
-                        type: 'ok',
-                        desc: __('This is as it should be if you plan to use wordpress.org as your new update server.', 'peak-publisher')
-                    },
-                ]
-            ],
-
-            // Top-level folder
-            [
-                (meta?.cleanup_info?.has_top_level_folder || meta?.cleanup_info?.fixed_top_level_folder) && {
-                    title: __('Top-level folder exists', 'peak-publisher'),
-                    type: 'ok',
-                    desc: [
-                        meta?.cleanup_info?.fixed_top_level_folder && __('It was added to your upload automatically as specified in the settings.', 'peak-publisher'),
-                        !meta?.cleanup_info?.fixed_top_level_folder && __('Your upload has a top-level folder.', 'peak-publisher'),
-                        createElement('br'),
-                        sprintf(__('The install folder will be %s.', 'peak-publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
-                    ]
-                },
-                !meta?.cleanup_info?.has_top_level_folder && !meta?.cleanup_info?.fixed_top_level_folder && {
-                    title: __('Top-level folder missing', 'peak-publisher'),
-                    type: addWithoutTopLevelFolder ? 'ok' : 'error',
-                    desc: [
-                        __('Your upload does not have a top-level folder.', 'peak-publisher'),
-                        createElement('br'),
-                        sprintf(__('The install folder will be %s.', 'peak-publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
-                        createElement(CheckboxControl, {
-                            __nextHasNoMarginBottom: true,
-                            label: __('That\'s fine, I want to add the release without a top-level folder.', 'peak-publisher'),
-                            checked: addWithoutTopLevelFolder,
-                            onChange: (value) => setAddWithoutTopLevelFolder(value),
-                        }),
-                    ]
-                }
-            ],
-            
-            // Workspace artifacts
-            [
-                // Nothing to remove
-                free_from_workspace_artifacts && {
-                    title: __('Free from workspace artifacts', 'peak-publisher'),
-                    type: 'ok',
-                    desc: [
-                        workspace_artifacts_count === 0 && sprintf(__('No files or folders from your system or development environment were found.', 'peak-publisher')),
-                        workspace_artifacts_count > 0 && sprintf(__('%s in %s files and folders deleted as specified in the settings.', 'peak-publisher'), workspace_artifacts_size, workspace_artifacts_count),
-                        createElement('br'),
-                        sprintf(__('The installed release will be %s in total with %s files and folders.', 'peak-publisher'), formatBytes(meta?.cleanup_info?.size_after_cleanup), meta?.cleanup_info?.entry_count_after_cleanup),
-                    ],
-                },
-                // Removed files and folders
-                !free_from_workspace_artifacts && {
-                    title: __('Workspace artifacts found', 'peak-publisher'),
-                    type: keepWorkspaceArtifacts ? 'ok' : 'error',
-                    desc: [
-                        settings.auto_remove_workspace_artifacts && __('The following artifacts could not be deleted automatically:', 'peak-publisher'),
-                        !settings.auto_remove_workspace_artifacts && __('Your upload contains the following artifacts:', 'peak-publisher'),
-                        createElement('br'),
-                        createElement('textarea', {
-                            value: meta?.cleanup_info?.found_workspace_artifacts?.filter(item => !item.deleted).map(file => file.path).join('\n'),
-                            readOnly: true,
-                            rows: Math.min(4, meta?.cleanup_info?.found_workspace_artifacts?.filter(item => !item.deleted).length + 1),
-                            style: {
-                                width: '100%',
-                                whiteSpace: 'nowrap',
-                                fontFamily: 'monospace',
-                                fontSize: '12px',
-                            },
-                        }),
-                        createElement('br'),
-                        sprintf(__('The artifacts are %s in total with %s files and folders.', 'peak-publisher'), workspace_artifacts_not_deleted_size, workspace_artifacts_not_deleted_count),
-                        createElement('br'),
-                        createElement(CheckboxControl, {
-                            __nextHasNoMarginBottom: true,
-                            label: __('That\'s fine, I want to keep the artifacts in the release.', 'peak-publisher'),
-                            checked: keepWorkspaceArtifacts,
-                            onChange: (value) => setKeepWorkspaceArtifacts(value),
-                        }),
-                        sprintf(__('The installed release will be %s in total with %s files and folders.', 'peak-publisher'), formatBytes(meta?.cleanup_info?.size_after_cleanup), meta?.cleanup_info?.entry_count_after_cleanup),
-                    ],
-                },
-            ],
-            
-            // Readme.txt presence
-            [
-                meta.plugin_readme_txt?.found && [
-                    {
-                        title: __('Readme file exists', 'peak-publisher'),
-                        type:
-                            (readme_txt_already_utf8 && readme_txt_already_without_bom)
-                            ||
-                            (settings.readme_txt_convert_to_utf8_without_bom && (
-                                (readme_txt_converted_to_utf8 && readme_txt_already_without_bom)
-                                ||
-                                (readme_txt_removed_utf8_bom && readme_txt_already_utf8)
-                                ||
-                                (readme_txt_converted_to_utf8 && readme_txt_removed_utf8_bom)
-                                ||
-                                ((!readme_txt_already_utf8 !== readme_txt_converted_to_utf8 || !readme_txt_already_without_bom !== readme_txt_removed_utf8_bom) && keepReadmeTxtAsIs)
-                            ))
-                            ||
-                            (!settings.readme_txt_convert_to_utf8_without_bom && (
-                                (readme_txt_already_without_bom || keepReadmeTxtBom)
-                                &&
-                                (readme_txt_already_utf8 || keepReadmeTxtEncoding)
-                            ))
-                            ? 'ok' : 'error',
-                        desc: [
-                            meta.plugin_readme_txt?.file_name !== 'readme.txt' && [
-                                sprintf(__('Although %s also works, the officially valid filename is readme.txt.', 'peak-publisher'), meta.plugin_readme_txt.file_name),
-                                createElement('br'),
-                            ],
-                            readme_txt_already_utf8 && readme_txt_already_without_bom && __('The file is a valid UTF-8 file without a BOM, exactly as it should be.', 'peak-publisher'),
-                            (!readme_txt_already_utf8 || !readme_txt_already_without_bom) && [
-                                settings.readme_txt_convert_to_utf8_without_bom && [
-                                    readme_txt_converted_to_utf8 && [
-                                        readme_txt_detected_encoding && sprintf(__('The file was converted from %s to UTF-8 as specified in the settings.', 'peak-publisher'), readme_txt_detected_encoding),
-                                        !readme_txt_detected_encoding && __('The file was converted to UTF-8 as specified in the settings.', 'peak-publisher'),
-                                        createElement('br'),
-                                    ],
-                                    readme_txt_removed_utf8_bom && [
-                                        __('The UTF-8 BOM was removed from the file as specified in the settings.', 'peak-publisher'),
-                                        createElement('br'),
-                                    ],
-                                    (!readme_txt_already_utf8 !== readme_txt_converted_to_utf8 || !readme_txt_already_without_bom !== readme_txt_removed_utf8_bom) && [
-                                        __('The file couldn\'t be converted to UTF-8 without a BOM. Please check it manually.', 'peak-publisher'),
-                                        createElement('br'),
-                                        !readme_txt_can_be_encoded_to_json && [
-                                            __('The file can\'t be processed because it is not a valid UTF-8 file.', 'peak-publisher'),
-                                            createElement('br'),
-                                        ],
-                                        createElement(CheckboxControl, {
-                                            __nextHasNoMarginBottom: true,
-                                            label: [
-                                                readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the current encoding of the file as it is.', 'peak-publisher'),
-                                                !readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the file even no information can be used from it.', 'peak-publisher')
-                                            ],
-                                            checked: keepReadmeTxtAsIs,
-                                            onChange: (value) => setKeepReadmeTxtAsIs(value),
-                                        }),
-                                    ],
-                                ],
-                                !settings.readme_txt_convert_to_utf8_without_bom && [
-                                    !readme_txt_already_without_bom && [
-                                        __('The file has a UTF-8 BOM, which can cause issues.', 'peak-publisher'),
-                                        createElement('br'),
-                                        createElement(CheckboxControl, {
-                                            __nextHasNoMarginBottom: true,
-                                            label: __('That\'s fine, I want to keep the UTF-8 BOM in the file as it is.', 'peak-publisher'),
-                                            checked: keepReadmeTxtBom,
-                                            onChange: (value) => setKeepReadmeTxtBom(value),
-                                        }),
-                                    ],
-                                    !readme_txt_already_utf8 && [
-                                        readme_txt_detected_encoding && sprintf(__('The detected encoding is not UTF-8, but %s.', 'peak-publisher'), readme_txt_detected_encoding),
-                                        !readme_txt_detected_encoding && __('The detected encoding is not UTF-8.', 'peak-publisher'),
-                                        createElement('br'),
-                                        !readme_txt_can_be_encoded_to_json && [
-                                            __('The file can\'t be processed because it is not a valid UTF-8 file.', 'peak-publisher'),
-                                            createElement('br'),
-                                        ],
-                                        createElement(CheckboxControl, {
-                                            __nextHasNoMarginBottom: true,
-                                            label: [
-                                                readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the current encoding of the file as it is.', 'peak-publisher'),
-                                                !readme_txt_can_be_encoded_to_json && __('That\'s fine, I want to keep the file even no information can be used from it.', 'peak-publisher'),
-                                            ],
-                                            checked: keepReadmeTxtEncoding,
-                                            onChange: (value) => setKeepReadmeTxtEncoding(value),
-                                        }),
-                                    ],
-                                ],
-                            ],
-                        ],
-                    }
-                ],
-                !meta.plugin_readme_txt?.found && {
-                    title: __('No readme file found', 'peak-publisher'),
-                    type: 'info',
-                    desc: [
-                        createInterpolateElement(__('A readme.txt is not required but would allow you to provide a description, changelog, and more to your users. Check out the <a>example on wordpress.org</a>.', 'peak-publisher'), {
-                            a: createElement('a', { href: 'https://wordpress.org/plugins/readme.txt', target: '_blank' }),
-                        }),
-                    ],
-                },
-            ]
-        ] : []).flat(Infinity).filter(Boolean);
-
-        return createElement('div', {
-            className: [
-                'pblsh--upload-result',
-                !meta.plugin_ok && 'pblsh--upload-result--invalid',
-                meta.plugin_ok && !meta.existing_plugin && 'pblsh--upload-result--newplugin',
-                meta.plugin_ok && meta.existing_plugin && !existing_release && 'pblsh--upload-result--newrelease',
-                meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_major_release && 'pblsh--upload-result--newmajor',
-                meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_minor_release && 'pblsh--upload-result--newminor',
-                meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_patch_release && 'pblsh--upload-result--newpatch',
-                meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_unknown_release && 'pblsh--upload-result--newunknown',
-                meta.plugin_ok && meta.existing_plugin && existing_release && 'pblsh--upload-result--releasereplacement',
-            ].filter(Boolean).join(' '),
-        },
-            createElement('header', { className: 'pblsh--upload-result__plugin' },
-                createElement('h2', { className: 'pblsh--upload-result__plugin__headline' },
-                    meta.plugin_ok && pluginData.Name,
-                    !meta.plugin_ok && __('Not a plugin', 'peak-publisher'),
+        const isWporgUploadResult = meta.hosting_type_resolved === 'wporg' || meta.hosting_type_intended === 'wporg';
+        const modelTargetKey = activeTargetKey || (isWporgUploadResult ? 'wporg' : 'self_hosted');
+        const model = buildUploadValidationModel(result, meta, modelTargetKey);
+        if (isProcessing && ['set_slug', 'refresh_target'].includes(processPhase)) {
+            // Every destination re-resolution (slug change, post-import
+            // refresh, account save) replaces the stale facts with the same
+            // wait state. The body waits; header (name and version are
+            // slug-independent), publish path and the disabled actions stay,
+            // so the layout doesn't jump.
+            return renderUploadResultShell({
+                ...model,
+                // Stale error notices step aside with the rest of the old facts.
+                notices: null,
+                body: createElement('div', { className: 'pblsh--upload-result__resolving' },
+                    createElement(Spinner),
+                    createElement('span', null, __('Resolving the publish destination…', 'peak-publisher')),
                 ),
-                createElement('div', { className: 'pblsh--upload-result__plugin__desc' },
-                    meta.plugin_ok && pluginData.Version,
-                    !meta.plugin_ok && __('No valid plugin main file could be found', 'peak-publisher'),
-                ),
-                createElement('div', { className: 'pblsh--upload-result__plugin__type' },
-                    !meta.plugin_ok && __('Invalid', 'peak-publisher'),
-                    meta.plugin_ok && !meta.existing_plugin && __('New Plugin', 'peak-publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_major_release && __('New Major Release', 'peak-publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_minor_release && __('New Minor Release', 'peak-publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_patch_release && __('New Patch Release', 'peak-publisher'),
-                    meta.plugin_ok && meta.existing_plugin && !existing_release && is_new_unknown_release && __('New Release', 'peak-publisher'),
-                    meta.plugin_ok && meta.existing_plugin && existing_release && __('Replace Existing Release', 'peak-publisher'),
-                ),
-                /* meta.plugin_ok && !meta.existing_plugin && createElement('div', null,
-                    sprintf(__('The plugin slug will be: %s', 'peak-publisher'), meta.plugin_info?.plugin_slug),
-                    createElement('br'),
-                    sprintf(__('The plugin file name will be: %s', 'peak-publisher'), meta.plugin_info?.plugin_basename.split('/').pop()),
-                    createElement('br'),
-                    sprintf(__('The plugin folder name will be: %s', 'peak-publisher'), meta.plugin_info?.plugin_basename.split('/')[0]),
-                    createElement('br'),
-                    sprintf(__('The plugin install path will be: %s', 'peak-publisher'), '/wp-content/plugins/' + meta.plugin_info?.plugin_basename.split('/')[0] + '/'),
-                ), */
-            ),
-            meta.plugin_ok && createElement('div', { className: 'pblsh--upload-result__checks' },
-                createElement('ul', { className: 'pblsh--checklist' },
-                    resultList.map((r, i) => createElement('li', { key: 'r' + i, className: 'pblsh--check ' + (r.type === 'ok' ? 'pblsh--check--ok' : (r.type === 'info' ? 'pblsh--check--info' : 'pblsh--check--error')) },
-                        createElement('span', { className: 'pblsh--check__icon' }, r.type === 'ok' ? getSvgIcon('check_bold', { size: 24 }) : (r.type === 'info' ? getSvgIcon('information_outline', { size: 24 }) : getSvgIcon('close_thick', { size: 24 }))),
-                        createElement('span', { className: 'pblsh--check__text' },
-                            createElement('span', { className: 'pblsh--check__title' }, r.title),
-                            r.desc && createElement('span', { className: 'pblsh--check__desc' }, r.desc),
-                        ),
-                    )),
-                ),
-            ),
-            !meta.plugin_ok && createElement('div', { className: 'pblsh--upload-result__checks' },
-                createElement('ul', { className: 'pblsh--checklist' },
-                    errors.map((r, i) => createElement('li', { key: 'r' + i, className: 'pblsh--check pblsh--check--error' },
-                        createElement('span', { className: 'pblsh--check__icon' }, getSvgIcon('close_thick', { size: 24 })),
-                        createElement('span', { className: 'pblsh--check__text' },
-                            createElement('span', { className: 'pblsh--check__title' }, r.code),
-                            createElement('span', { className: 'pblsh--check__desc' }, r.message),
-                        ),
-                    )),
-                ),
-            ),
-            createElement('div', { className: 'pblsh--upload-result__actions' },
-                createElement(Button, {
-                    isSecondary: true,
-                    onClick: async () => {
-                        closeOverlay();
-                        if (upload_id) {
-                            try { await Pblsh.API.discardUpload(upload_id); } catch (e) {}
-                        }
-                    },
-                    __next40pxDefaultSize: true,
-                }, __('Discard', 'peak-publisher')),
-                meta.plugin_ok && createElement(Button,
-                    {
-                        isPrimary: true,
-                        disabled: !resultList.every(item => item.type === 'ok' || item.type === 'info'),
-                        className: 'pblsh--button--add-plugin',
-                        onClick: () => finalizeCreation(upload_id),
-                        __next40pxDefaultSize: true,
-                    },
-                    !meta.existing_plugin && __('Add Plugin', 'peak-publisher'),
-                    meta.existing_plugin && !existing_release && is_new_major_release && __('Add Major Release', 'peak-publisher'),
-                    meta.existing_plugin && !existing_release && is_new_minor_release && __('Add Minor Release', 'peak-publisher'),
-                    meta.existing_plugin && !existing_release && is_new_patch_release && __('Add Patch Release', 'peak-publisher'),
-                    meta.existing_plugin && !existing_release && is_new_unknown_release && __('Add Release', 'peak-publisher'),
-                    meta.existing_plugin && existing_release && __('Replace Existing Release', 'peak-publisher'),
-                ),
-            ),
-        );
+                checklistItems: null,
+            });
+        }
+        if (publishing) {
+            // The same for a running publish: its decisions are sent, its steps are what there
+            // is to watch. Header, publish path and the disabled actions stay; the checklist
+            // returns when the publish ends with an error, the error in the strip beside it.
+            return renderUploadResultShell({
+                ...model,
+                notices: null,
+                body: createElement(PublishProgress, { channel: modelTargetKey === 'wporg' ? 'wporg' : 'self_hosted', ...finalizeProgress }),
+                checklistItems: null,
+            });
+        }
+        return renderUploadResultShell(model);
     }
 
     // Always keep overlay in DOM for smooth fade-in/out
@@ -871,27 +1405,27 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
                     setFilename(f.name);
                     startUpload(f);
                 }
+                e.target.value = '';
             },
             className: 'pblsh--hidden-file-input',
         }),
         zipProgress !== false && createElement('div', { className: 'pblsh--progress' },
             filename && createElement('div', { className: 'pblsh--file-info' }, filename),
             createElement('div', { className: 'pblsh--progress__bar', style: { '--percentage': zipProgress + '%' } }),
-            createElement('div', { className: 'pblsh--progress__label' }, __('creating zip …', 'peak-publisher'), ' ', Math.floor(zipProgress), '%'),
+            createElement('div', { className: 'pblsh--progress__label' }, __('creating zip…', 'peak-publisher'), ' ', Math.floor(zipProgress), '%'),
         ),
         uploadProgress !== false && createElement('div', { className: 'pblsh--progress' },
             filename && createElement('div', { className: 'pblsh--file-info' }, filename),
             createElement('div', { className: 'pblsh--progress__bar', style: { '--percentage': uploadProgress + '%' } }),
-            createElement('div', { className: 'pblsh--progress__label' }, __('uploading …', 'peak-publisher'), ' ', Math.floor(uploadProgress), '%'),
+            createElement('div', { className: 'pblsh--progress__label' }, __('uploading…', 'peak-publisher'), ' ', Math.floor(uploadProgress), '%'),
         ),
         isProcessing && createElement('div', { className: 'pblsh--processing' },
             createElement('div', { className: 'pblsh--loading__spinner' }),
             createElement('div', { className: 'pblsh--processing__text' }, (
-                processPhase === 'upload_prepare' ? __('validating upload …', 'peak-publisher') :
-                processPhase === 'unpack' ? __('unpacking data …', 'peak-publisher') :
-                processPhase === 'analyze' ? __('analyzing data …', 'peak-publisher') :
-                processPhase === 'rebuild_zip' ? __('rebuilding zip …', 'peak-publisher') :
-                __('loading results …', 'peak-publisher')
+                processPhase === 'upload_prepare' ? __('validating upload…', 'peak-publisher') :
+                processPhase === 'unpack' ? __('unpacking data…', 'peak-publisher') :
+                processPhase === 'analyze' ? __('analyzing data…', 'peak-publisher') :
+                __('loading results…', 'peak-publisher')
             )),
         ),
     );
@@ -904,6 +1438,8 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
             if (validationResult) {
                 if (typeof dialogEl.showModal === 'function' && !dialogEl.open) {
                     dialogEl.showModal();
+                    // Focus the dialog itself so no control (e.g. the first target card) appears pre-focused.
+                    dialogEl.focus();
                 }
             } else {
                 if (dialogEl.open) {
@@ -913,9 +1449,20 @@ lodash.set(window, 'Pblsh.Components.GlobalDropOverlay', ({ onCreated } = {}) =>
         } catch (e) {}
     }, [validationResult]);
 
-    const dialog = createElement('dialog', { className: 'pblsh--modal pblsh--modal--upload-result', ref: dialogRef }, validationResult ? renderValidation(validationResult) : null);
+    const dialog = createElement('dialog', {
+        className: 'pblsh--modal pblsh--modal--upload-result',
+        ref: dialogRef,
+        tabIndex: -1,
+        // The dialog holds a pending upload awaiting a decision — leaving it is an explicit
+        // action (Discard), so the native Escape close is cancelled. Chrome's close-watcher
+        // still force-closes on a second Escape without intervening interaction; onClose
+        // catches that (and any other unexpected close) and resets the overlay state instead
+        // of leaving a closed dialog behind that the state still believes is open. The upload
+        // then stays in tmp for the regular stale-uploads cleanup — deliberately no discard
+        // call without an explicit user decision.
+        onCancel: (event) => event.preventDefault(),
+        onClose: () => { if (validationResult) closeOverlay(); },
+    }, validationResult ? renderValidation(validationResult) : null);
 
     return createElement(wp.element.Fragment, null, overlay, dialog);
 });
-
-

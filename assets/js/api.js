@@ -27,6 +27,9 @@ lodash.set(window, 'Pblsh.API', {
     getPluginReleases: async (id) => {
         return await window.Pblsh.API.request('plugins/' + id + '/releases');
     },
+    getWporgDownloadUrl: async (id, version) => {
+        return await window.Pblsh.API.request('plugins/' + id + '/wporg-download-url?version=' + encodeURIComponent(version || ''));
+    },
     // Update a plugin
     updatePlugin: async (id, plugin) => {
         return await window.Pblsh.API.request('plugins/' + id, {
@@ -46,11 +49,36 @@ lodash.set(window, 'Pblsh.API', {
             method: 'DELETE',
         });
     },
-    // Update a release (e.g., status)
-    updateRelease: async (id, data) => {
-        return await window.Pblsh.API.request('releases/' + id, {
-            method: 'PUT',
-            body: data,
+    // Make a release the plugin's current release; expected_pointer is the pointer the
+    // editor showed, so a flip by someone else in the meantime is refused, not overwritten
+    setCurrentRelease: async (pluginId, version, expectedPointer) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/current-release', {
+            method: 'POST',
+            body: { version, expected_pointer: expectedPointer },
+        });
+    },
+    // Set Tested up to of a release; expected is the value the editor showed, so a change by
+    // someone else in the meantime is refused, not overwritten
+    setReleaseTestedUpTo: async (releaseId, value, expected) => {
+        return await window.Pblsh.API.request('releases/' + releaseId + '/tested-up-to', {
+            method: 'POST',
+            body: { value, expected },
+        });
+    },
+    // Bring the wordpress.org plugins up to date, in three forms (AdminAPI::refresh_wporg_rest()):
+    // the automatic look at every plugin with whatever is due, the editor's Refresh of one straight
+    // against SVN, and with `watch` the import watch of one — its stamp compared, SVN only when it
+    // moved. Answers { plugins, changes, next_check_in }: the row of every plugin in scope.
+    refreshWporg: async (pluginId = null, watch = false) => {
+        return await window.Pblsh.API.request('admin/wporg/refresh', {
+            method: 'POST',
+            body: { plugin_id: pluginId, watch },
+        });
+    },
+    // Dismiss the one-time notice about the schema upgrade (includes/upgrade.php)
+    dismissUpgradeNotice: async () => {
+        return await window.Pblsh.API.request('admin/upgrade-notice', {
+            method: 'DELETE',
         });
     },
     // Get code to embed
@@ -58,7 +86,7 @@ lodash.set(window, 'Pblsh.API', {
         return await window.Pblsh.API.request('admin/get-bootstrap-code');
     },
     // Start upload workflow (phase: upload_prepare), with progress callback
-    uploadStart: async (file, onProgress, opts) => {
+    uploadStart: async (file, onProgress, opts = {}) => {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', window.wpApiSettings.root + 'pblsh-admin/v1/admin/upload');
@@ -79,30 +107,35 @@ lodash.set(window, 'Pblsh.API', {
             xhr.onerror = () => reject(new Error('Network error during upload.'));
             const form = new FormData();
             form.append('file', file, file.name);
-            form.append('built_in_browser', opts?.builtInBrowserBy);
             form.append('phase', 'upload_prepare');
+            form.append('built_in_browser', opts.built_in_browser || '');
             xhr.send(form);
         });
     },
     // Continue upload workflow by phase
-    uploadContinue: async (uploadId, phase) => {
+    uploadContinue: async (upload_id, phase, body = {}) => {
         return await window.Pblsh.API.request('admin/upload', {
             method: 'POST',
-            body: { upload_id: uploadId, phase },
+            body: { ...body, upload_id, phase },
         });
     },
     // Finalize an uploaded ZIP (create plugin + release)
-    finalizeUpload: async (uploadId) => {
+    finalizeUpload: async (upload_id, body = {}) => {
         return await window.Pblsh.API.request('admin/upload/finalize', {
             method: 'POST',
-            body: { upload_id: uploadId },
+            body: { ...body, upload_id },
         });
     },
+    // How far the finalize of an upload got, or how it ended (finalize_status_view()):
+    // { state: not_started | running (phase, done, total) | lost | finished (response) }
+    getFinalizeStatus: async (upload_id) => {
+        return await window.Pblsh.API.request('admin/upload/finalize?upload_id=' + encodeURIComponent(upload_id));
+    },
     // Discard an uploaded ZIP (cleanup temp data)
-    discardUpload: async (uploadId) => {
+    discardUpload: async (upload_id) => {
         return await window.Pblsh.API.request('admin/upload/discard', {
             method: 'POST',
-            body: { upload_id: uploadId },
+            body: { upload_id },
         });
     },
     // Settings
@@ -113,6 +146,48 @@ lodash.set(window, 'Pblsh.API', {
         return await window.Pblsh.API.request('admin/settings', {
             method: 'POST',
             body: settings,
+        });
+    },
+    getWporgAccounts: async () => {
+        return await window.Pblsh.API.request('admin/wporg/accounts');
+    },
+    // id null connects a new account; an id changes that account (password '' keeps the stored one)
+    saveWporgAccount: async (id, body) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts' + (id ? '/' + id : ''), {
+            method: id ? 'PUT' : 'POST',
+            body,
+        });
+    },
+    deleteWporgAccount: async (id) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts/' + id, { method: 'DELETE' });
+    },
+    // Tests the stored credentials of an account — records the verdict, refreshes the avatar
+    testWporgAccount: async (id) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts/' + id + '/test', { method: 'POST' });
+    },
+    // Tests credentials that are not saved — nothing is stored or recorded
+    testWporgCredentials: async (username, password) => {
+        return await window.Pblsh.API.request('admin/wporg/accounts/test', {
+            method: 'POST',
+            body: { username, password },
+        });
+    },
+    lookupWporgPlugin: async (username, slug) => {
+        return await window.Pblsh.API.request('admin/wporg/lookup-plugin', {
+            method: 'POST',
+            body: { username, slug },
+        });
+    },
+    discoverWporgPlugins: async (username) => {
+        return await window.Pblsh.API.request('admin/wporg/discover-plugins', {
+            method: 'POST',
+            body: { username },
+        });
+    },
+    importWporgPlugins: async (username, slugs) => {
+        return await window.Pblsh.API.request('admin/wporg/import-plugins', {
+            method: 'POST',
+            body: { username, slugs },
         });
     },
     // Get all assets for a plugin
@@ -136,8 +211,8 @@ lodash.set(window, 'Pblsh.API', {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     resolve(xhr.response || {});
                 } else {
-                    const msg = xhr.response && xhr.response.message ? xhr.response.message : 'Upload failed (status ' + xhr.status + ')';
-                    reject(new Error(msg));
+                    // Like apiFetch: the REST error payload (code, message) is the rejection.
+                    reject(xhr.response && xhr.response.code ? xhr.response : new Error('Upload failed (status ' + xhr.status + ')'));
                 }
             };
             xhr.onerror = () => reject(new Error('Network error during asset upload.'));
@@ -157,11 +232,35 @@ lodash.set(window, 'Pblsh.API', {
             body: { slot, screenshot_n: screenshotN !== undefined ? screenshotN : null },
         });
     },
-    // Move a screenshot from one position to another
+    // Move a screenshot to another position — onto an occupied one the server swaps the two
+    // and answers mode 'swap'
     moveScreenshot: async (pluginId, fromN, toN) => {
         return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/move', {
             method: 'POST',
-            body: { slot: 'screenshot', from: fromN, to: toN },
+            body: { from: fromN, to: toN },
         });
+    },
+    // The working copy of a wordpress.org plugin's assets: one commit, drop all, or decide one slot.
+    commitPluginAssets: async (pluginId) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/commit', { method: 'POST' });
+    },
+    discardPluginAssets: async (pluginId) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/discard', { method: 'POST' });
+    },
+    // keep: 'mine' (rebase the change on wordpress.org's current file) | 'theirs' (drop the change)
+    resolvePluginAsset: async (pluginId, slot, keep) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/resolve', {
+            method: 'POST',
+            body: { slot, keep },
+        });
+    },
+    // The Live Preview in the working copy: { change: create | contents | landing_page | theme |
+    // dependencies | delete, value?, contents?, expected? } — the answer is the fresh view.
+    changePluginBlueprint: async (pluginId, change) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/assets/blueprint', { method: 'POST', body: change });
+    },
+    // Whether the Live Preview is public, asked on wordpress.org now: { preview: { public, checked_at }, assets } — the fresh view, like every write's answer.
+    checkLivePreview: async (pluginId) => {
+        return await window.Pblsh.API.request('plugins/' + pluginId + '/wporg/live-preview-check', { method: 'POST' });
     },
 });
